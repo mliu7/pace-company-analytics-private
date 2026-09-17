@@ -1,10 +1,107 @@
 #!/bin/sh
+
 # Inspect the exact objects being published; staging is not required.
 set -eu
-command -v gitleaks >/dev/null || { echo "Install gitleaks before publishing company code." >&2; exit 1; }
+
+remote_name="${1:-}"
+remote_url="${2:-}"
+
+COMPANY_SSH="git"'@'"github.com:pace-systems/pace-company-analytics.git"
+COMPANY_HTTPS="https://github.com/pace-systems/pace-company-analytics.git"
+
+# Determine whether this push is going to the Pace company repository.
+is_company_repo=false
+
+case "$remote_url" in
+    "$COMPANY_SSH"|"$COMPANY_HTTPS")
+        is_company_repo=true
+        ;;
+esac
+
+# Extra safety:
+# If we're currently checked out on the private branch, do not permit
+# ANY push to the company repository. This also catches things like:
+#
+#   git push origin HEAD:something
+#
+current_branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+
+if [ "$is_company_repo" = true ] && [ "$current_branch" = "private" ]; then
+    echo "" >&2
+    echo "============================================================" >&2
+    echo "BLOCKED: PRIVATE BRANCH -> COMPANY REPOSITORY" >&2
+    echo "" >&2
+    echo "You are currently on the 'private' branch." >&2
+    echo "Nothing may be pushed to the Pace company repository" >&2
+    echo "while this branch is checked out." >&2
+    echo "" >&2
+    echo "Destination:" >&2
+    echo "  $remote_url" >&2
+    echo "" >&2
+    echo "Use the private repository instead:" >&2
+    echo "  git push private-origin private" >&2
+    echo "============================================================" >&2
+    echo "" >&2
+    exit 1
+fi
+
+# Preserve existing security checks.
+command -v gitleaks >/dev/null || {
+    echo "Install gitleaks before publishing company code." >&2
+    exit 1
+}
+
 python_bin="${PCA_PYTHON:-.venv/bin/python}"
+
 while read -r local_ref local_sha remote_ref remote_sha; do
+
+    # ============================================================
+    # HARD BLOCK: private branch must never go to company repo
+    # ============================================================
+
+    if [ "$is_company_repo" = true ]; then
+
+        # Blocks:
+        #   git push origin private
+        #
+        # and:
+        #   git push origin private:some-other-branch
+        if [ "$local_ref" = "refs/heads/private" ]; then
+            echo "" >&2
+            echo "============================================================" >&2
+            echo "BLOCKED: PRIVATE BRANCH -> COMPANY REPOSITORY" >&2
+            echo "" >&2
+            echo "The local 'private' branch may NEVER be pushed to:" >&2
+            echo "  $remote_url" >&2
+            echo "" >&2
+            echo "Use:" >&2
+            echo "  git push private-origin private" >&2
+            echo "============================================================" >&2
+            echo "" >&2
+            exit 1
+        fi
+
+        # Also make it impossible to create/update a remote branch
+        # literally named "private" in the company repository.
+        if [ "$remote_ref" = "refs/heads/private" ]; then
+            echo "" >&2
+            echo "============================================================" >&2
+            echo "BLOCKED: REMOTE BRANCH 'private' IS FORBIDDEN" >&2
+            echo "" >&2
+            echo "A branch named 'private' may NEVER exist in:" >&2
+            echo "  $remote_url" >&2
+            echo "============================================================" >&2
+            echo "" >&2
+            exit 1
+        fi
+    fi
+
+    # ============================================================
+    # Existing privacy / secret scanning
+    # ============================================================
+
     [ "$local_sha" != "0000000000000000000000000000000000000000" ] || continue
+
     "$python_bin" scripts/check_repository_privacy.py --tree "$local_sha"
     gitleaks git . --redact=100 --log-opts="$local_sha"
 done
