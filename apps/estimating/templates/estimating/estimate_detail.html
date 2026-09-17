@@ -1,0 +1,63 @@
+{% extends "dashboard/base.html" %}{% load humanize pca static %}
+{% block title %}{{ est|default:"Estimate" }} · Pace Company Analytics{% endblock %}
+{% block extra_css %}@import url("{% static 'estimating/estimating.css' %}");{% endblock %}
+{% block content %}
+<div class="topbar">
+  <div class="title"><h1 id="h1-title">{{ est }}</h1><small>Estimate #{{ est.id }} · v{{ est.version_no }} · owner {{ est.owner.display_name|default:"—" }} · last saved {{ est.updated_at|date:"M j, g:i A" }}{% if est.updated_by %} by {{ est.updated_by.display_name }}{% endif %} · labor priced at today's <a href="{% url 'estimating:estimating_rates' %}">rate card</a> · every edit is local until you <b>Save</b> (⌘S); every save keeps a version · <a href="{% url 'estimating:estimating_estimates' %}">all estimates</a> · <a href="{% url 'estimating:estimating_home' %}?est={{ est.id }}">catalog search into this estimate</a></small></div>
+  <div class="est-actions">
+    <span id="save-state"></span>
+    {% if can_write %}<button class="btn" id="btn-save" title="Save every room and line (⌘S / Ctrl+S). Creates version v{{ est.version_no|add:1 }}.">Save</button>{% endif %}
+    <a class="btn small" href="{% url 'estimating:estimate_export' est.id %}?fmt=xlsx" title="Workbook: Summary sheet (per-room cost / sell / labor / profit / margin) + one sheet per room">Export xlsx</a>
+    <a class="btn small" href="{% url 'estimating:estimate_export' est.id %}?fmt=csv" title="Detail CSV: every line of every room with the 55 labor columns">Detail CSV</a>
+    <button class="btn small" id="btn-copy" title="Plain-text block per line + totals to the clipboard">Copy</button>
+    {% if can_write %}<form method="post" action="{% url 'estimating:estimate_save' %}" style="display:inline">{% csrf_token %}<input type="hidden" name="action" value="duplicate"><input type="hidden" name="id" value="{{ est.id }}"><button class="btn small" title="Copy this estimate">Duplicate</button></form>
+    <form method="post" action="{% url 'estimating:estimate_save' %}" style="display:inline" data-confirm="Delete this estimate and its versions?">{% csrf_token %}<input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="{{ est.id }}"><button class="btn small" title="Delete (audited)">Delete</button></form>
+    <form method="post" action="{% url 'estimating:estimate_save' %}" style="display:inline-flex;gap:4px;align-items:center" title="Raise a BOM or labor approval request for this estimate in Production › Approvals (amount = total sell, cost, labor hours; links the estimate and its bid)">{% csrf_token %}<input type="hidden" name="action" value="approval"><input type="hidden" name="id" value="{{ est.id }}">
+      {% if approval_available %}<select name="kind" title="BOM = materials to buy · Labor = hours to release"><option value="BOM">BOM</option><option value="Labor">Labor</option></select><input type="date" name="needed_by" title="Needed by" style="font:inherit;padding:3px 6px;border:1px solid var(--line-strong);border-radius:8px"><input name="note" placeholder="note for the approver" style="font:inherit;padding:3px 6px;border:1px solid var(--line-strong);border-radius:8px;width:150px">{% endif %}
+      <button class="btn small {% if approval_available %}primary{% endif %}" id="btn-approval" {% if not approval_available %}disabled title="BOM / labor approval requests arrive with the Production phase (D) — the button lights up the moment apps.planning.api.create_approval_request exists"{% endif %}>Request approval{% if est.approval_ref %} ✓ #{{ est.approval_ref }}{% endif %}</button></form>{% endif %}
+  </div>
+</div>
+{% if request.GET.msg %}<div class="note" style="margin-bottom:8px"><span class="warn-ink">{{ request.GET.msg }}</span></div>{% endif %}
+<div class="stale" id="stale" hidden></div>
+{% if view_version %}
+<div class="card tight" style="margin-bottom:10px;border-color:#f2dfb1;background:var(--warn-bg)"><b>Viewing version v{{ view_version.version_no }}</b> saved {{ view_version.saved_at|date:"M j, g:i A" }} by {{ view_version.saved_by.display_name|default:"—" }} ({{ view_version.note }}) — totals then: sell {{ view_version.totals.total_sell|money }}, cost {{ view_version.totals.total_cost|money }}. <a href="{% url 'estimating:estimate_detail' est.id %}">Back to the current version</a>{% if can_write %} · <form method="post" action="{% url 'estimating:estimate_save' %}" style="display:inline" data-confirm="Restore v{{ view_version.version_no }} over the current lines? (Saved as a new version — nothing is lost.)">{% csrf_token %}<input type="hidden" name="action" value="restore_version"><input type="hidden" name="id" value="{{ est.id }}"><input type="hidden" name="version_no" value="{{ view_version.version_no }}"><button class="btn small">Restore this version</button></form>{% endif %}
+<div class="table-wrap" style="margin-top:8px;max-height:40vh"><table class="data dense"><thead><tr><th>Room</th><th>Vendor</th><th>Part</th><th>Description</th><th class="num">Qty</th><th class="num">Cost</th><th class="num">Markup</th><th class="num">Sell</th></tr></thead><tbody>{% for r in view_version.snapshot.rooms %}{% for l in r.lines %}<tr><td>{{ r.name }}</td><td>{{ l.manufacturer }}</td><td>{{ l.part }}</td><td>{{ l.description|truncatechars:70 }}</td><td class="num">{{ l.qty }}</td><td class="num">{{ l.cost|money:2 }}</td><td class="num">{{ l.markup|floatformat:3 }}</td><td class="num">{{ l.sell|money:2 }}</td></tr>{% endfor %}{% endfor %}</tbody></table></div></div>
+{% endif %}
+<div class="card tight">
+  <div class="est-meta">
+    <div><label>Project title</label><input id="meta-title" value="{{ est.title }}" {% if not can_write %}readonly{% endif %} title="Auto-saved when you leave the field"></div>
+    <div><label>Client</label><input id="meta-client" value="{{ est.client_name }}" {% if not can_write %}readonly{% endif %} title="Free text; the bid's client fills it when a bid is attached"></div>
+    <div><label>Description / notes</label><input id="meta-notes" value="{{ est.notes }}" {% if not can_write %}readonly{% endif %} title="Auto-saved when you leave the field"></div>
+    <div><label>Status</label><select id="meta-status" {% if not can_write %}disabled{% endif %} title="Draft → Submitted → Approved (approval itself lives in Production › Approvals)">{% for k, l in statuses %}<option value="{{ k }}" {% if est.status == k %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></div>
+    <div><label>SL project #</label><input id="meta-project" value="{{ est.project.display_number|default:'' }}" {% if not can_write %}readonly{% endif %} placeholder="e.g. 260071" title="Links the estimate to an SL job (canonical number — 000000 suffix matters)"></div>
+    <div style="grid-column: span 3"><label>Bid</label><div id="bid-card"></div>{% if can_write %}<div class="quick" style="margin-top:6px"><input id="bid-search" placeholder="attach a bid: type the project or client name…" autocomplete="off" title="Search the Project Portal bids (name, client, job #) and click one to attach"><div class="sugg" id="bid-sugg" hidden></div></div>{% endif %}</div>
+  </div>
+</div>
+<div class="card tight" style="margin-top:10px">
+  <div class="rooms" id="rooms"></div>
+  {% if can_write %}<div class="roomtools"><input id="room-name" placeholder="current room name" title="Rename the current room (Enter) — lines whose area was blank or matched the old name follow"><button class="btn small" id="room-rename">Rename</button><button class="btn small" id="room-dup" title="Copy the current room and its lines">Duplicate room</button><button class="btn small" id="room-del" title="Delete the current room (clears the lines when it is the only one)">Delete room</button>
+    <input id="room-notes" placeholder="room notes" style="flex:1;min-width:200px" title="Notes for this room (saved with the estimate)">
+    <div class="quick" style="flex:1;min-width:260px"><input id="quick" placeholder="quick add: type a part # and press Enter (top hit) — ↑↓ to pick" autocomplete="off" title="Searches the catalog as you type; Enter adds the highlighted hit to this room, or a typed line when nothing matches"><div class="sugg" id="quick-sugg" hidden></div></div></div>{% endif %}
+  <div class="ledger-chips" id="cols"></div>
+  <div class="table-wrap freeze ebwrap" id="ebwrap"><table class="data dense freeze eb" id="eb"></table></div>
+  <div class="tot-strip" id="tot-room"></div>
+  <div class="warnbox" id="warn"></div>
+</div>
+<div class="card tight" style="margin-top:10px"><h2>Rooms inside this estimate <small>click a card to switch · grand totals across every room</small></h2>
+  <div class="roomcards" id="roomcards"></div>
+  <div class="tot-strip" id="tot-grand"></div>
+</div>
+<div class="card tight" style="margin-top:10px"><h2>Versions <small>every save keeps a snapshot — open one to see it, restore it if needed</small></h2>
+  <div class="table-wrap" style="max-height:30vh"><table class="data dense"><thead><tr><th>Version</th><th>Saved</th><th>By</th><th>Note</th><th class="num">Total sell</th><th></th></tr></thead><tbody id="versions">{% for v in versions %}<tr><td>v{{ v.version_no }}</td><td>{{ v.saved_at|date:"M j, g:i:s A" }}</td><td>{{ v.saved_by.display_name|default:"—" }}</td><td>{{ v.note }}</td><td class="num">{{ v.totals.total_sell|money }}</td><td><a href="?v={{ v.version_no }}">view</a></td></tr>{% empty %}<tr><td colspan="6" class="empty">no versions yet — the first save creates v1</td></tr>{% endfor %}</tbody></table></div>
+</div>
+<details class="card tight" style="margin-top:10px" data-remember="notes"><summary><b>Estimator Notes</b> <span class="note">the policy this page enforces as warnings · rate card in force below</span></summary>
+  <div class="notes-box" style="margin-top:8px"><ul>{% for n in notes %}<li>{{ n }}</li>{% endfor %}</ul></div>
+  <table class="data dense" style="margin-top:8px"><thead><tr><th>Labor type</th><th>Group</th><th class="num">Cost / h</th><th class="num">Sell / h</th><th class="num">Margin</th><th>Effective</th></tr></thead><tbody>{% for r in rates %}<tr><td>{{ r.label }}</td><td>{{ r.group_label }}</td><td class="num">{{ r.cost|money:2 }}</td><td class="num">{{ r.sell|money:2 }}</td><td class="num">{{ r.margin }}</td><td>{{ r.effective_from|default:"default" }}</td></tr>{% endfor %}</tbody></table>
+</details>
+<div class="toast" id="toast"></div>
+{{ payload|json_script:"est-payload" }}
+{% endblock %}
+{% block scripts %}
+<script id="est-cfg" type="application/json">{"save_url": "{% url 'estimating:estimate_save' %}", "search_url": "{% url 'estimating:estimating_search' %}", "export_url": "{% url 'estimating:estimate_export' est.id %}", "item_url": "{% url 'estimating:estimating_item' 0 %}", "bid_url": "{% url 'bids:bid_detail' 0 %}", "can_write": {{ can_write|yesno:"true,false" }}}</script>
+<script src="{% static 'estimating/builder.js' %}"></script>
+{% endblock %}

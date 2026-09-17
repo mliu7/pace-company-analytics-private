@@ -1,0 +1,17 @@
+{% extends "dashboard/base.html" %}{% load humanize pca bids static %}
+{% block title %}Bid calendar · Pace Company Analytics{% endblock %}
+{% block extra_css %}{% include "bids/_css.html" %}{% endblock %}
+{% block content %}
+<div class="bids">
+{% include "bids/_tabs.html" %}
+<div class="card">
+  <h2><span class="row" style="gap:8px;align-items:center"><a href="#" class="btn" id="cal_prev">‹</a><span id="cal_title" style="min-width:160px;text-align:center"></span><a href="#" class="btn" id="cal_next">›</a><a href="#" class="btn" id="cal_today">today</a></span>
+    <span class="legend" id="cal_legend"><span class="ev due" data-kind="due">bid due</span><span class="ev submitted" data-kind="submitted">submitted</span><span class="ev awarded" data-kind="awarded">awarded</span><span class="ev walkthrough" data-kind="walkthrough">walkthrough</span><span class="ev start" data-kind="start">project start</span></span></h2>
+  <div class="cal" id="cal"></div>
+  <div class="note">Dates are the portal's Bid Due, Submitted, Awarded, Walkthrough and project Start columns. Click a legend chip to hide that kind; click an event to open the bid. The list under the calendar is the same month, sorted by date.</div>
+</div>
+<div class="card" style="margin-top:14px"><h2>This month <small id="cal_n"></small></h2><div class="table-wrap" style="max-height:420px"><table class="data dense" id="cal_list"><thead><tr><th>Date</th><th>What</th><th>Bid</th><th>Client</th><th>Stage</th><th class="num">Value</th><th>Estimator</th><th>Div</th></tr></thead><tbody></tbody></table></div></div>
+</div>
+<script id="bids-filters-json" type="application/json">{{ filters_json|safe }}</script>
+{% endblock %}
+{% block scripts %}<script src="{% static 'bids/bids.js' %}"></script><script>PCABids.calendar("{% url 'bids:bids_calendar_json' %}");</script>{% endblock %}

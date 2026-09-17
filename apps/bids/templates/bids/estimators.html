@@ -1,0 +1,102 @@
+{% extends "dashboard/base.html" %}{% load humanize pca bids static %}
+{% block title %}Estimators · Pace Company Analytics{% endblock %}
+{% block extra_css %}
+  .est table.data th.sorted { color: var(--ink); } .est table.data th.sorted::after { content: attr(data-dir); font-size: 9px; margin-left: 4px; color: var(--accent); }
+  .est .fz { position: sticky; left: 0; background: var(--panel); z-index: 2; box-shadow: 2px 0 0 var(--line); }
+  .est thead .fz { z-index: 3; background: #fafbfd; }
+  .est .table-wrap { overflow: auto; max-height: 640px; scrollbar-width: auto; }
+  .est .bar { display: inline-block; height: 7px; border-radius: 4px; background: var(--accent); vertical-align: middle; margin-right: 6px; opacity: .8; }
+  .est .hit-good { color: var(--good); font-weight: 600; } .est .hit-bad { color: var(--bad); font-weight: 600; }
+  .est .facet { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+{% endblock %}
+{% block content %}
+<div class="est">
+<div class="topbar">
+  <div class="title"><h1>Estimators</h1><small>Who bids, how much, how often they win, how tight their numbers are. Every figure is from the Project Portal's Bidder column joined to SL outcomes; ratings are a separate, concealed model (spec §4.4).</small></div>
+  <form method="get" class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
+    <select name="div" onchange="this.form.submit()" title="Division of the bid: the SL job's division when linked, else the estimator's division."><option value="">All divisions</option>{% for d in divisions_list %}<option value="{{ d.code }}" {% if div == d.code %}selected{% endif %}>{{ d.code }} {{ d.name }}</option>{% endfor %}</select>
+    <select name="period" onchange="this.form.submit()" title="Bids whose due date (else submitted, else created) falls in the window.">{% for k, l in periods %}<option value="{{ k }}" {% if period == k %}selected{% endif %}>{{ l }}</option>{% endfor %}</select>
+    <label class="muted" style="font-size:12px"><input type="checkbox" name="inferred" value="1" {% if show_inferred %}checked{% endif %} onchange="this.form.submit()"> include people who only appear by inference</label>
+  </form>
+</div>
+
+<div class="grid kpi" style="margin-bottom:14px">
+  <div class="card kpi"><div class="label" title="Estimators with at least one bid of record in the window.">Estimators</div><div class="value">{{ rows|length }}</div></div>
+  <div class="card kpi"><div class="label" title="Portal rows in the window whose Bidder resolved to a person.">Bids</div><div class="value">{{ tot.bids|intcomma }}</div></div>
+  <div class="card kpi"><div class="label" title="Σ Project Value of submitted / awarded / lost bids in the window.">Submitted value</div><div class="value">{{ tot.submitted_value|money_k }}</div></div>
+  <div class="card kpi"><div class="label" title="Won ÷ (won + lost). Won = portal Awarded, or an SL job with billings (SL is the truth for won).">Hit rate</div><div class="value">{% if tot.hit_rate != None %}{{ tot.hit_rate|pct:0 }}{% else %}—{% endif %}</div><div class="sub">{{ tot.won }} won · {{ tot.lost }} lost</div></div>
+  <div class="card kpi"><div class="label" title="On closed SL jobs that came from a bid with both Budget and Value: the average bid margin (Value − Budget) ÷ Value versus the average SL final GP %. The gap is change orders, conservative budgets and SL cost timing — explained before anyone is rated on it (spec §4.3).">Bid margin → final GP</div><div class="value sm">{% if gap.bid_margin != None %}{{ gap.bid_margin|pct:1 }} → {{ gap.final_gp|pct:1 }}{% else %}—{% endif %}</div><div class="sub">{{ gap.n|intcomma }} closed jobs, all time</div></div>
+</div>
+
+<div class="card">
+  <h2>Roster <small>click a column to sort · shift-click adds a second key · everything drills to the estimator</small></h2>
+  <div class="table-wrap"><table class="data dense" id="roster" data-sortable><thead><tr>
+    <th class="fz">Estimator</th>
+    <th title="SL role today: division head, project manager, or staff — the answer to who is estimating.">Role</th>
+    <th title="Division of most of their bids (the SL job's division when linked, else theirs).">Div</th>
+    <th class="num" data-numeric title="Bids of record in the window (inferred rows excluded from every other column).">Bids</th>
+    <th class="num" data-numeric title="Open bids right now (quoting + submitted).">Open</th>
+    <th class="num" data-numeric title="Σ Project Value of submitted / awarded / lost bids.">Submitted $</th>
+    <th class="num" data-numeric title="Median bid value.">Median bid</th>
+    <th class="num" data-numeric title="Won ÷ (won + lost), by count.">Hit rate</th>
+    <th class="num" data-numeric title="Won ÷ (won + lost), weighted by value.">Hit rate $</th>
+    <th class="num" data-numeric title="Did-not-bid rows.">DNB</th>
+    <th class="num" data-numeric title="Median (Value − Budget) ÷ Value at bid time.">Bid margin</th>
+    <th class="num" data-numeric title="Median of (SL final GP % − bid margin) on closed jobs they estimated, in margin points. Positive = jobs beat the estimate.">Accuracy</th>
+    <th class="num" data-numeric title="Median SL direct cost ÷ bid budget on closed jobs (1.00 = spent exactly the budget).">Cost ÷ budget</th>
+    <th class="num" data-numeric title="Median days from submission to award.">Cycle</th>
+    <th class="num" data-numeric title="Submissions dated after the bid due date, out of those with both dates.">Late</th>
+    <th class="num" data-numeric title="Awarded rows with no SL job number (the leak).">Leaks</th>
+    <th class="num" data-numeric title="Share of submitted / decided bids with budget, value, due date and probability all filled.">Hygiene</th>
+    <th class="num" data-numeric title="Share of bids on house (OT) accounts — no commissioned rep.">House</th>
+  </tr></thead><tbody>
+  {% for r in rows %}<tr>
+    <td class="fz"><a href="{% url 'bids:estimator_detail' r.key %}">{{ r.name }}</a>{% if not r.active %} <span class="tag" title="Not active in SL / PTT today.">inactive</span>{% endif %}{% if r.inferred %} <span class="muted" title="{{ r.inferred }} more rows credited by inference (blank Bidder).">+{{ r.inferred }}</span>{% endif %}</td>
+    <td>{{ r.role_label }}</td>
+    <td class="num-col">{{ r.division }}</td>
+    <td class="num" data-v="{{ r.bids }}">{{ r.bids }}</td>
+    <td class="num" data-v="{{ r.open }}">{{ r.open|default:"—" }}</td>
+    <td class="num" data-v="{{ r.submitted_value }}">{{ r.submitted_value|money_k }}</td>
+    <td class="num" data-v="{{ r.median_value|default:0 }}">{% if r.median_value %}{{ r.median_value|money_k }}{% else %}—{% endif %}</td>
+    <td class="num {% if r.hit_rate != None and r.hit_rate >= 0.5 %}hit-good{% elif r.hit_rate != None and r.hit_rate < 0.3 %}hit-bad{% endif %}" data-v="{{ r.hit_rate|default_if_none:'' }}">{% if r.hit_rate != None %}<span class="bar" style="width:{{ r.hit_rate|floatformat:2|floatformat:"-2" }}px;width:calc({{ r.hit_rate }} * 40px)"></span>{{ r.hit_rate|pct:0 }} <span class="muted">{{ r.won }}/{{ r.won|add:r.lost }}</span>{% else %}—{% endif %}</td>
+    <td class="num" data-v="{{ r.hit_rate_w|default_if_none:'' }}">{% if r.hit_rate_w != None %}{{ r.hit_rate_w|pct:0 }}{% else %}—{% endif %}</td>
+    <td class="num" data-v="{{ r.dnb }}">{{ r.dnb|default:"—" }}</td>
+    <td class="num" data-v="{{ r.margin|default_if_none:'' }}">{% if r.margin != None %}{{ r.margin|pct:1 }}{% else %}—{% endif %}</td>
+    <td class="num" data-v="{{ r.accuracy|default_if_none:'' }}">{% if r.accuracy != None %}<span class="{% if r.accuracy >= 0 %}pos{% else %}neg{% endif %}">{{ r.accuracy|pts }}</span> <span class="muted">n={{ r.accuracy_n }}</span>{% else %}—{% endif %}</td>
+    <td class="num" data-v="{{ r.cost_vs_budget|default_if_none:'' }}">{% if r.cost_vs_budget != None %}{{ r.cost_vs_budget|floatformat:2 }}×{% else %}—{% endif %}</td>
+    <td class="num" data-v="{{ r.cycle|default_if_none:'' }}">{% if r.cycle != None %}{{ r.cycle|floatformat:0 }}d{% else %}—{% endif %}</td>
+    <td class="num" data-v="{{ r.late }}">{% if r.late_n %}{{ r.late }}/{{ r.late_n }}{% else %}—{% endif %}</td>
+    <td class="num" data-v="{{ r.leaks }}">{{ r.leaks|default:"—" }}</td>
+    <td class="num" data-v="{{ r.hygiene|default_if_none:'' }}">{% if r.hygiene != None %}{{ r.hygiene|pct:0 }}{% else %}—{% endif %}</td>
+    <td class="num" data-v="{{ r.house_share|default_if_none:'' }}">{% if r.house_share != None %}{{ r.house_share|pct:0 }}{% else %}—{% endif %}</td>
+  </tr>{% endfor %}
+  </tbody></table></div>
+  {% if not rows %}<div class="empty">No bids in this window.</div>{% endif %}
+  <div class="note" style="margin-top:6px">Hit rate counts only decided bids (won or lost). "Won" is the portal's Awarded, or an SL job with billings — SL is the source of truth for won (spec D4). Accuracy and cost ÷ budget use only jobs SL has closed and stabilised. Inferred estimators (blank Bidder filled by rule) are counted in "Bids" with a "+n" marker and excluded from every rate.</div>
+</div>
+
+<div class="grid two" style="margin-top:14px">
+  <div class="card"><h2>Hit rate vs volume <small>each dot an estimator · click to open</small></h2><div class="chart" style="height:280px"><canvas id="c_scatter"></canvas></div></div>
+  <div class="card"><h2>Bid margin vs realised GP <small>closed jobs · median per estimator · click to open</small></h2><div class="chart" style="height:280px"><canvas id="c_margin"></canvas></div></div>
+</div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{% static 'bids/tables.js' %}?v={{ ASSET_VERSION }}"></script>
+<script>
+(function () {
+  const rows = {{ rows_json|safe }};
+  const pts = rows.filter(r => r.hit_rate != null).map(r => ({x: r.won + r.lost, y: r.hit_rate * 100, r: Math.max(4, Math.min(18, Math.sqrt(r.submitted_value / 25000))), name: r.name, key: r.key, val: r.submitted_value}));
+  const sc = new Chart(document.getElementById('c_scatter'), {type: 'bubble', data: {datasets: [{data: pts, backgroundColor: 'rgba(31,94,255,.45)', borderColor: '#1f5eff'}]},
+    options: {responsive: true, maintainAspectRatio: false, plugins: {legend: {display: false}, tooltip: {callbacks: {label: c => c.raw.name + ' · ' + c.raw.x + ' decided · ' + c.raw.y.toFixed(0) + '% · ' + PCA.money(c.raw.val)}}},
+      scales: {x: {title: {display: true, text: 'decided bids'}}, y: {title: {display: true, text: 'hit rate %'}, min: 0, max: 100}},
+      onClick: (e, els) => { if (els.length) location.href = '/bids/estimators/' + pts[els[0].index].key + '/'; }}});
+  const mr = rows.filter(r => r.margin != null && r.accuracy != null).sort((a, b) => b.accuracy_n - a.accuracy_n).slice(0, 14);
+  new Chart(document.getElementById('c_margin'), {type: 'bar', data: {labels: mr.map(r => r.name), datasets: [
+      {label: 'bid margin', data: mr.map(r => r.margin * 100), backgroundColor: '#b7791f'},
+      {label: 'realised GP (median, closed)', data: mr.map(r => (r.margin + r.accuracy) * 100), backgroundColor: '#178a52'}]},
+    options: {responsive: true, maintainAspectRatio: false, plugins: {tooltip: {callbacks: {label: c => c.dataset.label + ': ' + c.parsed.y.toFixed(1) + '%'}}},
+      scales: {y: {title: {display: true, text: '%'}}}, onClick: (e, els) => { if (els.length) location.href = '/bids/estimators/' + mr[els[0].index].key + '/'; }}});
+})();
+</script>
+{% endblock %}

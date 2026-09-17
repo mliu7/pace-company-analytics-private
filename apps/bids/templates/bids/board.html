@@ -1,0 +1,20 @@
+{% extends "dashboard/base.html" %}{% load humanize pca bids static %}
+{% block title %}Bid board · Pace Company Analytics{% endblock %}
+{% block extra_css %}{% include "bids/_css.html" %}{% endblock %}
+{% block content %}
+<div class="bids">
+{% include "bids/_tabs.html" %}
+<div class="row" style="gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+  <span class="muted">{{ n }} open bids · {{ total|money_k }}</span>
+  <span class="muted">sort cards by</span>
+  <select id="board_sort"><option value="edited">recently edited</option><option value="due">bid due</option><option value="value">value ↓</option><option value="prob">probability ↓</option><option value="days">longest since edit</option><option value="client">client</option></select>
+  <label class="muted" style="font-size:12px"><input type="checkbox" id="board_group"> group by estimator</label>
+</div>
+<div class="board" id="board">
+  {% for key, label, items in cols %}<div class="col" data-stage="{{ key }}"><h3>{{ label }} <small>{{ items|length }} · <span class="colsum"></span></small></h3><div class="cards"></div></div>{% endfor %}
+</div>
+<div class="note">Cards are the portal's live rows (statuses Quoting, Submitted and On hold). Red edge = past the bid due date, amber = due within 7 days. The bar under the value is the estimator's stated probability. Drag is intentionally off: the Project Portal stays the system of record — open the card and use "Open in Portal" to change a status.</div>
+</div>
+<script id="bids-rows" type="application/json">{{ rows_json|safe }}</script>
+{% endblock %}
+{% block scripts %}<script src="{% static 'bids/bids.js' %}"></script><script>PCABids.board();</script>{% endblock %}

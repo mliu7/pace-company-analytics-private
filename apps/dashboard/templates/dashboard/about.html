@@ -1,0 +1,46 @@
+{% extends "dashboard/base.html" %}{% load pca %}
+{% block title %}Definitions · Pace Company Analytics{% endblock %}
+{% block content %}
+<div class="topbar"><div class="title"><h1>Definitions &amp; how to read the numbers</h1><small>Every figure traces to SL account categories and PTT entries; nothing is written back to either system.</small></div></div>
+<div class="grid two">
+  <div class="card"><h2>Economics (Dynamics SL)</h2>
+    <dl class="kv">
+      <dt>Contract value</dt><dd>SL <code>CONTRACT VALUE</code> budget, summed over tasks. SL keeps only the <em>current</em> value; "budget edited" shows the last edit date of that row.</dd>
+      <dt>Billed revenue</dt><dd>SL <code>REVENUE</code> actuals = AR invoices − credits. SL does not post percent-complete revenue to projects.</dd>
+      <dt>Earned revenue</dt><dd>Contract value × PM % complete (PTT). Derived, labelled.</dd>
+      <dt>Labor</dt><dd>Wages (<code>LABOR</code> + <code>LABORUNION</code>) + burden (<code>BURDEN</code>: employer payroll tax per employee + union fringe vouchers per project).</dd>
+      <dt>Material / Subcontract / Other direct</dt><dd><code>MATERIALS</code> · <code>SUBCONTRACT</code> · <code>ODC</code>+<code>TRAVEL</code> (freight is inside ODC, GL 50750/50760).</dd>
+      <dt>Purchase variance</dt><dd><code>PURCHASEVARIANCE</code>: vendor invoice vs PO/receipt price on the job's purchases — a correction of material cost (usually negative). Shown as its own component so the direct-cost breakdown adds up; folded into material in the EAC and in the cost mix.</dd>
+      <dt>Open commitments</dt><dd>Open PO lines (ordered − received × unit cost) + warehouse stock received for the job and not yet shipped to it. <strong>Not</strong> SL's raw <code>com_amount</code>: at Pace that figure is mostly project-inventory allocations created by PO receipts that are never relieved when the stock ships to the job through Order Management, so it double-counts cost already in actuals (the "already shipped" amount is shown separately on each project).</dd>
+      <dt>Direct cost / GP</dt><dd>Sum of the above; GP = billed revenue − direct cost; GP % = GP ÷ billed revenue. Matches SL's own <code>PJPrjBgt.ACT_Margin</code>.</dd>
+      <dt>Sold GP</dt><dd>Contract value − current budget direct cost (labor budget is loaded; burden rarely budgeted separately). Current-budget basis — original budgets do not exist in SL.</dd>
+      <dt>Margin preservation</dt><dd>Final GP % − sold GP %, in points, revenue-weighted across jobs with a contract value.</dd>
+      <dt>Loaded labor rate</dt><dd>Labor (wages + burden) ÷ SL labor-charge hours (PA/PR/TM rows only — PO quantities on labor accounts are excluded).</dd>
+    </dl></div>
+  <div class="card"><h2>Operations (PTT)</h2>
+    <dl class="kv">
+      <dt>PTT hours</dt><dd>Live Job Report entries: on-site + OT + off-site. Time-off entries never count. Ties to SL labor hours at 99.98 % in aggregate.</dd>
+      <dt>PM remaining hours</dt><dd>PTT <code>estimated_hours_to_completion</code> (union + non-union), with every revision since Aug 2019.</dd>
+      <dt>PM % complete</dt><dd>PTT's labor-weighted blend of hours-remaining and expense-remaining (written back to SL PM_ID26 by PTT).</dd>
+      <dt>Labor % (calc)</dt><dd>PTT hours ÷ (PTT hours + PM remaining hours).</dd>
+      <dt>System / Work type</dt><dd>Structured choices on every PTT entry; the project's solution class is the hour-weighted dominant system (title keywords as fallback).</dd>
+      <dt>Crew lead</dt><dd>Inferred: submitted PTT time for two or more other people on the project.</dd>
+    </dl></div>
+  <div class="card"><h2>Lifecycle</h2>
+    <dl class="kv">
+      <dt>Not Started</dt><dd>Awarded but not started: SL active, no PTT or SL hours, has contract value or budget hours.</dd>
+      <dt>In Progress</dt><dd>SL active with hours in the last 30 days, or remaining hours and work in the last 45 days.</dd>
+      <dt>Field Complete</dt><dd>SL active, no work in 30 days, remaining hours 0 or PM % ≥ 98.</dd>
+      <dt>Dormant</dt><dd>SL active, remaining hours &gt; 0, no work in 45+ days.</dd>
+      <dt>Closed / Stabilizing → Closed</dt><dd>SL inactive; stabilized after 45 days without a material posting. Close date = PTT inactivation date, else SL last-edit at the flip.</dd>
+    </dl></div>
+  <div class="card"><h2>Forecast &amp; risk</h2>
+    <dl class="kv">
+      <dt>EAC labor</dt><dd>Posted labor + unposted PTT hours × rate + PM remaining hours × rate. Rate hierarchy: project actual (≥80 h) → crew mix (13-week employee wage + tax + fringe) → division rolling → budget rate → $90 default.</dd>
+      <dt>EAC non-labor</dt><dd>Material: max(actual + purchase variance + real open commitments, budget); subcontract: max(actual + open commitments, budget); other: max(actual, budget).</dd>
+      <dt>EAC revenue</dt><dd>Contract value (T&amp;M/service: max(billed, CV)).</dd>
+      <dt>Risk score</dt><dd>Heuristic 0–100: projected loss (+45), margin &lt;10 % (+25), &gt;5 pts below sold (+25), &gt;15 pts (+10), hours EAC &gt;110 % of budget (+15), &gt;130 % (+10), dormant (+10), no PM estimate (+5). Low &lt;25, moderate &lt;50, high &lt;75, critical ≥75 or projected loss &gt; $50k.</dd>
+      {% if acc.ratings %}<dt>Ratings</dt><dd>Ridge expected-outcome model excluding the rated entity; weighted mean residual, empirical-Bayes shrinkage; published only with enough jobs, customers and solution contexts.</dd>{% endif %}
+    </dl></div>
+</div>
+{% endblock %}

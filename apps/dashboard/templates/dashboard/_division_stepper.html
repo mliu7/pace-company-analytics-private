@@ -1,0 +1,11 @@
+{% comment %}Snapshot header division carousel: the dropdown flanked by prev/next arrows so one day
+can be walked across every division without reopening the select. Context: div_nav
+(views._division_nav) + divisions. Shared by the project snapshot and its 010 hardware-sales
+body.{% endcomment %}
+<div class="stepper">
+  <a class="btn small step" href="{{ div_nav.prev.url }}" title="Previous division — {{ div_nav.prev.label }}" aria-label="Previous division: {{ div_nav.prev.label }}">‹</a>
+  <label title="Filter every section to one division's jobs, or view the whole company. The arrows step through the same list ({{ div_nav.at }} of {{ div_nav.of }}) and keep the day or week you are on.">Division
+    <select name="div" onchange="this.form.submit()"><option value="">All divisions</option>
+    {% for dv in divisions %}<option value="{{ dv.code }}" {% if div_nav.cur.code == dv.code %}selected{% endif %}>{{ dv.code }} {{ dv.name }}</option>{% endfor %}</select></label>
+  <a class="btn small step" href="{{ div_nav.next.url }}" title="Next division — {{ div_nav.next.label }}" aria-label="Next division: {{ div_nav.next.label }}">›</a>
+</div>

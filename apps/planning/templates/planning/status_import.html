@@ -1,0 +1,43 @@
+{% extends "dashboard/base.html" %}
+{% load humanize pca static %}
+{% block title %}Status board · Import · Pace Company Analytics{% endblock %}
+{% block extra_css %}@import url("{% static 'planning/planning.css' %}?v={{ PL_VERSION }}");{% endblock %}
+{% block content %}
+<div class="topbar"><div class="title"><h1>Status board · transition import</h1><small>Admin tool for the cut-over from the P:-drive dashboards (spec §6.7). Dry run first, then apply. Completed and manual rows are never touched; an import never completes a row.</small></div>
+  <div class="actions"><a class="btn" href="{% url 'planning:planning_status' %}">← Status board</a></div></div>
+{% include "planning/_tabs.html" %}
+{% if err %}<div class="callout bad" style="margin-bottom:12px">{{ err }}</div>{% endif %}
+<div class="grid two">
+<div class="card">
+  <h2>Master Schedule export <small>.xlsx / .xls / .csv — every sheet; headers found by alias, columns claimed in priority order</small></h2>
+  <form method="post" enctype="multipart/form-data" class="pl-form" style="grid-template-columns:1fr">{% csrf_token %}
+    <input type="hidden" name="kind" value="excel">
+    {% if token %}<input type="hidden" name="token" value="{{ token }}">{% endif %}
+    <label>File <input type="file" name="file" accept=".xlsx,.xls,.csv"></label>
+    <div class="row">
+      <button class="btn" name="mode" value="dry" title="Read the file and report what would change — nothing is written">Dry run</button>
+      {% if token and not applied %}<button class="btn primary" name="mode" value="apply" title="Write the rows shown in the dry-run report">Apply this file</button>{% endif %}
+    </div>
+  </form>
+  <div class="note" style="margin-top:8px">Division comes from a Division / Schedule column, else the sheet name, else the file name (040 / 070 / 080; default 070). Hours Left = union hours remaining when present. Percent and status never complete a row.</div>
+</div>
+<div class="card">
+  <h2>Dashboard JSON envelopes <small>the P: layout: project_status_data.json · 0x0_punch_list_data.json · bom_labor_approval_data.json</small></h2>
+  <form method="post" class="pl-form" style="grid-template-columns:1fr">{% csrf_token %}
+    <input type="hidden" name="kind" value="dir">
+    <label>Directory on this Mac <input type="text" name="dir" value="{{ dir|default:'' }}" placeholder="/Volumes/projects/PACE_Dashboard/…/data/resource-scheduler"></label>
+    <div class="row">
+      <button class="btn" name="mode" value="dry">Dry run</button>
+      <button class="btn primary" name="mode" value="apply" onclick="return confirm('Apply the JSON envelopes from this directory?')">Apply</button>
+    </div>
+  </form>
+  <div class="note" style="margin-top:8px">The same importer runs from the command line: <code>manage.py planning_import --dir … | --seeds | --excel …</code> (dry run by default, <code>--apply</code> to write).</div>
+</div>
+</div>
+{% if mappings %}<div class="card" style="margin-top:14px"><h2>Column mapping <small>what each sheet's headers resolved to (the visible mapping step the dashboard lacked)</small></h2>
+<table class="data dense"><thead><tr><th>Sheet</th><th>Header row</th><th>Columns</th></tr></thead><tbody>
+{% for m in mappings %}<tr><td>{{ m.sheet }}</td><td class="num">{{ m.header_row }}</td><td>{% for k, v in m.mapping.items %}<span class="chip" title="column {{ v|add:1 }}">{{ k }} → col {{ v|add:1 }}</span> {% endfor %}</td></tr>{% endfor %}
+</tbody></table></div>{% endif %}
+{% if report %}<div class="card" style="margin-top:14px"><h2>{% if applied %}Applied{% else %}Dry-run report{% endif %} <small>counts · unmatched project numbers · unknown PMs</small></h2><pre class="mono" style="white-space:pre-wrap;margin:0">{{ report }}</pre></div>{% endif %}
+{% endblock %}
+{% block scripts %}<script src="{% static 'planning/planning.js' %}?v={{ PL_VERSION }}"></script>{% endblock %}

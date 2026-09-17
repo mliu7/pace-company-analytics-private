@@ -1,0 +1,38 @@
+{% extends "dashboard/base.html" %}{% load humanize pca %}
+{% block title %}010 Products & Drift · Pace Company Analytics{% endblock %}
+{% block content %}
+<div class="topbar"><div class="title"><h1>Products &amp; cost drift</h1>
+  <small>Trailing 24 months of SO1 lines. Drift = SL actual unit cost − CNET quoted unit cost, where the part matches an SL order line (matched lines only, min 2 orders). Positive drift = we paid more than we quoted.</small></div></div>
+
+<div class="grid two" style="margin-bottom:14px">
+  <div class="card"><h2>Worst drift <small>products costing more than quoted</small></h2>
+    <table class="data dense"><thead><tr><th>Part</th><th>Mfr</th><th class="num">Orders</th><th class="num">Qty</th><th class="num">Drift/unit</th><th class="num">Drift total</th></tr></thead><tbody>
+    {% for p in worst %}{% if p.drift_total > 0 %}<tr><td class="mono trunc fluid" style="width:35%" title="{{ p.descr }}">{{ p.part_number }}</td>
+      <td class="trunc fluid" style="width:15%;min-width:90px" title="{{ p.manufacturer }}">{{ p.manufacturer }}</td><td class="num">{{ p.orders }}</td><td class="num">{{ p.qty|num }}</td>
+      <td class="num neg">{{ p.drift_unit|money:2 }}</td><td class="num neg"><b>{{ p.drift_total|money }}</b></td></tr>{% endif %}{% empty %}<tr><td class="empty" colspan="6">none</td></tr>{% endfor %}</tbody></table></div>
+  <div class="card"><h2>Best drift <small>products costing less than quoted (bought better)</small></h2>
+    <table class="data dense"><thead><tr><th>Part</th><th>Mfr</th><th class="num">Orders</th><th class="num">Qty</th><th class="num">Drift/unit</th><th class="num">Drift total</th></tr></thead><tbody>
+    {% for p in best %}{% if p.drift_total < 0 %}<tr><td class="mono trunc fluid" style="width:35%" title="{{ p.descr }}">{{ p.part_number }}</td>
+      <td class="trunc fluid" style="width:15%;min-width:90px" title="{{ p.manufacturer }}">{{ p.manufacturer }}</td><td class="num">{{ p.orders }}</td><td class="num">{{ p.qty|num }}</td>
+      <td class="num pos">{{ p.drift_unit|money:2 }}</td><td class="num pos"><b>{{ p.drift_total|money }}</b></td></tr>{% endif %}{% empty %}<tr><td class="empty" colspan="6">none</td></tr>{% endfor %}</tbody></table></div>
+</div>
+
+<div class="card" style="margin-bottom:14px"><h2>Drift by person <small>order-level: SL shipped cost vs quoted cost, orders booked in 24 months (min 5 shipped orders) — attribution: rep × who created the order in CNET</small></h2>
+<table class="data"><thead><tr><th>Rep</th><th>Created by</th><th class="num">Shipped orders</th><th class="num">Quoted cost</th><th class="num">Drift $</th><th class="num">Drift %</th></tr></thead><tbody>
+{% for p in people %}<tr><td><b>{{ p.rep }}</b></td><td>{{ p.creator|default:"?" }}</td><td class="num">{{ p.n }}</td>
+  <td class="num muted">{{ p.quoted_cost|money }}</td>
+  <td class="num"><span class="{% if p.drift > 0 %}neg{% elif p.drift < 0 %}pos{% endif %}">{{ p.drift|signed_money }}</span></td>
+  <td class="num">{{ p.drift_pct|pct }}</td></tr>{% endfor %}</tbody></table></div>
+
+<div class="grid two">
+  <div class="card"><h2>By manufacturer <small>24 months</small></h2>
+    <table class="data dense"><thead><tr><th>Manufacturer</th><th class="num">Orders</th><th class="num">Revenue</th><th class="num">Quoted GM%</th><th class="num">Drift total</th></tr></thead><tbody>
+    {% for m in mfrs %}<tr><td>{{ m.manufacturer }}</td><td class="num">{{ m.orders }}</td><td class="num">{{ m.revenue|money }}</td>
+      <td class="num">{{ m.quoted_gm|pct }}</td><td class="num">{% if m.drift_total != None %}<span class="{% if m.drift_total > 0 %}neg{% elif m.drift_total < 0 %}pos{% endif %}">{{ m.drift_total|signed_money }}</span>{% else %}—{% endif %}</td></tr>{% endfor %}</tbody></table></div>
+  <div class="card"><h2>Top products <small>by revenue, 24 months</small></h2>
+    <div class="table-wrap" style="max-height:460px"><table class="data dense"><thead><tr><th>Part</th><th>Mfr</th><th class="num">Orders</th><th class="num">Revenue</th><th class="num">Quoted GM%</th></tr></thead><tbody>
+    {% for p in prods|slice:":60" %}<tr><td class="mono trunc fluid" style="width:40%" title="{{ p.descr }}">{{ p.part_number }}</td>
+      <td class="trunc fluid" style="width:15%;min-width:90px" title="{{ p.manufacturer }}">{{ p.manufacturer }}</td><td class="num">{{ p.orders }}</td>
+      <td class="num">{{ p.revenue|money }}</td><td class="num">{{ p.quoted_gm|pct }}</td></tr>{% endfor %}</tbody></table></div></div>
+</div>
+{% endblock %}

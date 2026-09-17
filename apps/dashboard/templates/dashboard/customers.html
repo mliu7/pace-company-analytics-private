@@ -1,0 +1,36 @@
+{% extends "dashboard/base.html" %}{% load humanize pca %}
+{% block title %}Customers · Pace Company Analytics{% endblock %}
+{% block content %}
+<div class="topbar">
+  <div class="title"><h1>Customers &amp; market sectors — {{ division_label }}</h1><small>Closed jobs {{ start|date:"M Y" }} → today. Sector comes from SL (Customer.User2).{% if acc.ratings %} Adjusted effects from the current ratings run.{% endif %}</small></div>
+  {% include "dashboard/_division_bar.html" with show_years=True %}
+</div>
+<div class="grid wide-narrow">
+  <div class="card"><h2>Customers <small>top {{ rows|length }} by revenue</small></h2>
+    <div class="table-wrap tall"><table class="data dense"><thead><tr>
+  <th title="Billing customer from SL, with its market sector (Customer.User2). General contractors bill for end users named in project titles.">Customer · sector</th>
+  <th class="num" title="Closed & stabilized jobs in the window.">Jobs</th>
+  <th class="num" title="Billed revenue of those jobs.">Revenue</th>
+  {% if acc.margins %}<th class="num" title="Gross profit (billed − direct cost).">GP $</th>
+  <th class="num" title="Raw observed margin, no adjustment for who managed the jobs or what kind of work it was.">GP %</th>
+  <th class="num" title="Revenue-weighted sold margin (current budget) → final margin on jobs with a contract value.">Sold → Final</th>
+  <th class="num" title="Final minus sold margin, points. Positive = jobs for this customer deliver above their budgeted margin.">Preservation</th>
+  <th class="num" title="Jobs that lost money.">Losses</th>{% endif %}
+  {% if acc.ratings %}<th class="num" title="Context-adjusted margin effect (points): this customer’s jobs vs model expectation controlling for PM, solution, mode, size, sold margin, year — shrunk for small samples.">Adj. GP % effect</th>
+  <th title="publishable / provisional / insufficient, from the current Ratings run.">Status</th>{% endif %}
+  <th class="num" title="Open projects and their contract value right now.">Open jobs / CV</th></tr></thead><tbody>
+    {% for r in rows %}<tr>
+      <td class="trunc fluid" style="width:55%;min-width:160px" title="{{ r.label }}"><a href="{% url 'dashboard:customer_detail' r.k %}">{{ r.label }}</a></td>
+      <td class="num">{{ r.n }}</td><td class="num">{{ r.revenue|money_k }}</td>{% if acc.margins %}<td class="num {{ r.gp|posneg }}">{{ r.gp|money_k }}</td><td class="num">{{ r.gp_pct|pct }}</td>
+      <td class="num muted">{{ r.sold_pct|pct }} → {{ r.final_pct_with|pct }}</td><td class="num {{ r.preservation|posneg }}">{{ r.preservation|pts }}</td><td class="num">{{ r.losers }}</td>{% endif %}
+      {% if acc.ratings %}<td class="num {% if r.rating %}{{ r.rating.adjusted_effect|posneg }}{% endif %}">{% if r.rating %}{{ r.rating.adjusted_effect|pts }}{% else %}—{% endif %}</td>
+      <td>{% if r.rating %}<span class="tag {{ r.rating.publication_status }}">{{ r.rating.publication_status }}</span>{% endif %}</td>{% endif %}
+      <td class="num">{% if r.open %}{{ r.open.n }} · {{ r.open.cv|money_k }}{% else %}—{% endif %}</td>
+    </tr>{% endfor %}</tbody></table></div></div>
+  <div class="card"><h2>Market sectors</h2>
+    <table class="data"><thead><tr><th title="Market sector from SL (Customer.User2). (unassigned) = blank in SL — fill it there and it flows through on refresh.">Sector</th><th class="num" title="Closed jobs in the window.">Jobs</th><th class="num" title="Billed revenue.">Revenue</th>{% if acc.margins %}<th class="num" title="Raw margin.">GP %</th><th class="num" title="Sold → final margin, revenue-weighted.">Sold → Final</th>{% endif %}{% if acc.ratings %}<th class="num" title="Context-adjusted margin effect from the Ratings run.">Adj.</th>{% endif %}</tr></thead><tbody>
+    {% for r in sectors %}<tr><td><a href="{% url 'dashboard:project_list' %}?div={{ div_code }}&state=closed&sector={{ r.k|urlencode }}">{{ r.k }}</a></td><td class="num">{{ r.n }}</td><td class="num">{{ r.revenue|money_k }}</td>{% if acc.margins %}<td class="num">{{ r.gp_pct|pct }}</td><td class="num muted">{{ r.sold_pct|pct }} → {{ r.final_pct_with|pct }}</td>{% endif %}{% if acc.ratings %}<td class="num {% if r.rating %}{{ r.rating.adjusted_effect|posneg }}{% endif %}">{% if r.rating %}{{ r.rating.adjusted_effect|pts }}{% else %}—{% endif %}</td>{% endif %}</tr>{% endfor %}
+    </tbody></table>
+    <div class="note" style="margin-top:8px">(unassigned) = customers with no sector in SL — 594 of 2,060 customers. Assigning them in SL flows through on the next refresh.</div></div>
+</div>
+{% endblock %}

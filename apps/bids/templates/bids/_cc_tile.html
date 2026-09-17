@@ -1,0 +1,3 @@
+{% load humanize pca %}{% if not hide %}
+<div class="card kpi"><div class="label" title="Open list bids (quoting + submitted) for this scope, Σ Project Value. Expected = Σ value × the estimator's stated probability for bids expected to decide within 90 days; the second figure values them at each estimator's own historical hit rate (spec D4).">Bid pipeline</div><div class="value">{{ kp.open_value|money_k }}</div><div class="sub"><a href="{% url 'bids:bids_overview' %}{% if div_code %}?div={{ div_code }}{% endif %}">{{ kp.open_n }} open</a> · expected {{ eb.stated|money_k }} <span title="at historical hit rates">/ {{ eb.historical|money_k }}</span>{% if kp.hit12 != None %} · {{ kp.hit12|pct:0 }} hit rate 12 mo{% endif %}</div></div>
+{% endif %}

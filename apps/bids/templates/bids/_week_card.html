@@ -1,0 +1,12 @@
+{% load humanize pca bids %}{% if not hide %}
+<div class="card" style="margin-top:14px"><h2>Bids <small>{{ start|date:"M j" }} – {{ end|date:"M j" }} · submitted, awarded, lost and due in the window{% if div_code %} · division {{ div_code }}{% endif %} · <a href="{% url 'bids:bids_overview' %}{% if div_code %}?div={{ div_code }}{% endif %}">all bids</a></small></h2>
+  {% if n %}<div class="row" style="gap:14px;flex-wrap:wrap;margin-bottom:8px">
+    <span class="pill good">awarded {{ groups.awarded|length }} · {{ tot.awarded|money_k }}</span><span class="pill info">submitted {{ groups.submitted|length }} · {{ tot.submitted|money_k }}</span><span class="pill bad">lost {{ groups.lost|length }} · {{ tot.lost|money_k }}</span><span class="pill warn">due {{ groups.due|length }} · {{ tot.due|money_k }}</span></div>
+  <div class="table-wrap" style="max-height:320px"><table class="data dense"><thead><tr><th>What</th><th>Bid</th><th>Client</th><th class="num">Value</th><th class="num">Prob</th><th>Estimator</th><th>Rep</th><th>Div</th></tr></thead><tbody>
+  {% for k, label in "awarded:Awarded,submitted:Submitted,lost:Lost,due:Due"|split_pairs %}{% for r in groups|getitem:k %}<tr>
+    <td><span class="pill {{ r.stage|stage_class }}">{{ label }}</span></td><td><a href="{% url 'bids:bid_detail' r.id %}">{{ r.project_name|truncatechars:46 }}</a>{% if r.pdisp %} <a class="muted" href="{% url 'dashboard:project_detail' r.cpn %}">{{ r.pdisp }}</a>{% endif %}</td>
+    <td class="trunc" style="max-width:200px" title="{{ r.client_label }}">{{ r.client_label|truncatechars:30 }}</td><td class="num">{% if r.value %}{{ r.value|money_k }}{% else %}—{% endif %}</td><td class="num">{% if r.probability != None %}{{ r.probability }}%{% else %}—{% endif %}</td>
+    <td>{{ r.estimator|default:"—" }}</td><td>{% if r.house_account %}House{% else %}{{ r.rep|default:"—" }}{% endif %}</td><td>{{ r.division }}</td></tr>{% endfor %}{% endfor %}
+  </tbody></table></div>{% else %}<div class="empty">No bid activity in this window.</div>{% endif %}
+</div>
+{% endif %}

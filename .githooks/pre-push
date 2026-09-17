@@ -1,0 +1,10 @@
+#!/bin/sh
+# Inspect the exact objects being published; staging is not required.
+set -eu
+command -v gitleaks >/dev/null || { echo "Install gitleaks before publishing company code." >&2; exit 1; }
+python_bin="${PCA_PYTHON:-.venv/bin/python}"
+while read -r local_ref local_sha remote_ref remote_sha; do
+    [ "$local_sha" != "0000000000000000000000000000000000000000" ] || continue
+    "$python_bin" scripts/check_repository_privacy.py --tree "$local_sha"
+    gitleaks git . --redact=100 --log-opts="$local_sha"
+done

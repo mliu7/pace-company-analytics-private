@@ -1,0 +1,22 @@
+{% load pca %}
+<form method="get" class="row" style="gap:8px">
+  {% for k, v in request.GET.items %}{% if k != 'div' and k != 'years' %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endif %}{% endfor %}
+  <label class="note">Division
+    <select name="div" onchange="this.form.submit()" style="margin-left:6px;font:inherit;padding:5px 8px;border:1px solid var(--line-strong);border-radius:8px">
+      {% for dv in divisions %}<option value="{{ dv.code }}" {% if dv.code == div_code %}selected{% endif %}>{{ dv.code }} {{ dv.name }}</option>{% endfor %}
+      {% if not division_locked %}<option value="all" {% if div_code == 'all' %}selected{% endif %}>All divisions</option>{% endif %}
+    </select>
+  </label>
+  {% if show_years %}
+  <label class="note">Closed within
+    <select name="years" onchange="this.form.submit()" style="margin-left:6px;font:inherit;padding:5px 8px;border:1px solid var(--line-strong);border-radius:8px">
+      <option value="1" {% if years == 1 %}selected{% endif %}>1 year</option>
+      <option value="2" {% if years == 2 %}selected{% endif %}>2 years</option>
+      <option value="3" {% if years == 3 %}selected{% endif %}>3 years</option>
+      <option value="5" {% if years == 5 %}selected{% endif %}>5 years</option>
+      <option value="8" {% if years == 8 %}selected{% endif %}>8 years</option>
+      <option value="12" {% if years == 12 %}selected{% endif %}>All history</option>
+    </select>
+  </label>
+  {% endif %}
+</form>

@@ -1,0 +1,73 @@
+{% extends "dashboard/base.html" %}{% load humanize pca %}
+{% block title %}010 Hardware · Pace Company Analytics{% endblock %}
+{% block content %}
+<div class="topbar"><div class="title"><h1>010 Hardware Sales</h1>
+  <small>Box sales quoted in ChannelOnline, fulfilled through SL (SO1 orders). Bookings = CNET orders; invoiced &amp; realized GP = SL shippers; drift = quoted cost vs SL actual cost. Quotes: <a href="{% url 'dashboard:sales010_pipeline' %}">pipeline</a> · detail: <a href="{% url 'dashboard:sales010_orders' %}">orders</a>, <a href="{% url 'dashboard:sales010_products' %}">products &amp; drift</a>.</small></div></div>
+
+<div class="grid kpi" style="margin-bottom:14px">
+  <div class="card kpi"><div class="label">Bookings MTD</div><div class="value sm">{{ k.mtd|money }}</div><div class="sub">{{ k.mtd_n }} orders</div></div>
+  <div class="card kpi"><div class="label">Bookings YTD</div><div class="value sm">{{ k.ytd|money }}</div><div class="sub">{{ k.ytd_n }} orders</div></div>
+  <div class="card kpi"><div class="label">Invoiced YTD (SL)</div><div class="value sm">{{ inv.rev|money }}</div><div class="sub">realized GP {{ inv.gp|money }} ({% if inv.rev %}{% widthratio inv.gp inv.rev 100 %}%{% else %}—{% endif %})</div></div>
+  <div class="card kpi"><div class="label">Open pipeline</div><div class="value sm">{{ pipe.amt|money }}</div><div class="sub">{{ pipe.n }} open quotes → <a href="{% url 'dashboard:sales010_pipeline' %}">pipeline</a></div></div>
+  <div class="card kpi"><div class="label">Backlog</div><div class="value sm">{{ k.backlog|money }}</div><div class="sub">{{ k.backlog_n }} SL-open orders → <a href="{% url 'dashboard:sales010_orders' %}?chip=backlog">list</a></div></div>
+</div>
+
+<div class="grid wide-narrow" style="margin-bottom:14px">
+  <div class="card">
+    <h2>Month by month <small>bookings (CNET) · invoiced &amp; realized GP (SL shippers) · quotes &amp; win rate · median days order→ship</small></h2>
+    <div class="table-wrap" style="max-height:520px"><table class="data dense">
+      <thead><tr><th>Month</th><th class="num">Orders</th><th class="num">Bookings</th><th class="num">Invoiced</th><th class="num">Real GP $</th><th class="num">GP %</th><th class="num">Quotes #</th><th class="num">Quotes $</th><th class="num">Win rate</th><th class="num" title="Median days from ordered to first shipment.">Ship days</th></tr></thead>
+      <tbody>{% for r in months %}<tr>
+        <td>{{ r.m|date:"M Y" }}</td><td class="num">{{ r.book_n|numdash:0 }}</td><td class="num">{{ r.book_amt|money }}</td>
+        <td class="num">{{ r.inv_rev|money }}</td><td class="num {{ r.inv_gp|posneg }}">{{ r.inv_gp|money }}</td>
+        <td class="num {% if r.gp_pct != None and r.gp_pct < 0.05 %}neg{% endif %}">{{ r.gp_pct|pct }}</td>
+        <td class="num muted">{{ r.q_n|numdash:0 }}</td><td class="num muted">{{ r.q_amt|money }}</td>
+        <td class="num">{{ r.win_rate|pct:0 }}</td><td class="num muted">{{ r.med_ship_days|numdash }}</td>
+      </tr>{% endfor %}</tbody></table></div>
+    <div class="note" style="margin-top:6px">GL tie-out (0100+0101, FY-to-date): revenue {{ gl.rev|money }} · COGS {{ gl.cogs|money }} · GP <b>{{ gl.gp|money }}</b>.
+      The GL is division truth; the SL-shipper GP above excludes freight cost variances, inventory adjustments and non-CNET postings — when the two diverge, the GL wins and the gap is worth asking about.</div>
+  </div>
+  <div class="card">
+    <h2>Bookings vs invoiced <small>with realized GP %</small></h2>
+    <div class="chart tall"><canvas id="c_months"></canvas></div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:14px">
+  <h2>Salespeople <small>YTD · pipeline · 90-day win rate · needs attention</small></h2>
+  <table class="data"><thead><tr><th>Rep</th><th class="num">MTD</th><th class="num">YTD bookings</th><th class="num" title="CNET quoted GP on YTD bookings.">Quoted GP</th><th class="num" title="SL invoiced − shipped cost, orders booked YTD.">Realized GP</th><th class="num">Real GM%</th><th class="num">Open pipeline</th><th class="num">Win rate 90d</th><th class="num" title="Open quotes older than 30 days + booked orders unshipped after 14 days.">Needs attention</th></tr></thead><tbody>
+  {% for r in reps %}<tr>
+    <td><b>{{ r.rep }}</b></td><td class="num">{{ r.mtd|money }}</td><td class="num">{{ r.ytd|money }}</td>
+    <td class="num">{{ r.quoted_gp_ytd|money }}</td><td class="num {{ r.real_gp_ytd|posneg }}">{{ r.real_gp_ytd|money }}</td>
+    <td class="num">{{ r.real_gp_pct|pct }}</td>
+    <td class="num">{{ r.open_amt|money }} <span class="muted">({{ r.open_n }})</span></td>
+    <td class="num">{{ r.win90|pct:0 }}</td>
+    <td class="num">{% if r.open_stale or r.backlog_14 %}<span class="warn-ink">{{ r.open_stale }} stale quotes · {{ r.backlog_14 }} old backlog</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+  </tr>{% endfor %}</tbody></table>
+</div>
+
+<div class="grid two" style="margin-bottom:14px">
+  <div class="card"><h2>Top customers <small>bookings, trailing 12 months</small></h2>
+    <table class="data"><thead><tr><th>Customer</th><th class="num">Orders</th><th class="num">Bookings</th><th class="num">Realized GP</th></tr></thead><tbody>
+    {% for r in top_cust %}<tr><td class="trunc fluid" style="width:55%" title="{{ r.name }}">{% if r.cid %}<a href="{% url 'dashboard:customer_detail' r.cid %}">{{ r.name }}</a>{% else %}{{ r.name }}{% endif %}</td>
+      <td class="num">{{ r.n }}</td><td class="num">{{ r.amt|money }}</td><td class="num {{ r.real_gp|posneg }}">{{ r.real_gp|money }}</td></tr>{% endfor %}</tbody></table></div>
+  <div class="card"><h2>Top manufacturers <small>line revenue, trailing 12 months · quoted margin</small></h2>
+    <table class="data"><thead><tr><th>Manufacturer</th><th class="num">Orders</th><th class="num">Revenue</th><th class="num">Quoted GP</th></tr></thead><tbody>
+    {% for r in top_mfr %}<tr><td>{{ r.manufacturer }}</td><td class="num">{{ r.orders }}</td><td class="num">{{ r.amt|money }}</td><td class="num">{{ r.quoted_gp|money }}</td></tr>{% endfor %}</tbody></table></div>
+</div>
+<div class="note">Drilldowns: <a href="{% url 'dashboard:sales010_serials' %}">serial lookup</a> · <a href="{% url 'dashboard:sales010_hygiene' %}">data hygiene{% if hygiene_n %} ({{ hygiene_n }} open items){% endif %}</a></div>
+{% endblock %}
+{% block scripts %}
+{{ charts|json_script:"charts" }}
+<script>
+const C = JSON.parse(document.getElementById('charts').textContent);
+new Chart(document.getElementById('c_months'), {
+  data: { labels: C.months.map(r => r.m.slice(0,7)), datasets: [
+    { type: 'bar', label: 'Bookings', data: C.months.map(r => r.book), backgroundColor: 'rgba(31,94,255,.45)', borderRadius: 2, yAxisID: 'y' },
+    { type: 'bar', label: 'Invoiced (SL)', data: C.months.map(r => r.inv), backgroundColor: 'rgba(23,138,82,.55)', borderRadius: 2, yAxisID: 'y' },
+    { type: 'line', label: 'Realized GP %', data: C.months.map(r => r.gp_pct == null ? null : r.gp_pct * 100), borderColor: '#b7791f', pointRadius: 2, yAxisID: 'y2' } ] },
+  options: { responsive: true, maintainAspectRatio: false,
+    scales: { y: { ticks: { callback: v => PCA.money(v) } }, y2: { position: 'right', ticks: { callback: v => v + '%' }, grid: { display: false } }, x: { grid: { display: false } } },
+    plugins: { legend: { position: 'bottom' } } } });
+</script>
+{% endblock %}

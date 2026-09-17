@@ -1,0 +1,390 @@
+{% extends "dashboard/base.html" %}{% load humanize pca %}
+{% block title %}010 Quote Pipeline · Pace Company Analytics{% endblock %}
+{% block content %}
+<div class="topbar"><div class="title"><h1>Quote pipeline</h1>
+  <small>Every ChannelOnline quote created <b>{{ win.from|date:"M j, Y" }} – {{ win.to|date:"M j, Y" }}</b> ({{ win.span }} days){% if echo.rep %} · rep <b>{{ echo.rep }}</b>{% endif %}{% if echo.creator %} · written by <b>{{ echo.creator }}</b>{% endif %}{% if cust_name %} · customer <b>{{ cust_name }}</b>{% endif %}{% if echo.sector %} · sector <b>{{ echo.sector }}</b>{% endif %}{% if echo.mfr %} · quoting <b>{{ echo.mfr }}</b>{% endif %}.
+    Won = linked to a CNET order (note reference or same-customer total match); lost = marked Lost/Expired/Closed; everything else is open. Quotes ≥ {{ jumbo_amt|money_k }} are {% if win.include_jumbo %}<b>included</b>{% else %}kept out of every total{% endif %} (budgetary placeholders — see the card at the bottom). Click any quote row to open its lines in place.</small></div></div>
+
+<form method="get" class="card tight" id="qpf" style="margin-bottom:12px">
+  <input type="hidden" name="range" value="{{ win.range }}">
+  {% if echo.cust %}<input type="hidden" name="cust" value="{{ echo.cust }}">{% endif %}
+  {% if echo.mfr %}<input type="hidden" name="mfr" value="{{ echo.mfr }}">{% endif %}
+  {% if echo.nolines %}<input type="hidden" name="nolines" value="1">{% endif %}
+  <div class="filters" style="margin-bottom:6px">
+    <label>Created<div class="qp-chips">
+      {% qs_without request 'range' 'from' 'to' as bq %}
+      <a href="?{{ bq }}&range=30" class="{% if win.range == '30' %}on{% endif %}">30d</a>
+      <a href="?{{ bq }}&range=90" class="{% if win.range == '90' %}on{% endif %}">90d</a>
+      <a href="?{{ bq }}&range=180" class="{% if win.range == '180' %}on{% endif %}">180d</a>
+      <a href="?{{ bq }}&range=365" class="{% if win.range == '365' %}on{% endif %}">12 mo</a>
+      <a href="?{{ bq }}&range=ytd" class="{% if win.range == 'ytd' %}on{% endif %}">YTD</a>
+      <a href="?{{ bq }}&range=all" class="{% if win.range == 'all' %}on{% endif %}" title="Every quote since 2013 — slower, monthly bars.">All</a>
+    </div></label>
+    <label>From<input type="date" name="from" value="{% if win.range == 'custom' %}{{ win.from|date:'Y-m-d' }}{% endif %}" style="min-width:140px"></label>
+    <label>To<input type="date" name="to" value="{% if win.range == 'custom' %}{{ win.to|date:'Y-m-d' }}{% endif %}" style="min-width:140px"></label>
+    <label>Outcome<select name="outcome">
+      <option value="open" {% if win.outcome == 'open' %}selected{% endif %}>Open (pipeline)</option>
+      <option value="won" {% if win.outcome == 'won' %}selected{% endif %}>Won</option>
+      <option value="lost" {% if win.outcome == 'lost' %}selected{% endif %}>Lost / expired</option>
+      <option value="hold" {% if win.outcome == 'hold' %}selected{% endif %}>On hold</option>
+      <option value="all" {% if win.outcome == 'all' %}selected{% endif %}>All outcomes</option></select></label>
+    <label>Rep<select name="rep"><option value="">all</option>{% for r in opts.reps %}<option value="{{ r.r }}" {% if echo.rep == r.r %}selected{% endif %}>{{ r.r }} ({{ r.n }})</option>{% endfor %}</select></label>
+    <label title="Who typed the quote in CNET — coordinators quote for a rep, and customers can build their own on the storefront.">Written by<select name="creator"><option value="">anyone</option>{% for r in opts.creators %}<option value="{{ r.r }}" {% if echo.creator == r.r %}selected{% endif %}>{{ r.r }} ({{ r.n }})</option>{% endfor %}</select></label>
+    <label>Sector<select name="sector"><option value="">all</option>{% for r in opts.sectors %}<option value="{{ r.r }}" {% if echo.sector == r.r %}selected{% endif %}>{{ r.r }} ({{ r.n }})</option>{% endfor %}</select></label>
+    <label>Size $<div class="row" style="gap:4px;flex-wrap:nowrap"><input type="text" name="minamt" value="{{ echo.minamt|default:'' }}" placeholder="min" style="min-width:80px;width:90px"><input type="text" name="maxamt" value="{{ echo.maxamt|default:'' }}" placeholder="max" style="min-width:80px;width:90px"></div></label>
+    <label>Search<input type="search" name="q" value="{{ echo.q|default:'' }}" placeholder="quote #, customer, description, PO, note, author"></label>
+    <label style="flex-direction:row;align-items:center;gap:6px;padding-bottom:7px"><input type="checkbox" name="jumbo" value="1" style="min-width:0;width:auto" {% if win.include_jumbo %}checked{% endif %}> include ≥ {{ jumbo_amt|money_k }}</label>
+    <label style="flex-direction:row;align-items:center;gap:6px;padding-bottom:7px" title="Quotes a customer built themselves on the CNET storefront (author e-mail outside pace-systems.com)."><input type="checkbox" name="self" value="1" style="min-width:0;width:auto" {% if echo.self %}checked{% endif %}> customer-built only</label>
+    <button class="btn primary">Apply</button>
+    <a class="btn" href="{% url 'dashboard:sales010_pipeline' %}">Reset</a>
+  </div>
+  {% if echo.cust or echo.mfr or echo.nolines %}<div class="qp-active">Also filtered by:
+    {% if echo.cust %}<span class="pill info">customer {{ cust_name }} <a href="?{% qs_without request 'cust' %}" title="remove">✕</a></span>{% endif %}
+    {% if echo.mfr %}<span class="pill info">manufacturer {{ echo.mfr }} <a href="?{% qs_without request 'mfr' %}" title="remove">✕</a></span>{% endif %}
+    {% if echo.nolines %}<span class="pill info">no line detail <a href="?{% qs_without request 'nolines' %}" title="remove">✕</a></span>{% endif %}
+  </div>{% endif %}
+</form>
+
+<div class="grid kpi" style="margin-bottom:14px">
+  <div class="card kpi"><div class="label">Quotes went out</div><div class="value sm">{{ k.amt|money_k }}</div>
+    <div class="sub">{{ k.n|intcomma }} quotes · avg {{ k.avg|money_k }} · {{ k.custs }} customers</div>
+    <div class="delta {{ k.d_amt|posneg }}" title="Prior {{ win.span }} days ({{ prior.from|date:'M j' }} – {{ prior.to|date:'M j' }}): {{ prior.n|intcomma }} quotes, {{ prior.amt|money_k }}.">{% if k.d_amt >= 0 %}▲{% else %}▼{% endif %} {{ k.d_amt|absolute|money_k }} · {% if k.d_n >= 0 %}+{% endif %}{{ k.d_n }} vs prior {{ win.span }}d</div></div>
+  <div class="card kpi"><div class="label">Open pipeline</div><div class="value sm">{{ k.open_amt|money_k }}</div>
+    <div class="sub">{{ k.open_n|intcomma }} open · median {{ k.open_med|money_k }}</div>
+    <div class="sub" title="Σ quoted price − Σ quoted cost over open quotes with a usable cost (cost entered, and not above 1.5× the price — CNET costs are hand-typed and a few are unit-vs-extended errors).">quoted GM <b>{{ k.open_gm|pct }}</b> on {{ k.open_costed_n|intcomma }} with a usable cost</div></div>
+  <div class="card kpi"><div class="label">Won</div><div class="value sm {% if k.won_amt %}pos{% endif %}">{{ k.won_amt|money_k }}</div>
+    <div class="sub">{{ k.won_n|intcomma }} quotes · win rate <b>{{ k.win_n|pct:0 }}</b> by count, {{ k.win_amt|pct:0 }} by $</div>
+    <div class="sub">median {{ k.won_med_days|numdash:0 }} days from quote to order</div></div>
+  <div class="card kpi"><div class="label">Stale open</div><div class="value sm {% if k.stale_amt %}warn-ink{% endif %}">{{ k.stale_amt|money_k }}</div>
+    <div class="sub">{{ k.stale_n|intcomma }} open quotes with no CNET activity for {{ stale_days }}+ days</div></div>
+  <div class="card kpi"><div class="label">Lost / on hold</div><div class="value sm">{{ k.lost_amt|add:k.hold_amt|money_k }}</div>
+    <div class="sub">{{ k.lost_n }} marked lost or expired · {{ k.hold_n }} on hold</div>
+    <div class="sub muted">reps rarely close quotes — "open" hides most losses</div></div>
+  <div class="card kpi"><div class="label">{% if win.include_jumbo %}Included{% else %}Excluded{% endif %} ≥ {{ jumbo_amt|money_k }}</div><div class="value sm muted">{{ k.jumbo_amt|money_k }}</div>
+    <div class="sub">{{ k.jumbo_n }} quote{{ k.jumbo_n|pluralize }} → <a href="#jumbo" class="jump">see them</a></div>
+    <div class="sub muted">{{ k.nolines_n }} quote{{ k.nolines_n|pluralize }} carry a total but no lines ({{ k.nolines_amt|money_k }}) · <a href="?{% qs_without request 'nolines' %}&nolines=1">list</a>{% if k.costbad_n %} · {{ k.costbad_n }} with an implausible cost{% endif %}</div></div>
+</div>
+
+<div class="grid two" style="margin-bottom:14px">
+  <div class="card">
+    <h2>Quotes going out <small>$ created per {{ win.unit }}, by what happened to them · hover for counts &amp; win rate</small></h2>
+    <div class="chart" style="height:280px"><canvas id="c_series"></canvas></div>
+    <div class="note" style="margin-top:6px">Recent {{ win.unit }}s read low on won: open quotes may still convert. The by-{{ win.unit }} numbers are in the table below the charts.</div>
+  </div>
+  <div class="card">
+    <h2>Open pipeline by rep × age <small>$ open, from newest (light) to 90+ days (dark)</small></h2>
+    <div class="chart" id="c_reps_wrap" style="height:280px"><canvas id="c_reps"></canvas></div>
+    <div class="note" style="margin-top:6px">Age = days since the quote was created. Dark bands are money the customer has sat on; the rep table below has the same buckets with counts.</div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:14px">
+    <h2>By rep <small>click a rep to focus the whole page on them · open $ by age since created, with counts</small></h2>
+    <div class="table-wrap" style="max-height:420px"><table class="data dense"><thead><tr>
+      <th>Rep</th><th class="num">Quotes</th><th class="num">$ quoted</th><th class="num">Open $</th>
+      <th class="num" title="Open $ (count) by age since created.">≤7d</th><th class="num">8–30d</th><th class="num">31–60d</th><th class="num">61–90d</th><th class="num">90d+</th>
+      <th class="num" title="Open quotes with no CNET activity for {{ stale_days }}+ days.">Stale</th>
+      <th class="num">Won $</th><th class="num" title="Won ÷ quotes created in the window (count).">Win</th><th class="num" title="Median days from quote created to order.">Days</th>
+      <th class="num" title="Quoted GM% on open quotes (price vs CNET cost).">Open GM</th></tr></thead><tbody>
+    {% for r in reps %}<tr>
+      <td><a href="?{% qs_without request 'rep' %}&rep={{ r.rep|urlencode }}"><b>{{ r.rep }}</b></a> <span class="muted" style="font-size:11px">{{ r.custs }} cust</span></td>
+      <td class="num">{{ r.n|intcomma }}</td><td class="num">{{ r.amt|money_k }}</td>
+      <td class="num"><b>{{ r.open_amt|money_k }}</b> <span class="muted">({{ r.open_n }})</span></td>
+      <td class="num">{{ r.a0|money_k }} <span class="muted">{{ r.c0|numdash:0 }}</span></td>
+      <td class="num">{{ r.a1|money_k }} <span class="muted">{{ r.c1|numdash:0 }}</span></td>
+      <td class="num {% if r.c2 %}warn-ink{% endif %}">{{ r.a2|money_k }} <span class="muted">{{ r.c2|numdash:0 }}</span></td>
+      <td class="num {% if r.c3 %}warn-ink{% endif %}">{{ r.a3|money_k }} <span class="muted">{{ r.c3|numdash:0 }}</span></td>
+      <td class="num {% if r.c4 %}neg{% endif %}">{{ r.a4|money_k }} <span class="muted">{{ r.c4|numdash:0 }}</span></td>
+      <td class="num {% if r.stale_n %}warn-ink{% endif %}">{{ r.stale_amt|money_k }} <span class="muted">{{ r.stale_n|numdash:0 }}</span></td>
+      <td class="num pos">{{ r.won_amt|money_k }} <span class="muted">({{ r.won_n }})</span></td>
+      <td class="num">{{ r.win_n|pct:0 }}</td><td class="num muted">{{ r.won_med_days|numdash:0 }}</td>
+      <td class="num">{{ r.open_gm|pct }}</td></tr>{% empty %}<tr><td colspan="14" class="empty">No quotes in this window.</td></tr>{% endfor %}</tbody></table></div>
+</div>
+
+<div class="grid wide-narrow" style="margin-bottom:14px">
+  <div class="card">
+    <h2>Customers with the most open money <small>top 15 by open $ · click a name to focus the page, ↗ for the customer page</small></h2>
+    <div class="table-wrap" style="max-height:520px"><table class="data dense"><thead><tr>
+      <th>Customer</th><th class="num">Quotes</th><th class="num">$ quoted</th><th class="num">Open $</th><th class="num" title="Age of the oldest open quote.">Oldest open</th><th class="num" title="Most recent quote to this customer in the window.">Last quote</th><th class="num">Won $</th><th class="num">Win</th><th>Reps</th></tr></thead><tbody>
+    {% for r in custs %}<tr>
+      <td class="trunc fluid" style="width:35%" title="{{ r.customer }}"><a href="?{% qs_without request 'cust' %}&cust={{ r.cid|urlencode }}">{{ r.customer }}</a>{% if r.ccode %} <a href="{% url 'dashboard:customer_detail' r.ccode %}" class="muted" title="customer page" style="font-size:11px">↗</a>{% endif %}{% if r.sector != '(none)' %}<div class="muted" style="font-size:11px">{{ r.sector }}</div>{% endif %}</td>
+      <td class="num">{{ r.n }}</td><td class="num">{{ r.amt|money_k }}</td>
+      <td class="num"><b>{{ r.open_amt|money_k }}</b> <span class="muted">({{ r.open_n }})</span></td>
+      <td class="num {% if r.oldest > 60 %}neg{% elif r.oldest > 30 %}warn-ink{% endif %}">{% if r.oldest != None %}{{ r.oldest }}d{% else %}—{% endif %}</td>
+      <td class="num muted">{{ r.last_quote|date:"M j" }}</td>
+      <td class="num pos">{{ r.won_amt|money_k }} <span class="muted">({{ r.won_n }})</span></td><td class="num">{{ r.win_n|pct:0 }}</td>
+      <td class="muted trunc fluid" style="width:12%;min-width:90px;font-size:12px" title="{{ r.reps }}">{{ r.reps }}</td></tr>{% empty %}<tr><td colspan="9" class="empty">No quotes in this window.</td></tr>{% endfor %}</tbody></table></div>
+  </div>
+  <div class="card">
+    <h2>What is being quoted <small>manufacturers on these quotes' lines · click to focus</small></h2>
+    <div class="table-wrap" style="max-height:520px"><table class="data dense"><thead><tr><th>Manufacturer <span class="muted" style="text-transform:none;letter-spacing:0">· quotes</span></th><th class="num">Line $</th><th class="num">Open $</th><th class="num" title="Share of this manufacturer's quoted $ that sits on won quotes.">Won</th><th class="num" title="Quoted GM% on lines with a plausible cost.">GM</th></tr></thead><tbody>
+    {% for r in mfrs %}<tr><td class="trunc fluid" style="width:55%" title="{{ r.manufacturer }}"><a href="?{% qs_without request 'mfr' %}&mfr={{ r.manufacturer|urlencode }}">{{ r.manufacturer }}</a> <span class="muted" style="font-size:11px">{{ r.quotes }}</span></td>
+      <td class="num">{{ r.amt|money_k }}</td><td class="num">{{ r.open_amt|money_k }}</td><td class="num">{{ r.won_share|pct:0 }}</td><td class="num">{{ r.gm|pct }}</td></tr>{% empty %}<tr><td colspan="5" class="empty">No lines.</td></tr>{% endfor %}</tbody></table></div>
+  </div>
+</div>
+
+<div class="grid three" style="margin-bottom:14px">
+  <div class="card">
+    <h2>By quote size <small>count · $ quoted → open, won</small></h2>
+    <table class="data dense"><thead><tr><th>Band</th><th class="num">Quotes</th><th class="num">Open $</th><th class="num">Won $</th><th class="num" title="Won ÷ created, by count.">Win</th><th class="num" title="Median days from quote to order.">Days</th></tr></thead><tbody>
+    {% for r in bands %}<tr class="{% if r.jumbo and not win.include_jumbo %}rowleft{% endif %}">
+      <td class="nowrap"><a href="?{% qs_without request 'minamt' 'maxamt' %}{% if r.lo %}&minamt={{ r.lo }}{% endif %}{% if r.hi %}&maxamt={{ r.hi }}{% endif %}{% if r.jumbo %}&jumbo=1{% endif %}">{{ r.label }}</a>{% if r.jumbo and not win.include_jumbo %} <span class="muted" style="font-size:11px">excluded</span>{% endif %}</td>
+      <td class="num">{{ r.n|intcomma }} <span class="muted" style="font-size:11px">{{ r.amt|money_k }}</span></td><td class="num">{{ r.open_amt|money_k }}</td>
+      <td class="num pos">{{ r.won_amt|money_k }}</td><td class="num">{{ r.win_n|pct:0 }}</td><td class="num muted">{{ r.med_days|numdash:0 }}</td></tr>{% endfor %}</tbody></table>
+  </div>
+  <div class="card">
+    <h2>By sector <small>customer market sector · click to focus</small></h2>
+    <table class="data dense"><thead><tr><th>Sector</th><th class="num">Quotes</th><th class="num">$</th><th class="num">Open $</th><th class="num">Won $</th><th class="num">Win</th></tr></thead><tbody>
+    {% for r in sectors %}<tr><td><a href="?{% qs_without request 'sector' %}&sector={{ r.sector|urlencode }}">{{ r.sector }}</a> <span class="muted" style="font-size:11px">{{ r.custs }} cust</span></td>
+      <td class="num">{{ r.n|intcomma }}</td><td class="num">{{ r.amt|money_k }}</td><td class="num">{{ r.open_amt|money_k }}</td><td class="num pos">{{ r.won_amt|money_k }}</td><td class="num">{{ r.win_n|pct:0 }}</td></tr>{% endfor %}</tbody></table>
+  </div>
+  <div class="card">
+    <h2>Who writes the quotes <small>author in CNET · for which reps</small></h2>
+    <table class="data dense"><thead><tr><th>Author</th><th class="num">Quotes</th><th class="num">$</th><th class="num">Open $</th><th class="num">Win</th><th>For</th></tr></thead><tbody>
+    {% for r in authors %}<tr><td class="trunc fluid" style="width:35%" title="{{ r.creator }}"><a href="?{% qs_without request 'creator' %}&creator={{ r.creator|urlencode }}">{{ r.creator }}</a>{% if r.self_service %} <span class="tag" title="Built by the customer on the CNET storefront.">customer</span>{% endif %}</td>
+      <td class="num">{{ r.n|intcomma }}</td><td class="num">{{ r.amt|money_k }}</td><td class="num">{{ r.open_amt|money_k }}</td><td class="num">{{ r.win_n|pct:0 }}</td>
+      <td class="muted trunc fluid" style="width:15%;min-width:90px;font-size:12px" title="{{ r.reps }}">{{ r.reps }}</td></tr>{% endfor %}</tbody></table>
+    <div class="note" style="margin-top:8px">{{ k.self_n }} customer-built quote{{ k.self_n|pluralize }} ({{ k.self_amt|money_k }}) in this window{% if not echo.self %} · <a href="?{% qs_without request 'self' %}&self=1">show only those</a>{% endif %}.</div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:14px">
+  <h2>By {{ win.unit }} created <small>quotes → outcome, in the window</small></h2>
+  <div class="table-wrap" style="max-height:300px"><table class="data dense"><thead><tr><th>{{ win.unit|capfirst }} of</th><th class="num">Quotes</th><th class="num">$</th><th class="num">Open</th><th class="num">Open $</th><th class="num">Won</th><th class="num">Won $</th><th class="num">Lost/hold</th><th class="num">Win (count)</th><th class="num">Win ($)</th></tr></thead><tbody>
+  {% for r in series reversed %}<tr><td>{{ r.p|date:"M j, Y" }}</td><td class="num">{{ r.n }}</td><td class="num">{{ r.amt|money_k }}</td>
+    <td class="num muted">{{ r.open_n|numdash:0 }}</td><td class="num">{{ r.open_amt|money_k }}</td>
+    <td class="num muted">{{ r.won_n|numdash:0 }}</td><td class="num pos">{{ r.won_amt|money_k }}</td>
+    <td class="num muted">{{ r.lost_n|add:r.hold_n|numdash:0 }}</td><td class="num">{{ r.win_n|pct:0 }}</td><td class="num">{{ r.win_amt|pct:0 }}</td></tr>{% endfor %}</tbody></table></div>
+</div>
+
+<div class="card" style="margin-bottom:14px" id="quotes">
+  <h2>Quotes <small id="qt-count"></small></h2>
+  <div class="row" style="margin-bottom:8px">
+    <input type="search" id="qt-search" placeholder="filter these rows (customer, quote #, description, note, PO)…" style="border:1px solid var(--line-strong);border-radius:8px;padding:6px 9px;font:inherit;min-width:320px">
+    <span class="note">Click a row to open its lines in place; click a column header to sort. Row tint: open quotes amber after 30 days, red after 60.</span>
+    <span class="spacer"></span>
+    <button type="button" class="btn small" id="qt-collapse">collapse all</button>
+  </div>
+  <div class="table-wrap tall"><table class="data dense qtable" id="qt"><thead><tr>
+    <th style="width:18px"></th>
+    <th data-k="num">Quote</th><th data-k="customer">Customer</th><th data-k="rep">Rep</th>
+    <th class="num" data-k="created">Created</th><th class="num" data-k="age" title="Days since created · idle = days since the last CNET change.">Age</th>
+    <th class="num" data-k="lines">Lines</th><th class="num" data-k="total">Total</th>
+    <th class="num" data-k="gm" title="Quoted GM% — CNET price vs CNET cost.">GM</th>
+    <th data-k="outcome">Outcome</th><th data-k="descr">Description · note</th></tr></thead>
+    <tbody id="qt-body"></tbody></table></div>
+</div>
+
+<div class="card" style="margin-bottom:14px" id="jumbo">
+  <h2>Quotes ≥ {{ jumbo_amt|money_k }} in this window <small>{{ table.jumbo|length }} shown · budgetary placeholders and lump sums, listed here so they never distort the totals above{% if win.include_jumbo %} (currently included){% endif %}</small></h2>
+  <div class="table-wrap" style="max-height:420px"><table class="data dense qtable" id="jt"><thead><tr>
+    <th style="width:18px"></th><th>Quote</th><th>Customer</th><th>Rep</th><th class="num">Created</th><th class="num">Age</th><th class="num">Lines</th><th class="num">Total</th><th class="num">GM</th><th>Outcome</th><th>Description · note</th></tr></thead>
+    <tbody id="jt-body"></tbody></table></div>
+</div>
+
+<div class="card">
+  <h2>Reading this page <small>definitions and caveats</small></h2>
+  <div class="note" style="line-height:1.6">
+    <b>Abandoned before this window:</b> {{ abandoned.n|intcomma }} quotes ({{ abandoned.amt|money_k }}) created before {{ win.from|date:"M j, Y" }} are still "Open" in CNET and unconverted; CNET never expires a quote, so they are not in any total here. Widen the window to see them.<br>
+    <b>Statuses in this window:</b> {% for s in statuses %}{{ s.status|default:"(blank)" }} → {{ s.outcome }} ({{ s.n|intcomma }}){% if not forloop.last %} · {% endif %}{% endfor %}.<br>
+    <b>Won</b> is inferred: CNET has no structural quote→order link, so a quote is won when an order's internal note cites it ("QUOTE #…", exact) or the same customer ordered the same total (±2 %) within 60 days (a total match can point several near-identical quotes at one order, so won counts can double up); the method shows in the row. <b>Win rate</b> = won ÷ quotes created in the window (reps almost never mark quotes lost, so a "decided" rate would read ~100 %).<br>
+    <b>Totals</b> are CNET quote totals (price incl. tax and S&amp;H); <b>GM</b> is quoted price vs quoted cost — realized margin lives on the <a href="{% url 'dashboard:sales010_orders' %}">orders</a> page once an order ships. Quotes with a total but no lines are lump sums whose detail was never entered line by line.
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+{{ charts|json_script:"charts" }}
+{{ table|json_script:"qtable" }}
+<script>
+(function () {
+  var C = JSON.parse(document.getElementById('charts').textContent);
+  var T = JSON.parse(document.getElementById('qtable').textContent);
+  var QURL = "{% url 'dashboard:sales010_quote_json' 'NUM' %}";
+  var CUST = "{% url 'dashboard:customer_detail' 'CODE' %}";
+  var DETAIL = "{% url 'dashboard:sales010_order_detail' 'NUM' %}";
+  var UNIT = C.unit;
+  function esc(s) { return String(s === null || s === undefined ? '' : s).replace(/[&<>"]/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function money(v, p) { if (v === null || v === undefined) return '—'; p = p || 0; var s = Math.abs(v).toLocaleString(undefined, {minimumFractionDigits: p, maximumFractionDigits: p}); return (v < 0 ? '-$' : '$') + s; }
+  function moneyk(v) { if (v === null || v === undefined) return '—'; var a = Math.abs(v), s = a >= 1e6 ? (a/1e6).toFixed(2) + 'M' : a >= 1e4 ? (a/1e3).toFixed(0) + 'k' : a >= 1e3 ? (a/1e3).toFixed(1) + 'k' : a.toFixed(0); return (v < 0 ? '-$' : '$') + s; }
+  function pct(v, p) { return (v === null || v === undefined) ? '—' : (v * 100).toFixed(p === undefined ? 1 : p) + '%'; }
+  function num(v) { return (v === null || v === undefined) ? '—' : Number(v).toLocaleString(); }
+  function plabel(iso) { var d = new Date(iso + 'T00:00:00'); return UNIT === 'week' ? d.toLocaleDateString(undefined, {month: 'short', day: 'numeric'}) : d.toLocaleDateString(undefined, {month: 'short', year: 'numeric'}); }
+
+  // ---------------------------------------------------------------- charts (single axis each; palettes validated)
+  if (C.series.length) {
+    new Chart(document.getElementById('c_series'), {
+      type: 'bar',
+      data: { labels: C.series.map(function (r) { return plabel(r.p); }), datasets: [
+        { label: 'Won', data: C.series.map(function (r) { return r.won; }), backgroundColor: '#178a52', borderColor: '#fff', borderWidth: 1 },
+        { label: 'Open', data: C.series.map(function (r) { return r.open; }), backgroundColor: '#1f5eff', borderColor: '#fff', borderWidth: 1 },
+        { label: 'Lost / hold', data: C.series.map(function (r) { return r.lost; }), backgroundColor: '#b7791f', borderColor: '#fff', borderWidth: 1 } ] },
+      options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+        scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, ticks: { callback: function (v) { return PCA.money(v); } }, grid: { color: '#eef1f5' } } },
+        plugins: { legend: { position: 'bottom' }, tooltip: { callbacks: {
+          title: function (items) { var r = C.series[items[0].dataIndex]; return (UNIT === 'week' ? 'Week of ' : '') + plabel(r.p) + ' · ' + r.n + ' quotes · ' + moneyk(r.won + r.open + r.lost); },
+          label: function (it) { var r = C.series[it.dataIndex]; var n = it.datasetIndex === 0 ? r.won_n : it.datasetIndex === 1 ? r.open_n : r.lost_n; return ' ' + it.dataset.label + ': ' + moneyk(it.raw) + ' (' + n + ')'; },
+          footer: function (items) { var r = C.series[items[0].dataIndex]; return 'win rate ' + pct(r.win_n, 0) + ' by count'; } } } } } });
+  }
+  var AGES = ['≤7d', '8–30d', '31–60d', '61–90d', '90d+'], AGEC = ['#c7d7ff', '#8fb0ff', '#4f82ff', '#1f5eff', '#0f3aa8'];
+  if (C.reps.length) {
+    document.getElementById('c_reps_wrap').style.height = Math.max(200, 70 + C.reps.length * 36) + 'px';
+    new Chart(document.getElementById('c_reps'), {
+      type: 'bar',
+      data: { labels: C.reps.map(function (r) { return r.rep; }), datasets: AGES.map(function (lab, i) {
+        return { label: lab, data: C.reps.map(function (r) { return r.a[i]; }), backgroundColor: AGEC[i], borderColor: '#fff', borderWidth: 1 }; }) },
+      options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+        scales: { x: { stacked: true, ticks: { callback: function (v) { return PCA.money(v); } }, grid: { color: '#eef1f5' } }, y: { stacked: true, grid: { display: false } } },
+        plugins: { legend: { position: 'bottom' }, tooltip: { callbacks: {
+          label: function (it) { var r = C.reps[it.dataIndex]; return ' ' + it.dataset.label + ': ' + moneyk(it.raw) + ' (' + r.c[it.datasetIndex] + ')'; },
+          footer: function (items) { var r = C.reps[items[0].dataIndex]; var tot = r.a.reduce(function (a, b) { return a + (b || 0); }, 0), n = r.c.reduce(function (a, b) { return a + b; }, 0); return 'open ' + moneyk(tot) + ' · ' + n + ' quotes'; } } } } } });
+  }
+
+  // ---------------------------------------------------------------- quote tables (client-side sort / filter / expand)
+  var cache = {}, expanded = {};
+  function prep(rows) { rows.forEach(function (r) { r._s = [r.num, r.customer, r.rep, r.creator, r.descr, r.note, r.po, r.so, r.status, r.stage, r.ship, r.sector].join(' ').toLowerCase(); }); return rows; }
+  var MAIN = { rows: prep(T.rows), body: 'qt-body', table: 'qt', key: T.outcome === 'open' ? 'score' : 'created', dir: -1, search: '' };
+  var JUMBO = { rows: prep(T.jumbo), body: 'jt-body', table: 'jt', key: 'total', dir: -1, search: '' };
+  var METHOD = {note_ref: ['note ref', 'the order\'s internal note cites this quote number (exact)'], heuristic_total: ['total match', 'same customer ordered the same total (±2%) within 60 days — several near-identical quotes can point at one order'], heuristic_lines: ['lines match', 'same customer, same lines within 60 days']};
+  function method(m) { var x = METHOD[m] || [m.replace(/_/g, ' '), 'how the quote was linked to the order']; return '<span class="muted" style="font-size:11px" title="' + esc(x[1]) + '">' + esc(x[0]) + '</span>'; }
+  function outcomeCell(r) {
+    if (r.outcome === 'won') return '<span class="tag closed_stabilized">won</span> → <a href="' + DETAIL.replace('NUM', encodeURIComponent(r.so)) + '" title="open the order page">SO ' + esc(r.so) + '</a>' + (r.days !== null ? ' <span class="muted">' + r.days + 'd</span>' : '') + (r.method ? '<div>' + method(r.method) + '</div>' : '');
+    if (r.outcome === 'lost') return '<span class="tag canceled">' + esc(r.status) + '</span>' + (r.stage ? ' <span class="muted" style="font-size:11px">' + esc(r.stage.replace(/_/g, ' ')) + '</span>' : '');
+    if (r.outcome === 'hold') return '<span class="tag field_complete">on hold</span>';
+    return '<span class="tag in_progress">' + esc(r.status || 'Open') + '</span>' + (r.stage ? ' <span class="muted" style="font-size:11px">' + esc(r.stage.replace(/_/g, ' ')) + (r.prob ? ' ' + r.prob + '%' : '') + '</span>' : '');
+  }
+  function rowHtml(r) {
+    var tint = r.outcome === 'open' ? (r.age > 60 ? ' age-bad' : r.age > 30 ? ' age-warn' : '') : '';
+    var open = expanded[r.num] ? ' on' : '';
+    return '<tr class="qr' + tint + open + '" data-num="' + esc(r.num) + '">' +
+      '<td class="qcaret">' + (expanded[r.num] ? '▾' : '▸') + '</td>' +
+      '<td><b>' + esc(r.num) + '</b>' + (r.jumbo ? ' <span class="tag critical" title="≥ $1M">jumbo</span>' : '') + (r.lines === 0 && r.total > 0 ? ' <span class="tag" title="a total but no line detail">no lines</span>' : '') + '</td>' +
+      '<td class="trunc fluid" style="width:20%" title="' + esc(r.customer) + '">' + (r.ccode ? '<a href="' + CUST.replace('CODE', encodeURIComponent(r.ccode)) + '" style="color:inherit" title="customer page">' + esc(r.customer) + '</a>' : esc(r.customer)) + (r.sector && r.sector !== '(none)' ? ' <span class="muted" style="font-size:11px">' + esc(r.sector) + '</span>' : '') + '</td>' +
+      '<td>' + esc(r.rep) + (r.creator && r.creator !== r.rep ? '<div class="muted" style="font-size:11px">by ' + esc(r.creator) + (r.self ? ' <span class="tag">customer</span>' : '') + '</div>' : '') + '</td>' +
+      '<td class="num muted">' + esc(r.created) + '</td>' +
+      '<td class="num' + (r.outcome === 'open' ? (r.age > 60 ? ' neg' : r.age > 30 ? ' warn-ink' : '') : ' muted') + '">' + r.age + 'd' + (r.idle !== null && r.idle < r.age - 1 ? '<div class="muted" style="font-size:11px" title="last CNET change ' + esc(r.activity) + '">idle ' + r.idle + 'd</div>' : '') + '</td>' +
+      '<td class="num muted">' + r.lines + '</td>' +
+      '<td class="num"><b>' + money(r.total) + '</b></td>' +
+      '<td class="num' + (r.gm !== null && r.gm < 0.05 ? ' neg' : '') + '">' + (r.costbad ? '<span class="tag critical" title="CNET cost is more than 1.5× the price — almost certainly a unit-vs-extended cost entry error; left out of every margin figure">cost?</span>' : r.gm === null && r.cost !== null && r.cost === 0 ? '<span class="muted" title="no cost entered">—</span>' : pct(r.gm)) + '</td>' +
+      '<td class="nowrap">' + outcomeCell(r) + '</td>' +
+      '<td class="trunc fluid" style="width:24%" title="' + esc((r.descr ? r.descr + ' — ' : '') + r.note) + '">' + (r.descr ? '<b>' + esc(r.descr) + '</b> ' : '') + '<span class="muted">' + esc(r.note) + '</span>' + (r.po ? ' <span class="muted" style="font-size:11px">PO ' + esc(r.po) + '</span>' : '') + '</td></tr>';
+  }
+  function sortRows(S) {
+    var k = S.key, d = S.dir;
+    return S.rows.slice().sort(function (a, b) {
+      var x = a[k], y = b[k];
+      if (x === null || x === undefined) return 1; if (y === null || y === undefined) return -1;
+      if (typeof x === 'string') { x = x.toLowerCase(); y = String(y).toLowerCase(); return x < y ? -d : x > y ? d : 0; }
+      return (x - y) * d;
+    });
+  }
+  function render(S) {
+    var q = S.search.toLowerCase(), rows = sortRows(S).filter(function (r) { return !q || r._s.indexOf(q) >= 0; });
+    var body = document.getElementById(S.body), h = '';
+    rows.forEach(function (r) { h += rowHtml(r); if (expanded[r.num] && cache[r.num]) h += panelRow(cache[r.num]); });
+    body.innerHTML = h || '<tr><td colspan="11" class="empty">No quotes match.</td></tr>';
+    if (S === MAIN) {
+      var tot = rows.reduce(function (a, r) { return a + (r.total || 0); }, 0);
+      var lab = {open: 'open', won: 'won', lost: 'lost / expired', hold: 'on hold', all: 'all outcomes'}[T.outcome];
+      document.getElementById('qt-count').textContent = rows.length.toLocaleString() + ' ' + lab + ' quote' + (rows.length === 1 ? '' : 's') + (q ? ' matching' : '') + ' · ' + moneyk(tot) +
+        (T.capped ? ' · showing the top ' + T.cap.toLocaleString() + ' of ' + T.n_in_view.toLocaleString() + ' (' + moneyk(T.amt_in_view) + ') — narrow the filters for the rest' : '') +
+        (T.outcome === 'open' && !q && S.key === 'score' ? ' · sorted by $ × age so the biggest stale money is on top' : '');
+    }
+    var thead = document.getElementById(S.table).tHead;
+    Array.prototype.forEach.call(thead.querySelectorAll('th[data-k]'), function (th) { th.classList.toggle('sorted', th.dataset.k === S.key); th.dataset.dir = th.dataset.k === S.key ? (S.dir > 0 ? 'asc' : 'desc') : ''; });
+  }
+  function kv(label, val) { return val ? '<dt>' + esc(label) + '</dt><dd>' + val + '</dd>' : ''; }
+  function panelRow(d) {
+    var t = d.totals, h = '<tr class="qx" data-for="' + esc(d.num) + '"><td colspan="11"><div class="qx-wrap"><div class="qx-grid"><div>';
+    h += '<h4>' + (d.type === 'quote' ? 'Quote' : 'Order') + ' ' + esc(d.num) + ' · ' + (d.so ? 'won <span class="muted" style="text-transform:none;letter-spacing:0">(CNET status ' + esc(d.status) + ')</span>' : esc(d.status)) + (d.stage ? ' · ' + esc(d.stage.replace(/_/g, ' ')) : '') + (d.revision > 1 ? ' · rev ' + d.revision : '') + (d.deleted ? ' · <span class="tag critical">deleted in CNET</span>' : '') + '</h4><dl class="kv dense">';
+    h += kv('Customer', (d.ccode ? '<a href="' + CUST.replace('CODE', encodeURIComponent(d.ccode)) + '">' + esc(d.customer) + '</a>' : esc(d.customer)) + (d.sector ? ' <span class="muted">' + esc(d.sector) + '</span>' : ''));
+    h += kv('Rep / author', esc(d.rep) + (d.creator && d.creator !== d.rep ? ' · written by ' + esc(d.creator) : '') + (d.am && d.am !== d.rep ? ' · AM ' + esc(d.am) : ''));
+    h += kv('Created', (d.created ? d.created.slice(0, 10) : '') + (d.modified && d.modified.slice(0, 10) !== (d.created || '').slice(0, 10) ? ' · last change ' + d.modified.slice(0, 10) : ''));
+    h += kv('Description', esc(d.descr)); h += kv('Customer PO', esc(d.po)); h += kv('Terms', esc([d.terms, d.price_profile, d.tax_status].filter(Boolean).join(' · ')));
+    h += kv('Ship to', esc(d.ship_to)); h += '</dl>';
+    if (d.note_internal) h += '<h4>Internal note</h4><div class="qx-note">' + esc(d.note_internal) + '</div>';
+    if (d.note_external) h += '<h4>Customer-facing note</h4><div class="qx-note">' + esc(d.note_external) + '</div>';
+    if (d.note_shipping) h += '<h4>Shipping note</h4><div class="qx-note">' + esc(d.note_shipping) + '</div>';
+    h += '<div style="margin-top:8px"><a class="btn small" href="' + DETAIL.replace('NUM', encodeURIComponent(d.num)) + '">full page →</a></div>';
+    h += '</div><div>';
+    h += '<h4>Totals</h4><table class="data dense qx-tot"><tbody>' +
+      '<tr><td>Subtotal</td><td class="num">' + money(t.subtotal, 2) + '</td></tr>' +
+      (t.sh ? '<tr><td>Shipping &amp; handling</td><td class="num">' + money(t.sh, 2) + '</td></tr>' : '') +
+      (t.tax ? '<tr><td>Tax</td><td class="num">' + money(t.tax, 2) + '</td></tr>' : '') +
+      (t.misc ? '<tr><td>Misc</td><td class="num">' + money(t.misc, 2) + '</td></tr>' : '') +
+      '<tr><td><b>Total</b></td><td class="num"><b>' + money(t.total, 2) + '</b></td></tr>' +
+      '<tr><td>Quoted cost</td><td class="num">' + money(t.cost, 2) + '</td></tr>' +
+      '<tr><td>Quoted GP</td><td class="num ' + (t.gp > 0 ? 'pos' : t.gp < 0 ? 'neg' : '') + '">' + money(t.gp, 2) + ' <span class="muted">' + pct(t.gm) + '</span></td></tr></tbody></table>';
+    if (d.so) {
+      var s = d.so;
+      h += '<h4>Became order <a href="' + s.url + '">' + esc(s.num) + '</a>' + (s.cancelled ? ' <span class="tag critical">cancelled in SL</span>' : '') + '</h4><dl class="kv dense">';
+      h += kv('Ordered', (s.ordered || '') + (s.days !== null ? ' · ' + s.days + ' days after the quote' : '') + (s.method ? ' · linked by ' + method(s.method) : ''));
+      h += kv('SL order', s.sl ? '<span class="mono">' + esc(s.sl) + '</span> (' + esc(s.sl_type) + ') status ' + esc(s.sl_status) : 'not yet in SL');
+      h += kv('Order total', money(s.total) + (s.cost !== null ? ' · cost ' + money(s.cost) : ''));
+      h += kv('Realized', s.realized_rev !== null ? money(s.realized_rev) + ' invoiced · GP ' + money(s.realized_gp) + ' · ' + s.invoices + ' invoice' + (s.invoices === 1 ? '' : 's') + (s.shipped ? ' · fully shipped' : '') + (s.last_ship ? ' · last ship ' + s.last_ship : '') : 'nothing shipped yet');
+      h += '</dl>';
+    }
+    if (d.mfrs.length > 1) {
+      h += '<h4>By manufacturer</h4><table class="data dense"><tbody>';
+      d.mfrs.slice(0, 8).forEach(function (m) { h += '<tr><td>' + esc(m.mfr) + ' <span class="muted">' + m.lines + '</span></td><td class="num">' + money(m.amt) + '</td><td class="num muted">' + pct(m.gm) + '</td></tr>'; });
+      if (d.mfrs.length > 8) h += '<tr><td class="muted" colspan="3">+ ' + (d.mfrs.length - 8) + ' more</td></tr>';
+      h += '</tbody></table>';
+    }
+    h += '</div></div>';
+    h += '<h4>' + d.lines.length + ' line' + (d.lines.length === 1 ? '' : 's') + (d.line_count !== d.lines.length ? ' <span class="muted" style="text-transform:none;letter-spacing:0">of ' + d.line_count + ' in CNET</span>' : '') + '</h4>';
+    if (d.lines.length) {
+      h += '<div class="table-wrap" style="max-height:420px"><table class="data dense qx-lines"><thead><tr><th>#</th><th>Part</th><th>Manufacturer</th><th>Description</th><th>Category</th><th>Supplier</th><th class="num">Qty</th><th class="num">Unit cost</th><th class="num">Unit price</th><th class="num">Ext price</th><th class="num">GP</th><th class="num">GM</th></tr></thead><tbody>';
+      d.lines.forEach(function (l) {
+        h += '<tr><td class="num muted">' + l.n + '</td><td class="mono">' + esc(l.part) + '</td><td class="trunc fluid" style="width:10%;min-width:90px">' + esc(l.mfr) + '</td>' +
+          '<td class="trunc fluid" style="width:35%;min-width:160px" title="' + esc(l.descr + (l.note ? ' — ' + l.note : '')) + '">' + esc(l.descr) + (l.dropship ? ' <span class="tag">dropship</span>' : '') + '</td>' +
+          '<td class="muted trunc fluid" style="width:10%;min-width:90px">' + esc(l.cat) + '</td><td class="muted trunc fluid" style="width:10%;min-width:90px" title="' + esc(l.sku) + '">' + esc(l.supplier) + '</td>' +
+          '<td class="num">' + num(l.qty) + '</td><td class="num">' + money(l.unit_cost, 2) + '</td><td class="num">' + money(l.unit_price, 2) + '</td>' +
+          '<td class="num"><b>' + money(l.ext_price, 2) + '</b></td><td class="num ' + (l.gp > 0 ? 'pos' : l.gp < 0 ? 'neg' : '') + '">' + money(l.gp, 2) + '</td>' +
+          '<td class="num' + (l.gm !== null && l.gm < 0.05 ? ' neg' : '') + '">' + pct(l.gm) + '</td></tr>';
+      });
+      h += '</tbody><tfoot><tr><td colspan="9">' + d.lines.length + ' line' + (d.lines.length === 1 ? '' : 's') + ' · quote subtotal / GP</td><td class="num">' + money(t.subtotal, 2) + '</td><td class="num">' + money(t.gp, 2) + '</td><td class="num">' + pct(t.gm) + '</td></tr></tfoot></table></div>';
+    } else {
+      h += '<div class="note">No line detail in CNET for this document — the total was entered as a lump sum.</div>';
+    }
+    h += '</div></td></tr>';
+    return h;
+  }
+  function toggle(tr) {
+    var n = tr.dataset.num, next = tr.nextElementSibling;
+    if (next && next.classList.contains('qx')) { next.remove(); tr.classList.remove('on'); tr.querySelector('.qcaret').textContent = '▸'; delete expanded[n]; return; }
+    expanded[n] = true; tr.classList.add('on'); tr.querySelector('.qcaret').textContent = '▾';
+    if (cache[n]) { tr.insertAdjacentHTML('afterend', panelRow(cache[n])); return; }
+    tr.insertAdjacentHTML('afterend', '<tr class="qx" data-for="' + esc(n) + '"><td colspan="11"><div class="empty" style="padding:14px">loading lines…</div></td></tr>');
+    fetch(QURL.replace('NUM', encodeURIComponent(n))).then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); }).then(function (d) {
+      cache[n] = d;
+      var cur = tr.nextElementSibling;
+      if (cur && cur.classList.contains('qx') && expanded[n]) { cur.outerHTML = panelRow(d); }
+    }).catch(function () {
+      var cur = tr.nextElementSibling;
+      if (cur && cur.classList.contains('qx')) cur.innerHTML = '<td colspan="11"><div class="empty">could not load this quote</div></td>';
+    });
+  }
+  function wire(S) {
+    document.getElementById(S.body).addEventListener('click', function (e) {
+      if (e.target.closest('a, button, input, select, textarea')) return;
+      var tr = e.target.closest('tr.qr'); if (!tr) return;
+      if (window.getSelection && String(window.getSelection())) return;   // let text selection through
+      toggle(tr);
+    });
+    Array.prototype.forEach.call(document.getElementById(S.table).tHead.querySelectorAll('th[data-k]'), function (th) {
+      th.classList.add('snap-sort');
+      th.addEventListener('click', function () {
+        var k = th.dataset.k;
+        if (S.key === k) S.dir = -S.dir; else { S.key = k; S.dir = (k === 'num' || k === 'customer' || k === 'rep' || k === 'outcome' || k === 'descr') ? 1 : -1; }
+        render(S);
+      });
+    });
+    render(S);
+  }
+  wire(MAIN); wire(JUMBO);
+  var si = document.getElementById('qt-search'), tmr;
+  si.addEventListener('input', function () { clearTimeout(tmr); tmr = setTimeout(function () { MAIN.search = si.value.trim(); render(MAIN); }, 120); });
+  document.getElementById('qt-collapse').addEventListener('click', function () { expanded = {}; render(MAIN); render(JUMBO); });
+  if (location.hash === '#jumbo') { var el = document.getElementById('jumbo'); if (el) el.scrollIntoView({block: 'start'}); }
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,35 @@
+{% extends "dashboard/base.html" %}
+{% load humanize pca static %}
+{% block title %}PM Active Task Report · {{ pm }} · Pace Company Analytics{% endblock %}
+{% block extra_css %}@import url("{% static 'planning/planning.css' %}?v={{ PL_VERSION }}");
+.rep-head { display:flex; gap:16px; align-items:center; margin-bottom:14px; } .rep-head img { width:64px; height:64px; }
+.rep-cards { display:grid; grid-template-columns: repeat(6, 1fr); gap:8px; margin-bottom:12px; }
+.rep-cards div { border:1px solid var(--line); border-radius:8px; padding:8px 10px; } .rep-cards .l { font-size:11px; color:var(--muted); text-transform:uppercase; } .rep-cards .v { font-size:22px; font-weight:700; }
+table.data td, table.data th { padding: 5px 7px; font-size: 12px; }
+{% endblock %}
+{% block content %}
+<div class="topbar no-print"><div class="title"><h1>PM Active Task Report</h1><small>{{ pm }} · print view — the same numbers as the Active tasks page, all schedules</small></div>
+  <div class="actions row"><a class="btn" href="{% url 'planning:planning_tasks' %}">← Active tasks</a><a class="btn" href="{% url 'planning:planning_tasks_export' %}?pm={{ pm|urlencode }}">Export Excel</a><button class="btn primary" onclick="window.print()">Print report</button></div></div>
+{% include "planning/_tabs.html" %}
+<div class="card">
+  <div class="rep-head"><img src="{% static 'dashboard/pace-logo-192.png' %}" alt="Pace"><div><h1 style="font-size:20px">{{ title }} — {{ pm }}</h1><div class="muted">Generated {{ generated|date:"M j, Y g:i A" }} · Active tasks across schedules 040 / 070 / 080 · {% for a in address %}{{ a }}{% if not forloop.last %}, {% endif %}{% endfor %}</div></div></div>
+  <div class="rep-cards">
+    <div title="Rows not completed and under 100 %"><span class="l">Active tasks</span><span class="v">{{ summary.active }}</span></div>
+    <div title="Σ union hours remaining"><span class="l">Union hours</span><span class="v">{{ summary.union_hours|floatformat:0|intcomma }}</span></div>
+    <div title="Critical stop before today"><span class="l">Past due</span><span class="v" style="color:var(--bad)">{{ summary.past_due }}</span></div>
+    <div title="Critical stop today … +14 days"><span class="l">Due within 14 days</span><span class="v" style="color:var(--warn)">{{ summary.due_soon }}</span></div>
+    <div title="No critical stop date"><span class="l">Missing stop date</span><span class="v">{{ summary.missing }}</span></div>
+    <div title="Simple mean of percent complete"><span class="l">Average complete</span><span class="v">{{ summary.avg_pct }}%</span></div>
+  </div>
+  <div class="note" style="margin-bottom:10px">Schedule totals: {% for d, s in per_div.items %}<b>{{ d }}</b> = {{ s.active }} task{{ s.active|pluralize }} / {{ s.union_hours|floatformat:0 }} h{% if not forloop.last %} &nbsp;|&nbsp; {% endif %}{% endfor %}</div>
+  <table class="data dense"><thead><tr><th>Schedule</th><th>Project / Task</th><th>PM</th><th>Start</th><th>Critical stop</th><th class="num">Union hrs</th><th class="num">Done</th><th>Priority</th><th>Status</th><th>Status V2</th></tr></thead><tbody>
+  {% for r in rows %}<tr><td>{{ r.division }}</td><td><b>{{ r.name }}</b></td><td>{{ r.pm }}{% if r.pm2 %} / {{ r.pm2 }}{% endif %}</td><td>{{ r.start|date:"n/j/y" }}</td><td>{{ r.end|date:"n/j/y" }}</td><td class="num">{{ r.hours_left|floatformat:0 }}</td><td class="num">{{ r.percent|floatformat:0 }}%</td><td><span class="p-badge {{ r.priority }}">{{ r.priority_label }}</span></td><td>{{ r.phase_status }}</td><td>{{ r.equipment_status }}</td></tr>
+  {% empty %}<tr><td colspan="10" class="empty">No active tasks.</td></tr>{% endfor %}
+  </tbody></table>
+  {% if attention %}<h3 style="margin:14px 0 6px">Attention required <small class="muted" style="text-transform:none;letter-spacing:0">past due → due soon → no date</small></h3>
+  <table class="data dense"><thead><tr><th>Schedule</th><th>Project / Task</th><th>PM</th><th>Critical stop</th><th class="num">Union hrs</th><th>Priority</th></tr></thead><tbody>
+  {% for r in attention %}<tr><td>{{ r.division }}</td><td>{{ r.name }}</td><td>{{ r.pm }}</td><td>{{ r.end|date:"n/j/y"|default:"—" }}</td><td class="num">{{ r.hours_left|floatformat:0 }}</td><td><span class="p-badge {{ r.priority }}">{{ r.priority_label }}</span></td></tr>{% endfor %}
+  </tbody></table>{% endif %}
+</div>
+{% endblock %}
+{% block scripts %}<script src="{% static 'planning/planning.js' %}?v={{ PL_VERSION }}"></script>{% if request.GET.print %}<script>setTimeout(() => window.print(), 350);</script>{% endif %}{% endblock %}

@@ -1,0 +1,18 @@
+{% extends "dashboard/base.html" %}{% load static humanize pca %}
+{% block title %}{{ side.title|capfirst }} · Pace Company Analytics{% endblock %}
+{% block content %}
+<div class="topbar">
+  <div class="title"><h1>{{ side.title }}</h1>
+    <small>{{ total|money }} on the <a href="{% url 'dashboard:finance_daily' %}">Daily Financial Snapshot</a> — {{ side.population }}, grouped, with the subledger behind the biggest account, ledger activity and a 20-month trend. Read-only, live GL.</small></div>
+  <div class="row">
+    <span class="pill info" title="When the GL balances and postings were last pulled from SL.">as of {{ snap.as_of|date:"M j, g:i A" }}</span>
+    <a class="btn small" href="{% url 'dashboard:finance_daily' %}">← Daily snapshot</a>
+  </div>
+</div>
+<div class="card">{% include "dashboard/finance_ledger_breakdown.html" %}</div>
+{% include "dashboard/_fin_drill_modal.html" %}
+{% endblock %}
+{% block scripts %}
+<script src="{% static 'dashboard/finance_modals.js' %}"></script>
+<script>PCADrill.bind('{% url "dashboard:finance_drill" %}'); PCALedger.init(document.getElementById('liab'));</script>
+{% endblock %}

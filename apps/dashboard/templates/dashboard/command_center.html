@@ -1,0 +1,245 @@
+{% extends "dashboard/base.html" %}{% load humanize pca static %}
+{% block title %}Command Center · Pace Company Analytics{% endblock %}
+{% block content %}
+<div class="topbar">
+  <div class="title">
+    <h1>{{ division_label }} — Command Center</h1>
+    <small>Closed-project truth from SL revenue &amp; direct cost + PTT hours · closed {{ start|date:"M Y" }} → today · Active book forecast as of {{ freshness.last_run.finished_at|date:"M j, g:i A" }}</small>
+  </div>
+  {% include "dashboard/_division_bar.html" with show_years=True %}
+</div>
+
+<div class="fresh" style="margin-bottom:14px">
+  <span class="pill {% if freshness.checksum_ok %}good{% else %}bad{% endif %}"><span class="dot"></span>{% if freshness.checksum_ok %}Σ PJTran = SL rollup, exact{% else %}SL checksum variance{% endif %}</span>
+  <span class="pill info">PTT hours through {{ freshness.ptt_max|date:"D M j" }}</span>
+  <span class="pill info">SL postings through {{ freshness.sl_max|date:"D M j" }}</span>
+  {% if freshness.blocking %}<span class="pill bad">{{ freshness.blocking }} blocking data issue{{ freshness.blocking|pluralize }}</span>{% endif %}
+  {% if freshness.running %}<span class="pill warn">refresh running…</span>{% endif %}
+  <span class="spacer"></span>
+  {% if acc.ops %}<a class="btn small" href="{% url 'dashboard:data_quality' %}">Data quality &amp; refresh →</a>{% endif %}
+</div>
+
+<h3 style="margin:6px 0 8px">Historical truth · {{ hist.n|intcomma }} closed projects</h3>
+<div class="grid kpi" style="margin-bottom:14px">
+  <div class="card kpi"><div class="label">Billed revenue</div><div class="value">{{ hist.revenue|money_k }}</div><div class="sub">{{ hist.hours|hours }} field hours</div></div>
+  <div class="card kpi"><div class="label">Direct cost</div><div class="value">{{ hist.cost|money_k }}</div><div class="sub">labor {{ hist.labor|money_k }} · material {{ hist.material|money_k }}</div></div>
+  <div class="card kpi"><div class="label">Gross profit</div><div class="value {{ hist.gp|posneg }}">{{ hist.gp|money_k }}</div><div class="sub">{{ hist.losers }} projects lost money ({{ hist.loss_dollars|money_k }})</div></div>
+  <div class="card kpi"><div class="label">Gross margin</div><div class="value">{{ hist.gp_pct|pct }}</div><div class="sub">sold {{ hist.sold_pct|pct }} → final {{ hist.final_pct_with|pct }} on jobs with a contract value</div></div>
+  <div class="card kpi"><div class="label">Margin preservation</div><div class="value {{ hist.preservation_pts|posneg }}">{{ hist.preservation_pts|pts }}</div><div class="sub">final − sold, revenue-weighted · current-budget basis</div></div>
+  <div class="card kpi"><div class="label">Loaded labor rate</div><div class="value sm">{{ hist.loaded_rate|money:2 }}/h</div><div class="sub">wages + burden ÷ SL hours · burden = {{ hist.burden|money_k }}</div></div>
+</div>
+
+<h3 style="margin:6px 0 8px">Active book · {{ active.n }} open projects</h3>
+<div class="grid kpi" style="margin-bottom:16px">
+  <div class="card kpi"><div class="label">Open contract value</div><div class="value">{{ active.cv|money_k }}</div><div class="sub">{{ active.in_progress }} in progress · {{ active.awarded }} awarded · {{ active.field_complete }} field-complete · {{ active.dormant }} dormant</div></div>
+  <div class="card kpi"><div class="label">Billed to date</div><div class="value">{{ active.billed|money_k }}</div><div class="sub">earned (CV × PM %) {{ active.earned|money_k }}</div></div>
+  <div class="card kpi"><div class="label">Forecast final GP</div><div class="value {{ active.eac_gp|posneg }}">{{ active.eac_gp|money_k }}</div><div class="sub">{{ active.eac_pct|pct }} EAC margin vs {{ active.sold_pct|pct }} sold · deterministic EAC</div></div>
+  <div class="card kpi"><div class="label">At-risk exposure</div><div class="value {% if active.at_risk_n %}neg{% endif %}">{{ active.at_risk_n }}</div><div class="sub">high/critical projects · {{ active.at_risk_cv|money_k }} revenue</div></div>
+  <div class="card kpi"><div class="label">Hours</div><div class="value sm">{{ active.hours|hours }}</div><div class="sub">{{ active.remaining_hours|hours }} remaining (PM) · {{ active.budget_hours|hours }} budget</div></div>
+  {% load bids %}{% bids_cc_tile div_code %}
+  <div class="card kpi"><div class="label">Data hygiene</div><div class="value sm {% if active.missing_remaining %}warn-ink{% endif %}">{{ active.missing_remaining }} / {{ active.stale_pc }}</div><div class="sub">active jobs missing remaining hrs / % complete stale &gt;45d · {{ active.unposted_h|hours }} PTT hours not yet in SL</div></div>
+</div>
+
+<div class="grid wide-narrow" style="margin-bottom:14px">
+  <div class="card">
+    <h2>Revenue and margin by quarter closed <small title="Closed-project cohorts: each job's lifetime billed revenue lands in its close quarter — not the fiscal-period P&L (that is the table at the bottom).">closed-job cohorts · bars = lifetime billed revenue, line = GP %</small></h2>
+    <div class="chart tall"><canvas id="c_periods"></canvas></div>
+  </div>
+  <div class="card">
+    <h2>Where the direct cost goes <small>closed projects in window</small></h2>
+    <div class="chart tall"><canvas id="c_cost"></canvas></div>
+  </div>
+</div>
+
+<div class="grid two" style="margin-bottom:14px">
+  <div class="card">
+    <h2>Sold margin vs final margin <small>each dot is a closed project · size = contract value · hover for the job, click to open it in a new tab</small></h2>
+    <div class="chart tall"><canvas id="c_scatter"></canvas></div>
+    <div class="note">Points below the diagonal lost margin between the budget and the final result. Sold margin uses SL's <em>current</em> budget (SL keeps no original), so heavily changed jobs sit near the line by construction.</div>
+  </div>
+  <div class="card">
+    <h2>Margin preservation distribution <small>final GP % − sold GP %, points · click a bar to list its jobs</small></h2>
+    <div class="chart tall"><canvas id="c_hist"></canvas></div>
+  </div>
+</div>
+
+<div class="grid three" style="margin-bottom:14px">
+  <div class="card">
+    <h2>By project mode <small>closed · revenue &amp; GP %</small></h2>
+    <div style="overflow:auto"><table class="data dense"><thead><tr><th title="Rule-derived work type from the title/PO.">Mode</th><th class="num" title="Closed jobs in the window.">Jobs</th><th class="num" title="Billed revenue.">Revenue</th><th class="num" title="Gross profit ÷ revenue.">GP %</th><th class="num" title="Revenue-weighted sold margin (current budget) → final margin on jobs with a contract value.">Sold→Final</th></tr></thead><tbody>
+    {% for r in modes %}<tr><td><a href="{% url 'dashboard:project_list' %}?div={{ div_code }}&state=closed&mode={{ r.k }}">{{ r.k|nice }}</a></td><td class="num">{{ r.n }}</td><td class="num">{{ r.revenue|money_k }}</td><td class="num {% if r.gp_pct < 0 %}neg{% endif %}">{{ r.gp_pct|pct }}</td><td class="num muted">{{ r.sold_pct|pct }} → {{ r.final_pct_with|pct }}</td></tr>{% endfor %}
+    </tbody></table></div>
+  </div>
+  <div class="card">
+    <h2>By solution <small>from PTT System mix on hours</small></h2>
+    <div style="overflow:auto"><table class="data dense"><thead><tr><th title="Dominant PTT System on the job’s hours (video, access control, AV, cabling…), title keywords as fallback.">Solution</th><th class="num">Jobs</th><th class="num">Revenue</th><th class="num" title="Gross profit ÷ revenue.">GP %</th></tr></thead><tbody>
+    {% for r in solutions %}<tr><td><a href="{% url 'dashboard:project_list' %}?div={{ div_code }}&state=closed&solution={{ r.k }}">{{ r.k|nice }}</a></td><td class="num">{{ r.n }}</td><td class="num">{{ r.revenue|money_k }}</td><td class="num {% if r.gp_pct < 0 %}neg{% endif %}">{{ r.gp_pct|pct }}</td></tr>{% endfor %}
+    </tbody></table></div>
+  </div>
+  <div class="card">
+    <h2>By market sector <small>SL customer sector</small></h2>
+    <div style="overflow:auto"><table class="data dense"><thead><tr><th title="Market sector from SL (Customer.User2); (unassigned) = blank in SL.">Sector</th><th class="num">Jobs</th><th class="num">Revenue</th><th class="num" title="Gross profit ÷ revenue.">GP %</th></tr></thead><tbody>
+    {% for r in sectors %}<tr><td><a href="{% url 'dashboard:project_list' %}?div={{ div_code }}&state=closed&sector={{ r.k|urlencode }}">{{ r.k }}</a></td><td class="num">{{ r.n }}</td><td class="num">{{ r.revenue|money_k }}</td><td class="num {% if r.gp_pct < 0 %}neg{% endif %}">{{ r.gp_pct|pct }}</td></tr>{% endfor %}
+    </tbody></table></div>
+  </div>
+</div>
+
+<div class="grid two" style="margin-bottom:14px">
+  <div class="card">
+    <h2>Project managers <small>closed jobs in window · sold → final margin</small></h2>
+    <div style="overflow:auto"><table class="data dense"><thead><tr><th title="Project manager — raw observed results, no context adjustment.">PM</th><th class="num">Jobs</th><th class="num">Revenue</th><th class="num" title="Gross profit dollars.">GP $</th><th class="num" title="Raw margin, no adjustment for job mix.">GP %</th><th class="num" title="Sold → final margin, revenue-weighted, current-budget basis.">Sold → Final</th><th class="num" title="Jobs that lost money.">Losses</th></tr></thead><tbody>
+    {% for r in pms %}<tr><td><a href="{% url 'dashboard:person_detail' r.k %}">{{ r.label }}</a></td><td class="num">{{ r.n }}</td><td class="num">{{ r.revenue|money_k }}</td><td class="num {{ r.gp|posneg }}">{{ r.gp|money_k }}</td><td class="num">{{ r.gp_pct|pct }}</td><td class="num muted">{{ r.sold_pct|pct }} → {{ r.final_pct_with|pct }}</td><td class="num">{{ r.losers }}</td></tr>{% endfor %}
+    </tbody></table></div>
+    <div class="note" style="margin-top:8px">Raw observed results.{% if acc.ratings %} Adjusted (context-controlled, shrunk) ratings live on the <a href="{% url 'dashboard:ratings' %}">Ratings</a> page.{% endif %}</div>
+  </div>
+  <div class="card">
+    <h2>Top customers <small>closed jobs in window</small></h2>
+    <div style="overflow:auto"><table class="data dense"><thead><tr><th title="Billing customer from SL.">Customer</th><th class="num">Jobs</th><th class="num">Revenue</th><th class="num">GP $</th><th class="num" title="Gross profit ÷ revenue.">GP %</th></tr></thead><tbody>
+    {% for r in customers %}<tr><td class="trunc fluid" style="width:55%;min-width:160px" title="{{ r.label }}"><a href="{% url 'dashboard:customer_detail' r.k %}">{{ r.label }}</a></td><td class="num">{{ r.n }}</td><td class="num">{{ r.revenue|money_k }}</td><td class="num {{ r.gp|posneg }}">{{ r.gp|money_k }}</td><td class="num">{{ r.gp_pct|pct }}</td></tr>{% endfor %}
+    </tbody></table></div>
+  </div>
+</div>
+
+<div class="grid two" style="margin-bottom:14px">
+  <div class="card">
+    <h2>Active projects needing attention <small>highest risk first</small></h2>
+    {% if at_risk %}
+    <div style="overflow:auto"><table class="data dense"><thead><tr><th>Project</th><th>PM</th><th class="num" title="Current contract value.">Contract</th><th class="num" title="Forecast gross profit at completion (deterministic EAC) and forecast margin.">EAC GP</th><th class="num" title="Forecast margin minus sold margin, points.">vs sold</th><th title="Heuristic risk score — see the Forecast page for the reasons.">Risk</th></tr></thead><tbody>
+    {% for r in at_risk %}<tr>
+      <td class="trunc fluid" style="width:45%;min-width:160px" title="{{ r.title }}"><a href="{% url 'dashboard:project_detail' r.canonical_project_number %}">{{ r.display_number }}</a> <span class="muted">{{ r.title }}</span></td>
+      <td class="nowrap">{{ r.pm_name|default:"—" }}</td><td class="num">{{ r.contract_value|money_k }}</td>
+      <td class="num {{ r.eac_gp_dollars|posneg }}">{{ r.eac_gp_dollars|money_k }} <span class="muted">{{ r.eac_gp_percent|pct }}</span></td>
+      <td class="num {{ r.projected_margin_change_points|posneg }}">{{ r.projected_margin_change_points|pts }}</td>
+      <td><span class="tag {{ r.risk_level }}">{{ r.risk_level }}</span> <span class="muted">{{ r.risk_score }}</span></td></tr>{% endfor %}
+    </tbody></table></div>
+    {% else %}<div class="empty">No high or critical risk projects right now.</div>{% endif %}
+    <div class="note" style="margin-top:8px"><a href="{% url 'dashboard:forecast' %}?div={{ div_code }}">Full active book →</a></div>
+  </div>
+  <div class="card">
+    <h2>Recently closed <small>latest close dates</small></h2>
+    <div style="overflow:auto"><table class="data dense"><thead><tr><th>Project</th><th class="num" title="Close date.">Closed</th><th class="num" title="Billed revenue (final).">Revenue</th><th class="num" title="Final margin.">GP %</th><th class="num" title="Sold margin (current budget).">Sold</th></tr></thead><tbody>
+    {% for r in recent_closed %}<tr>
+      <td class="trunc fluid" style="width:55%;min-width:160px" title="{{ r.title }}"><a href="{% url 'dashboard:project_detail' r.canonical_project_number %}">{{ r.display_number }}</a> <span class="muted">{{ r.title }}</span></td>
+      <td class="num">{{ r.close_date|date:"M j" }}</td><td class="num">{{ r.billed_revenue|money_k }}</td>
+      <td class="num {% if r.actual_gp_percent < 0 %}neg{% endif %}">{{ r.actual_gp_percent|pct }}</td><td class="num muted">{{ r.sold_gp_percent|pct }}</td></tr>{% endfor %}
+    </tbody></table></div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:14px">
+  <h2>P&amp;L by fiscal year <small>official basis — GL by posting period &amp; division subaccount · ties to SL's ledger to the penny</small></h2>
+  <div style="overflow:auto"><table class="data dense"><thead><tr>
+    <th title="SL fiscal year (= calendar year). The current year is period-to-date.">Year</th>
+    <th class="num" title="GL accounts 40000 SALES + 40001 SALES-MBE posted to this division's subaccounts.">Revenue</th>
+    <th class="num" title="Cost of sales: all 5xxxx accounts plus 60000 SALARIES &amp; WAGES and 60005 UNION BENEFITS — the exact account set the accountants use. Includes 50701, the WIP adjustment they book at every month-end (hover a cell for the amount).">COGS</th>
+    <th class="num" title="Revenue − COGS.">GP $</th>
+    <th class="num" title="GP ÷ revenue.">GP %</th>
+    <th class="num" title="PCA's WIP change (earned − billed on open jobs, from the WIP snapshots) for the months the accountants have not closed yet — the only WIP the ledger can't see. Closed months already carry their month-end WIP entry inside COGS (50701), so nothing is added for them. ≈ = a bracketing snapshot is missing.">ΔWIP (open mo.)</th>
+    <th class="num" title="Remaining 6xxxx/7xxxx accounts posted to this division's own subaccounts (G&amp;A, insurance, rent…).">Own OH</th>
+    <th class="num" title="This division's share of the corporate overhead pool (GL subaccount 0000, 6xxxx/7xxxx excl 60000/60005), charged by the per-division shares.{% if acc.finance %} Edit shares under Financial Reports → Overhead Allocation.{% endif %}">000 OH</th>
+    <th class="num" title="GP − own overhead. The number division managers usually look at — it ignores both WIP movement and the corporate overhead they consume.">Op income</th>
+    <th class="num" title="The real result: GP + ΔWIP (open months) − own overhead − corporate 000 share. If this is negative, the division's volume doesn't carry its share of the company.">Op (loaded)</th>
+    <th class="num" title="Loaded op income ÷ (revenue + ΔWIP).">Loaded %</th>
+    <th class="num" title="Other 4xxxx income (interest, eBay/misc sales…), shown separately from Sales.">Other inc</th>
+  </tr></thead><tbody>
+  {% for r in pnl_years %}<tr {% if forloop.last %}title="Period-to-date — the year is still open."{% endif %}>
+    <td>{{ r.fiscal_year }}{% if forloop.last %} <span class="muted">YTD</span>{% endif %}</td>
+    <td class="num"><b>{{ r.revenue|money }}</b></td>
+    <td class="num" title="Includes {{ r.wip_booked|signed_money }} of WIP adjustment booked by the accountants (50701).">{{ r.cogs|money }}</td>
+    <td class="num {{ r.gp|posneg }}">{{ r.gp|money }}</td>
+    <td class="num">{{ r.gp_pct|pct }}</td>
+    <td class="num {{ r.dwip|posneg }}">{% if r.dwip != None %}{{ r.dwip|signed_money }}{% if r.wip_reconstructed %}<span class="muted" title="A bracketing WIP snapshot is missing — estimate incomplete.">≈</span>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num muted">{{ r.overhead|money }}</td>
+    <td class="num muted">{% if r.alloc_000 %}{{ r.alloc_000|money }}{% if r.alloc_share %} <span class="muted">{{ r.alloc_share|pct:0 }}</span>{% endif %}{% else %}—{% endif %}</td>
+    <td class="num {{ r.op_income|posneg }}">{{ r.op_income|money }}</td>
+    <td class="num {{ r.op_loaded|posneg }}"><b>{{ r.op_loaded|money }}</b></td>
+    <td class="num muted">{{ r.op_loaded_pct|pct }}</td>
+    <td class="num muted">{{ r.other_income|money }}</td></tr>{% endfor %}
+  </tbody></table></div>
+  <div class="note" style="margin-top:6px">This is the fiscal-period income statement — revenue and cost in the year they were posted, regardless of when jobs closed. It ties to SL's ledger to the penny and is the number to compare with the accountants' spreadsheets. The accountants book the company WIP into COGS at every month-end (50701), so closed years already carry the earned view; <b>ΔWIP</b> adds PCA's estimate only for months not yet closed, and <b>Op (loaded)</b> also subtracts the division's share of corporate (000) overhead. Month and quarter detail with drill-downs: <a href="{% url 'dashboard:finance_pnl' %}">Divisional P&amp;L</a>. Allocation shares are set per fiscal year{% if acc.finance %} and are editable under <a href="{% url 'dashboard:finance_allocations' %}">Financial Reports → Overhead Allocation</a>{% endif %}.</div>
+</div>
+
+<div class="card">
+  <details data-remember="cohorts"><summary><b>Closed-project cohorts by close year</b> <span class="muted">— lifetime job economics grouped by the year the job closed. NOT the fiscal-year P&amp;L: a job closing in January carries all its prior-year revenue into that row. Use it to judge project vintages, not the business year.</span></summary>
+  <div style="overflow:auto;margin-top:8px"><table class="data dense"><thead><tr><th title="Year the projects closed.">Close year</th><th class="num">Jobs</th><th class="num" title="Lifetime billed revenue of jobs closed this year.">Lifetime revenue</th><th class="num" title="Labor (wages+burden) + material + subcontract + other direct.">Direct cost</th><th class="num">GP $</th><th class="num" title="GP ÷ revenue.">GP %</th><th class="num" title="Revenue-weighted sold margin on jobs with a contract value.">Sold GP %</th><th class="num" title="Final margin on that same subset — the gap vs Sold is the preservation.">Final GP % (jobs w/ CV)</th><th class="num" title="PTT field hours.">Hours</th></tr></thead><tbody>
+  {% for r in yearly %}<tr>
+    <td><a href="{% url 'dashboard:project_list' %}?div={{ div_code }}&state=closed&closed_year={{ r.period|date:'Y' }}">{{ r.period|date:"Y" }}</a></td><td class="num">{{ r.n }}</td><td class="num">{{ r.revenue|money }}</td><td class="num">{{ r.cost|money }}</td>
+    <td class="num {{ r.gp|posneg }}">{{ r.gp|money }}</td>
+    <td class="num">{% if r.revenue %}{% widthratio r.gp r.revenue 100 %}%{% else %}—{% endif %}</td>
+    <td class="num muted">{% if r.cv_with %}{% widthratio r.sold_gp_with r.cv_with 100 %}%{% else %}—{% endif %}</td>
+    <td class="num muted">{% if r.rev_with %}{% widthratio r.gp_with r.rev_with 100 %}%{% else %}—{% endif %}</td>
+    <td class="num">{{ r.hours|hours }}</td></tr>{% endfor %}
+  </tbody></table></div></details>
+</div>
+{% include "dashboard/_fin_drill_modal.html" %}
+{% endblock %}
+
+{% block scripts %}
+{{ charts|json_script:"charts" }}
+<script src="{% static 'dashboard/finance_modals.js' %}"></script>
+<script>
+const C = JSON.parse(document.getElementById('charts').textContent);
+// Chart drill-downs: the jobs behind a histogram bar / a stack of overlapping dots open in the shared drill modal
+// (PCADrill, finance_modals.js) reading the division + window this page is showing.
+PCADrill.bind('{% url "dashboard:command_center_jobs" %}');
+const CC_SCOPE = { div: '{{ div_code }}', years: '{{ years }}' };
+const projectUrl = k => '{% url "dashboard:project_detail" "KEY" %}'.replace('KEY', encodeURIComponent(k));
+const pointer = (evt, els) => { evt.native.target.style.cursor = els.length ? 'pointer' : 'default'; };
+const qlabel = p => { const d = new Date(p); return 'Q' + (Math.floor(d.getUTCMonth()/3)+1) + " '" + String(d.getUTCFullYear()).slice(2); };
+new Chart(document.getElementById('c_periods'), {
+  data: { labels: C.periods.map(r => qlabel(r.p)),
+    datasets: [
+      { type: 'bar', label: 'Billed revenue', data: C.periods.map(r => r.rev), backgroundColor: 'rgba(31,94,255,.75)', yAxisID: 'y', borderRadius: 3 },
+      { type: 'bar', label: 'Gross profit', data: C.periods.map(r => r.gp), backgroundColor: 'rgba(23,138,82,.75)', yAxisID: 'y', borderRadius: 3 },
+      { type: 'line', label: 'GP %', data: C.periods.map(r => r.pct), yAxisID: 'y2', borderColor: '#14202e', backgroundColor: '#14202e', tension: .25, pointRadius: 3 },
+      { type: 'line', label: 'Sold GP % (jobs w/ CV)', data: C.periods.map(r => r.sold), yAxisID: 'y2', borderColor: '#b7791f', borderDash: [5,4], pointRadius: 0, tension: .25 },
+    ]},
+  options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+    scales: { y: { ticks: { callback: v => PCA.money(v) }, grid: { color: '#eef2f7' } }, y2: { position: 'right', min: -0.1, max: 0.6, ticks: { callback: v => PCA.pct(v) }, grid: { display: false } }, x: { grid: { display: false } } },
+    plugins: { legend: { position: 'bottom' }, tooltip: { callbacks: { label: c => c.dataset.label + ': ' + (c.dataset.yAxisID === 'y2' ? PCA.pct(c.raw) : PCA.money(c.raw)) + (c.datasetIndex===0 ? ' (' + C.periods[c.dataIndex].n + ' jobs)' : '') } } } }
+});
+new Chart(document.getElementById('c_cost'), { type: 'doughnut',
+  data: { labels: Object.keys(C.cost_mix), datasets: [{ data: Object.values(C.cost_mix), backgroundColor: ['#1f5eff','#6b8cff','#178a52','#b7791f','#8d6e63'], borderWidth: 2 }] },
+  options: { responsive: true, maintainAspectRatio: false, cutout: '58%', plugins: { legend: { position: 'bottom' }, tooltip: { callbacks: { label: c => { const t = c.dataset.data.reduce((a,b)=>a+b,0); return c.label + ': ' + PCA.money(c.raw) + ' (' + (100*c.raw/t).toFixed(1) + '%)'; } } } } }
+});
+const modeColor = { installation: '#1f5eff', joc: '#0e9aa7', tm_ticket: '#b7791f', tm_service: '#e0a030', service_agreement: '#6a3ff0', warranty: '#8d6e63' };
+new Chart(document.getElementById('c_scatter'), { type: 'bubble',
+  data: { datasets: [
+    { label: 'Closed project', data: C.scatter, backgroundColor: C.scatter.map(p => (modeColor[p.m] || '#546e7a') + 'aa'), borderColor: C.scatter.map(p => (modeColor[p.m] || '#546e7a')) },
+    { type: 'line', label: 'Held margin', data: [{x:-0.4,y:-0.4},{x:0.9,y:0.9}], borderColor: '#cbd3de', borderDash: [4,4], pointRadius: 0, fill: false }
+  ]},
+  options: { responsive: true, maintainAspectRatio: false,
+    onHover: (evt, els) => pointer(evt, els.filter(e => e.datasetIndex === 0)),
+    onClick: (evt, els, chart) => {
+      // every dot under the cursor (not just the nearest): one → open the job; a stack → list them in the modal
+      const hits = chart.getElementsAtEventForMode(evt, 'point', { intersect: true }, true).filter(e => e.datasetIndex === 0);
+      if (!hits.length) return;
+      if (hits.length === 1) { window.open(projectUrl(C.scatter[hits[0].index].k), '_blank'); return; }
+      PCADrill.open({ title: hits.length + ' overlapping jobs at this point', q: Object.assign({ keys: hits.map(e => C.scatter[e.index].k).join(',') }, CC_SCOPE) });
+    },
+    scales: { x: { title: { display: true, text: 'Sold GP % (current budget)' }, min: -0.4, max: 0.9, ticks: { callback: v => PCA.pct(v) }, grid: { color: '#eef2f7' } },
+              y: { title: { display: true, text: 'Final GP %' }, min: -0.6, max: 0.95, ticks: { callback: v => PCA.pct(v) }, grid: { color: '#eef2f7' } } },
+    plugins: { legend: { display: false }, tooltip: { displayColors: false, filter: c => c.datasetIndex === 0, callbacks: {
+      title: items => items.length ? items[0].raw.n + '  ' + (items[0].raw.t || '') : '',
+      label: c => { const p = c.raw; if (!p.n) return '';
+        const d = (p.y - p.x) * 100, pts = (d > 0 ? '+' : '') + d.toFixed(1) + ' pts';
+        const dt = p.cd ? new Date(p.cd + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
+        return [ (p.cust || '—') + ' · PM ' + (p.pm || '—'),
+                 'closed ' + dt + ' · ' + (p.m || '').replace('_', ' '),
+                 'contract ' + PCA.money(p.cv) + ' · billed ' + PCA.money(p.rev),
+                 'direct cost ' + PCA.money(p.cost) + ' · GP ' + PCA.money(p.gp) + (p.h != null ? ' · ' + Math.round(p.h).toLocaleString('en-US') + ' h' : ''),
+                 'sold ' + PCA.pct(p.x) + ' → final ' + PCA.pct(p.y) + ' (' + pts + ')' ]; },
+      footer: () => 'click to open the job in a new tab' } } } }
+});
+new Chart(document.getElementById('c_hist'), { type: 'bar',
+  data: { labels: C.hist.labels, datasets: [{ label: 'Projects', data: C.hist.values, backgroundColor: C.hist.labels.map((l,i) => i < 9 ? 'rgba(198,40,40,.7)' : 'rgba(23,138,82,.7)'), borderRadius: 3 }] },
+  options: { responsive: true, maintainAspectRatio: false,
+    onHover: pointer,
+    onClick: (evt, els) => { if (!els.length) return; const i = els[0].index;
+      const band = i === 0 ? 'below −40 pts' : i === 17 ? 'above +40 pts' : C.hist.labels[i].replace('..', ' to ').replace(/-/g, '−') + ' pts';
+      PCADrill.open({ title: 'Margin preservation ' + band + ' · {{ division_label|escapejs }} · closed {{ start|date:"M Y" }} → today', q: Object.assign({ bucket: i }, CC_SCOPE) }); },
+    scales: { x: { title: { display: true, text: 'Final GP % minus sold GP % (points)' }, grid: { display: false } }, y: { grid: { color: '#eef2f7' } } },
+    plugins: { legend: { display: false }, tooltip: { displayColors: false, callbacks: { label: c => c.raw + (c.raw === 1 ? ' project' : ' projects'), footer: () => 'click to list the jobs' } } } }
+});
+</script>
+{% endblock %}

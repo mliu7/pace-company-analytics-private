@@ -1,0 +1,69 @@
+{% extends "dashboard/base.html" %}{% load humanize pca %}
+{% block title %}Vendors · Pace Company Analytics{% endblock %}
+{% block content %}
+<div class="topbar">
+  <div class="title"><h1>Vendors</h1>
+    <small>Everyone we buy from — what we paid each vendor in the window you pick (checks and EFTs cut, voids negative; every year since {{ period.first_year }}), the same window a year earlier beside it, plus today's open AP balance, open purchase orders and material received. Payables settled with a company credit card are shown separately from cash: they clear through the card holding account and the card issuer's own row carries the cash, so nothing is counted twice. Click a vendor for its full page.</small></div>
+  <div class="row">
+    <form method="get"><input type="hidden" name="p" value="{{ period.key }}">{% if period.key == 'custom' %}<input type="hidden" name="from" value="{{ period.custom_from }}"><input type="hidden" name="to" value="{{ period.custom_to }}">{% endif %}<input type="search" name="q" value="{{ q }}" placeholder="Search vendor…" style="font:inherit;padding:6px 10px;border:1px solid var(--line-strong);border-radius:8px;min-width:220px"></form>
+  </div>
+</div>
+
+<div class="card tight" style="margin-bottom:12px">
+  <div class="row" style="gap:6px 8px;flex-wrap:wrap;align-items:center">
+    <b style="margin-right:4px" title="Payments are totalled by check / EFT date inside this window. The prior column is the same window a year earlier.">Paid window</b>
+    <a class="btn small {% if period.key == 'ytd' %}primary{% endif %}" href="?{% qs_without request 'p' 'from' 'to' %}&p=ytd" title="January 1 to today, vs the same span last year.">YTD</a>
+    <a class="btn small {% if period.key == '12mo' %}primary{% endif %}" href="?{% qs_without request 'p' 'from' 'to' %}&p=12mo" title="The last 365 days, vs the 365 before them.">12 mo</a>
+    <span class="muted" style="margin:0 2px">·</span>
+    {% for y in period.years %}<a class="btn small {% if period.key == y|stringformat:'s' %}primary{% endif %}" href="?{% qs_without request 'p' 'from' 'to' %}&p={{ y }}" title="Calendar year {{ y }}, vs {{ y|add:'-1' }}.">{{ y }}</a>{% endfor %}
+    <span class="muted" style="margin:0 2px">·</span>
+    <a class="btn small {% if period.key == 'all' %}primary{% endif %}" href="?{% qs_without request 'p' 'from' 'to' %}&p=all" title="Every payment on record.">All</a>
+    <form method="get" class="row" style="gap:6px;align-items:center;margin-left:auto" title="Any date range, vs the span of the same length just before it.">
+      <input type="hidden" name="p" value="custom">{% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}
+      <span class="muted">Custom</span>
+      <input type="date" name="from" value="{{ period.custom_from|default:period.start|date:'Y-m-d' }}" style="font:inherit;padding:4px 6px;border:1px solid var(--line-strong);border-radius:8px">
+      <span class="muted">→</span>
+      <input type="date" name="to" value="{{ period.custom_to|default:period.end|date:'Y-m-d' }}" style="font:inherit;padding:4px 6px;border:1px solid var(--line-strong);border-radius:8px">
+      <button class="btn small" type="submit">Go</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <h2>{{ rows|length }} vendor{{ rows|length|pluralize }} <small>{% if q %}matching “{{ q }}” · {% endif %}{{ tot.paid_vendors }} paid in {{ period.label }} ({{ period.start|date:"M j, Y" }} – {{ period.end|date:"M j, Y" }}) · <b>{{ tot.paid|money }}</b> from the bank{% if tot.card %} + <b>{{ tot.card|money }}</b> settled by card{% endif %}{% if period.prior_label %} vs {{ tot.prior|money }} {{ period.prior_label }}{% if tot.delta_pct != None %} · <span class="{% if tot.delta > 0 %}warn-ink{% elif tot.delta < 0 %}pos{% endif %}">{{ tot.delta|signed_money }} ({% if tot.delta_pct > 0 %}+{% endif %}{{ tot.delta_pct|pct:0 }})</span>{% endif %}{% endif %} · largest paid first</small></h2>
+  <div class="table-wrap tall"><table class="data dense"><thead><tr>
+    <th>Vendor</th><th>Class</th><th>Terms</th><th>Location</th>
+    <th class="num" title="Cash paid from the bank {{ period.start|date:'M j, Y' }} – {{ period.end|date:'M j, Y' }}: checks, ACH and EFTs drawn on the checking account (voids negative) · payments in brackets (card settlements included in the count).">Paid {{ period.label }}</th>
+    <th class="num" title="Payables settled with a company credit card in the window: the vendor's invoices were cleared through the card holding account (GL 10450) and a voucher to the card issuer took their place — no cash went to this vendor. The card issuer's row shows the cash paid to the card. SL does not record which card on the payment, so none is named.">By card</th>
+    {% if period.prior_label %}<th class="num" title="The same window a year earlier: {{ period.prior_start|date:'M j, Y' }} – {{ period.prior_end|date:'M j, Y' }}.">Prior · {{ period.prior_label }}</th>
+    <th class="num" title="Paid this window minus the prior window, and as a share of the prior. Amber = spending more than before, green = less.">Δ</th>{% endif %}
+    <th class="num" title="Open AP balance right now (vouchers − adjustments).">Open AP</th>
+    <th class="num" title="Open purchase-order value right now (undelivered quantity × unit cost).">Open POs</th>
+    <th class="num" title="Material received in the window (PO receipt lines){% if period.rcpt_partial %} — local receipts start {{ period.rcpt_from|date:'M j, Y' }}, so this window is only partly covered{% endif %}.">Received{% if period.rcpt_partial %} <span class="warn-ink" title="Receipts on record start {{ period.rcpt_from|date:'M j, Y' }}.">partial</span>{% endif %}</th>
+    <th class="num" title="Most recent payment in the window, else the most recent receipt.">Last activity</th>
+  </tr></thead><tbody>
+  {% for r in rows %}<tr>
+    <td class="trunc fluid" style="width:40%;min-width:180px" title="{{ r.name }}"><a href="{% url 'dashboard:finance_vendor' r.id %}">{{ r.name }}</a>{% if r.family %} <span class="ar-chip info" title="Owner-family account: shareholder distributions and family reimbursements, not supplier spend. Kept in every total; never treated as a supplier anomaly.">family</span>{% endif %} <span class="muted mono" style="font-size:11px">{{ r.id }}</span></td>
+    <td class="muted">{{ r.cls }}</td>
+    <td class="muted">{{ r.terms }}</td>
+    <td class="muted">{{ r.city }}</td>
+    <td class="num">{% if r.paid %}<b>{{ r.paid|money }}</b> <span class="muted">({{ r.paid_n }})</span>{% elif r.card %}<span class="muted" title="No cash to this vendor in the window — settled by card.">$0</span> <span class="muted">({{ r.paid_n }})</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num">{% if r.card %}<span class="warn-ink" title="Settled by company credit card{% if r.prior_card %} · {{ r.prior_card|money }} in the prior window{% endif %}.">{{ r.card|money }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+    {% if period.prior_label %}<td class="num muted">{% if r.prior %}{{ r.prior|money }} <span class="muted">({{ r.prior_n }})</span>{% else %}—{% endif %}</td>
+    <td class="num" style="white-space:nowrap">{% if r.prior or r.paid %}<span class="{% if r.delta > 0 %}warn-ink{% elif r.delta < 0 %}pos{% else %}muted{% endif %}">{{ r.delta|signed_money }}{% if r.delta_pct != None %} <small>({% if r.delta_pct > 0 %}+{% endif %}{{ r.delta_pct|pct:0 }})</small>{% elif r.paid %} <small>new</small>{% endif %}</span>{% else %}<span class="muted">—</span>{% endif %}</td>{% endif %}
+    <td class="num">{% if r.open_ap %}{{ r.open_ap|money }}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num">{% if r.open_po %}{{ r.open_po|money }} <span class="muted">({{ r.open_po_n }})</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num">{% if r.rcvd %}{{ r.rcvd|money }}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num muted">{% if r.last_paid %}{{ r.last_paid|date:"M j, Y" }}{% elif r.last_rcvd %}{{ r.last_rcvd|date:"M j, Y" }}{% else %}—{% endif %}</td>
+  </tr>{% empty %}<tr><td colspan="12" class="empty">No vendors match.</td></tr>{% endfor %}
+  </tbody>{% if rows %}<tfoot><tr>
+    <td>Total</td><td></td><td></td><td></td>
+    <td class="num">{{ tot.paid|money }}</td>
+    <td class="num warn-ink">{% if tot.card %}{{ tot.card|money }}{% endif %}</td>
+    {% if period.prior_label %}<td class="num">{{ tot.prior|money }}</td><td class="num {% if tot.delta > 0 %}warn-ink{% elif tot.delta < 0 %}pos{% endif %}">{{ tot.delta|signed_money }}{% if tot.delta_pct != None %} <small>({% if tot.delta_pct > 0 %}+{% endif %}{{ tot.delta_pct|pct:0 }})</small>{% endif %}</td>{% endif %}
+    <td class="num">{{ tot.open_ap|money }}</td>
+    <td class="num">{{ tot.open_po|money }}</td>
+    <td class="num">{{ tot.rcvd|money }}</td><td></td>
+  </tr></tfoot>{% endif %}</table></div>
+</div>
+{% endblock %}

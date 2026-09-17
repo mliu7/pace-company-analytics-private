@@ -1,0 +1,62 @@
+{% extends "dashboard/base.html" %}{% load humanize pca documents %}
+{% block title %}{{ f.name }} · Documents · Pace Company Analytics{% endblock %}
+{% block extra_css %}{% include "documents/_css.html" %}{% endblock %}
+{% block content %}
+<div class="topbar"><div class="title"><h1 style="word-break:break-word">{{ f.name }}</h1>
+  <div style="margin:6px 0 4px"><a class="btn small" id="doc-back" href="{% if back_url %}{{ back_url }}{% else %}{% url 'documents:documents_page' %}{% endif %}" title="Back to the page you came from" onclick="if(!this.dataset.ref&&history.length>1){history.back();return false;}" {% if back_url %}data-ref="1"{% endif %}>← Back</a></div>
+  <small><a href="{% url 'documents:documents_page' %}">Documents</a> › {% if f.repo.is_share %}P: drive{% else %}{{ f.repo.name }}{% endif %}{% if f.folder_path %} › <span class="mono">{{ f.folder_path }}</span>{% endif %}{% if f.is_deleted %} · <span class="pill bad">deleted at the source</span>{% endif %}</small></div>
+  <div class="row">
+    {% if f.open_url %}<a class="btn primary small" href="{{ f.open_url }}" target="_blank" rel="noopener" title="{% if f.repo.is_share %}Opens the file on the P: drive with your own credentials (smb://).{% else %}Opens the file in SharePoint with your own login.{% endif %}">Open {% if f.repo.is_share %}on P:{% else %}in SharePoint{% endif %} ↗</a>{% endif %}
+    {% if not f.is_deleted %}<a class="btn small" href="{% url 'documents:document_content' f.id %}?download=1" title="Download a copy through PCA (cached, read-only).">Download</a>{% endif %}
+  </div></div>
+
+<div class="grid two" style="grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);margin-bottom:14px">
+  <div class="card" id="preview">
+    {% if preview == 'pdf' %}<iframe class="doc-frame" src="{% url 'documents:document_content' f.id %}#view=FitH" title="{{ f.name }}"></iframe>
+    {% elif preview == 'image' %}<img class="doc-img" src="{% url 'documents:document_content' f.id %}" alt="{{ f.name }}">
+    {% elif preview == 'html' %}<iframe class="doc-frame" sandbox src="{% url 'documents:document_html' f.id %}" title="{{ f.name }}"></iframe>
+    {% elif preview == 'page' %}<div class="muted" style="font-size:12px;margin-bottom:6px">First page (QuickLook) — open the file for the rest.</div><img class="doc-img" src="{% url 'documents:document_page' f.id %}" alt="{{ f.name }} — first page">
+    {% elif preview == 'text' %}<div class="muted" style="font-size:12px;margin-bottom:6px">Extracted text ({{ text.extractor }}{% if text.pages %} · {{ text.pages }} page{{ text.pages|pluralize }}{% endif %} · {{ text.chars|intcomma }} characters{% if text.truncated %} · truncated{% endif %})</div><pre class="doc-text">{{ text_shown }}</pre>{% if text.chars > 30000 and not full %}<a href="?full=1">Show all {{ text.chars|intcomma }} characters</a>{% endif %}
+    {% else %}<div class="empty">No in-app preview for this {{ kind }} file{% if f.size > 52428800 %} (over the 50 MB cap){% endif %} — open it at the source.</div>{% endif %}
+  </div>
+  <div>
+    <div class="card tight" style="margin-bottom:12px"><h2>About this file</h2>
+      <dl class="kv">
+        <dt>Type</dt><dd><span class="tag">{{ f.ext|upper|default:"—" }}</span> {{ kind }}</dd>
+        <dt>Size</dt><dd>{{ f.size|filesize }}</dd>
+        <dt title="The source's own modified time.">Modified</dt><dd>{% if f.mtime %}{{ f.mtime|date:"M j, Y g:i a" }}{% if f.modified_by %} by {{ f.modified_by }}{% endif %}{% else %}—{% endif %}</dd>
+        {% if f.created %}<dt>Created</dt><dd>{{ f.created|date:"M j, Y" }}</dd>{% endif %}
+        <dt>Location</dt><dd>{% if f.repo.is_share %}P: drive{% else %}{{ f.repo.name }}{% endif %}</dd>
+        <dt>Path</dt><dd class="mono" style="word-break:break-all">{{ f.path }}</dd>
+        {% if f.unc %}<dt title="Paste into File Explorer on a Windows desktop.">Windows path</dt><dd class="mono" style="word-break:break-all">{{ f.unc }}</dd>{% endif %}
+        {% if smb %}<dt>Mac path</dt><dd class="mono" style="word-break:break-all"><a href="{{ smb }}">{{ smb }}</a></dd>{% endif %}
+        <dt title="Whether text was extracted for search and the proposal checks.">Text</dt><dd>{% if f.text_status == 'ok' %}<span class="pill good">extracted</span>{% elif f.text_status == 'failed' %}<span class="pill bad" title="{{ f.text_error }}">failed — {{ f.text_error }}</span>{% elif f.text_status == 'skipped' %}<span class="pill" title="{{ f.text_error }}">skipped</span>{% else %}<span class="pill">not yet</span>{% endif %}</dd>
+        <dt>Indexed</dt><dd class="muted">{{ f.indexed_at|date:"M j, g:i a"|default:"—" }}</dd>
+      </dl></div>
+
+    <div class="card tight" style="margin-bottom:12px"><h2>Linked to <small>{% if f.link_via == 'folder' %}inherited from the folder{% elif f.link_via == 'file' %}from the file name{% else %}nothing yet{% endif %}</small></h2>
+      {% if f.linked_project or f.linked_bid or f.linked_customer %}<div style="margin-bottom:8px">
+        {% if f.linked_project %}<a class="doc-target" href="{% url 'dashboard:project_detail' f.linked_project.canonical_project_number %}"><b>{{ f.linked_project.display_number }}</b> {{ f.linked_project.title }}</a>{% endif %}
+        {% if f.linked_bid %}<a class="doc-target" href="{% url 'bids:bid_detail' f.linked_bid.id %}">bid · {{ f.linked_bid.client_name }} · {{ f.linked_bid.project_name }}</a>{% endif %}
+        {% if f.linked_customer %}<a class="doc-target" href="{% url 'dashboard:customer_detail' f.linked_customer.sl_customer_id %}">{{ f.linked_customer.canonical_name }}</a>{% endif %}
+        <span class="tag {{ f.link_confidence|conf_label }}" title="{{ rules|getitem:f.link_rule|first }}">{{ f.link_rule|nice }} · {{ f.link_confidence|pct:0 }}</span></div>{% endif %}
+      {% if own_links or folder_links %}<table class="data dense"><thead><tr><th>Candidate</th><th>Rule</th><th class="num" title="How sure the rule is; under {{ low|pct:0 }} is marked for a check.">Conf.</th><th>State</th>{% if can_link %}<th></th>{% endif %}</tr></thead><tbody>
+        {% for l in own_links %}{% include "documents/_link_row.html" with l=l where="file" %}{% endfor %}
+        {% for l in folder_links %}{% include "documents/_link_row.html" with l=l where=l.folder.name %}{% endfor %}
+      </tbody></table>{% else %}<div class="muted" style="font-size:12.5px">No rule matched this file or its folders.</div>{% endif %}
+      {% if can_link %}<form method="post" action="{% url 'documents:document_link_state' %}" class="row" style="margin-top:8px;gap:6px">{% csrf_token %}<input type="hidden" name="file" value="{{ f.id }}"><input type="hidden" name="next" value="{{ next_url }}">
+        <input name="project" placeholder="SL job number" style="width:140px;font:inherit;padding:4px 8px;border:1px solid var(--line-strong);border-radius:8px" title="Type the SL project number (the trailing 000000 counts) to link this file by hand — recorded as a confirmed manual link."><button class="btn small" type="submit">Link to job</button></form>{% endif %}
+    </div>
+
+    {% if findings %}<div class="card tight" style="margin-bottom:12px"><h2>Findings <small>proposal checks · <a href="{% url 'documents:documents_findings' %}?file={{ f.id }}&severity=all&status=all">queue</a></small></h2>
+      <table class="data dense"><thead><tr><th>Sev.</th><th>Check</th><th>Message</th><th>Status</th></tr></thead><tbody>
+      {% for x in findings %}<tr><td><span class="pill {% if x.severity == 'error' %}bad{% elif x.severity == 'warn' %}warn{% else %}info{% endif %}">{{ x.severity }}</span></td><td>{{ checks|getitem:x.check_id|first }}</td>
+        <td>{{ x.message }}{% if x.evidence.quote %}<div class="muted" style="font-size:12px">{% if x.evidence.page %}p.{{ x.evidence.page }} · {% endif %}“{{ x.evidence.quote }}”</div>{% endif %}</td>
+        <td><span class="tag">{{ x.status }}</span></td></tr>{% endfor %}</tbody></table></div>{% endif %}
+
+    {% if related %}<div class="card tight"><h2>Same folder <small>{{ related|length }} other file{{ related|length|pluralize }}</small></h2>
+      <div class="table-wrap" style="max-height:300px"><table class="data dense"><tbody>{% for r in related %}<tr><td><a href="{% url 'documents:document_preview' r.id %}">{{ r.name }}</a></td><td class="num muted">{{ r.mtime|date:"M j, Y" }}</td></tr>{% endfor %}</tbody></table></div></div>{% endif %}
+  </div>
+</div>
+{% if preview != 'text' and text %}<div class="card"><h2>Extracted text <small>{{ text.extractor }}{% if text.pages %} · {{ text.pages }} page{{ text.pages|pluralize }}{% endif %} · {{ text.chars|intcomma }} characters{% if text.truncated %} · truncated at the cap{% endif %}</small></h2><pre class="doc-text">{{ text_shown }}</pre>{% if text.chars > 30000 and not full %}<a href="?full=1">Show all {{ text.chars|intcomma }} characters</a>{% endif %}</div>{% endif %}
+{% endblock %}

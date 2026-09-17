@@ -1,0 +1,25 @@
+{% extends "dashboard/base.html" %}{% load humanize pca %}
+{% block title %}{{ c.canonical_name }} · Pace Company Analytics{% endblock %}
+{% block content %}{% load extension_hooks %}{% extension_cards "customer" c %}
+<div class="crumbs"><a href="{% url 'dashboard:customers' %}">Customers</a></div>
+<div class="topbar"><div class="title"><h1>{{ c.canonical_name }} <span class="muted" style="font-size:14px;font-weight:400">{{ c.sl_customer_id }}</span></h1>
+  <small>{{ c.market_sector|default:"sector unassigned in SL" }} · {{ c.city }} {{ c.state }} · SL status {{ c.sl_status }} · default rep {{ c.default_salesperson_code }}{% if c.is_general_contractor %} · general contractor (end user is inferred from titles){% endif %}</small></div></div>
+<div class="grid kpi" style="margin-bottom:14px">
+  <div class="card kpi"><div class="label">Closed jobs (all divisions)</div><div class="value">{{ closed|length }}</div><div class="sub">{{ open|length }} open now</div></div>
+  <div class="card kpi"><div class="label">Revenue</div><div class="value">{{ rev|money_k }}</div></div>
+  {% if acc.margins %}<div class="card kpi"><div class="label">Gross profit</div><div class="value {{ gp|posneg }}">{{ gp|money_k }}</div><div class="sub">{{ gp_pct|pct }}</div></div>{% endif %}
+  {% if acc.ratings %}{% for r in ratings %}<div class="card kpi"><div class="label">Adj. {{ r.metric_name|nice }} <span class="tag {{ r.publication_status }}">{{ r.publication_status }}</span></div><div class="value sm {{ r.adjusted_effect|posneg }}">{{ r.adjusted_effect|pts }}</div><div class="sub">raw {{ r.raw_effect|pts }} · n {{ r.project_count }} · rel {{ r.reliability_score|pct:0 }}</div></div>{% endfor %}{% endif %}
+</div>
+{% include "documents/_customer_documents.html" %}
+<div class="grid three" style="margin-bottom:14px">
+  <div class="card"><h2>By close year <small title="Lifetime job economics grouped by the year the job closed — not a fiscal-year P&L.">closed-job cohorts</small></h2><table class="data"><thead><tr><th>Year</th><th class="num">Jobs</th><th class="num">Revenue</th>{% if acc.margins %}<th class="num">GP $</th><th class="num">GP %</th>{% endif %}</tr></thead><tbody>{% for r in by_year %}<tr><td>{{ r.y }}</td><td class="num">{{ r.n }}</td><td class="num">{{ r.rev|money }}</td>{% if acc.margins %}<td class="num {{ r.gp|posneg }}">{{ r.gp|money }}</td><td class="num">{% if r.rev %}{% widthratio r.gp r.rev 100 %}%{% endif %}</td>{% endif %}</tr>{% endfor %}</tbody></table></div>
+  <div class="card"><h2>By project manager</h2><table class="data"><thead><tr><th>PM</th><th class="num">Jobs</th><th class="num">Revenue</th>{% if acc.margins %}<th class="num">GP %</th>{% endif %}</tr></thead><tbody>{% for r in by_pm %}<tr><td><a href="{% url 'dashboard:person_detail' r.employee_key %}">{{ r.canonical_name }}</a></td><td class="num">{{ r.n }}</td><td class="num">{{ r.rev|money_k }}</td>{% if acc.margins %}<td class="num">{% if r.rev %}{% widthratio r.gp r.rev 100 %}%{% endif %}</td>{% endif %}</tr>{% endfor %}</tbody></table></div>
+  <div class="card"><h2>By solution</h2><table class="data"><thead><tr><th>Solution</th><th class="num">Jobs</th><th class="num">Revenue</th>{% if acc.margins %}<th class="num">GP %</th>{% endif %}</tr></thead><tbody>{% for r in by_solution %}<tr><td>{{ r.k|nice|default:"unknown" }}</td><td class="num">{{ r.n }}</td><td class="num">{{ r.rev|money_k }}</td>{% if acc.margins %}<td class="num">{% if r.rev %}{% widthratio r.gp r.rev 100 %}%{% endif %}</td>{% endif %}</tr>{% endfor %}</tbody></table></div>
+</div>
+{% if acc.finance and ar %}{% include "dashboard/_customer_ar.html" %}{% endif %}
+{% if can_customer_payments and pay %}{% include "dashboard/_customer_payments.html" %}{% endif %}
+{% if acc.sales010 and s010 %}{% include "dashboard/_customer_sales010.html" %}{% endif %}
+<div class="card" id="customer-jobs"><h2>Projects <small>{{ jt.n_open }} active · {{ jt.n_closed }} completed · the WIP by Job view, to date: WIP as it stands today, result from each job's start (Adj. GP = GP + WIP) · <a href="{% url 'dashboard:finance_wip' %}?q={{ c.canonical_name|urlencode }}" title="This customer's open jobs on the WIP by Job page, where any month or year can be chosen.">WIP by Job</a></small></h2>
+  {% include "dashboard/_job_table.html" %}
+</div>
+{% endblock %}

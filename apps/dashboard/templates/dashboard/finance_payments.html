@@ -1,0 +1,134 @@
+{% extends "dashboard/base.html" %}{% load humanize pca %}
+{% block title %}Payments Received {{ day|date:"M j, Y" }} · Pace Company Analytics{% endblock %}
+{% block extra_css %}
+/* Fixed column widths (Owner, 2026-09-11): the columns never move when a payment's invoice rows are shown or hidden.
+   The widths come from the colgroup, never from the rows on screen; long text truncates and the full text is the hover. */
+#paytable { table-layout: fixed; width: 100%; min-width: 1200px; }
+#paytable th, #paytable td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#paytable tr.pay-group td .ph { color: var(--muted); font-weight: 400; }
+{% endblock %}
+{% block content %}
+<div class="topbar">
+  <div class="title"><h1>Payments received</h1>
+    <small>Daily cash receipts and the invoices they paid — the in-app version of the "Payment Applications" email (SL report 08820, verified to the penny). Day = the payment's entry date, like the emailed report; same-day applications to older payments are in the section at the bottom.</small></div>
+  <div class="row">
+    {% if prev_day %}<a class="btn small" href="?day={{ prev_day|date:'Y-m-d' }}" title="Previous day with payments.">← {{ prev_day|date:"M j" }}</a>{% endif %}
+    <form method="get" style="display:inline"><input type="date" name="day" value="{{ day|date:'Y-m-d' }}" onchange="this.form.submit()" style="font:inherit;padding:5px 8px;border:1px solid var(--line-strong);border-radius:8px" title="Jump to any date (~14 months of history)."></form>
+    {% if next_day %}<a class="btn small" href="?day={{ next_day|date:'Y-m-d' }}" title="Next day with payments.">{{ next_day|date:"M j" }} →</a>{% endif %}
+  </div>
+</div>
+
+<div class="grid four" style="margin-bottom:12px">
+  <div class="card kpi"><div class="label">Received {{ day|date:"D M j" }}</div><div class="value">{{ totals.received|money }}</div><div class="sub">{{ totals.n }} payment{{ totals.n|pluralize }} · {{ totals.customers }} customer{{ totals.customers|pluralize }}</div></div>
+  <div class="card kpi"><div class="label" title="Portion of today's payments already applied to invoices.">Applied</div><div class="value sm">{{ totals.applied|money }}</div><div class="sub">{% if totals.unapplied %}<span class="warn-ink">{{ totals.unapplied|money }} not yet applied</span>{% else %}fully applied{% endif %}</div></div>
+  <div class="card kpi"><div class="label" title="Applications entered today against payments received on earlier days — the emailed report doesn't show these.">Applied to older payments</div><div class="value sm">{{ totals.late|money }}</div><div class="sub">{{ late_apps|length }} application{{ late_apps|length|pluralize }}</div></div>
+  <div class="card"><div class="label muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;font-weight:600">Receipts · trailing 45 days</div><div class="chart" style="height:66px"><canvas id="c_recv"></canvas></div></div>
+</div>
+
+<div class="card">
+  <h2>Payments <small>{{ day|date:"D, M j, Y" }} · largest first · every dollar column aligned</small>
+    <span style="margin-left:auto"><a href="#" class="btn small" onclick="payToggleAll(false);return false" title="Hide invoice rows, keep one row per payment.">Collapse all</a>
+    <a href="#" class="btn small" onclick="payToggleAll(true);return false">Expand all</a></span></h2>
+  <div style="overflow:auto"><table class="data dense pay-table" id="paytable">
+  <colgroup><col><col style="width:80px"><col style="width:80px"><col style="width:140px"><col style="width:240px"><col style="width:64px"><col style="width:130px"><col style="width:112px"><col style="width:98px"><col style="width:128px"></colgroup>
+  <thead><tr>
+    <th title="Payment (bold row): customer and payment reference — WT##### = wire batch, numeric = check number. Invoice rows sit beneath their payment.">Customer / invoice</th>
+    <th class="num" title="Invoice date. Payment rows: the date when every invoice shares it, else (multiple).">Inv date</th>
+    <th class="num" title="Invoice due date. Payment rows: the date when every invoice shares it, else (multiple).">Due</th>
+    <th title="Whether the cash was applied on time or how late vs the due date. Payment rows: the timeframe when every invoice shares it, else the average days late across the invoices, marked (avg.) — on-time invoices count as 0.">Paid</th>
+    <th title="Project the invoice bills. (SO1 Order) = a 010 hardware order with no job. Payment rows: the project when every invoice bills the same one, (SO1 Order) when every invoice is one, else (multiple). Click to open the job.">Project</th>
+    <th class="num" title="The project's PM % complete — how far along the work is. Payment rows: shown when every invoice bills the same project.">% done</th>
+    <th class="num" title="How much of the project's contract value has been billed so far. Payment rows: shown when every invoice bills the same project.">Billed/CV</th>
+    <th class="num" title="Invoice original amount. Payment rows: the sum over the payment's invoices.">Invoice amt</th>
+    <th class="num" title="Invoice balance still open after this application. Payment rows: the sum over the payment's invoices.">Still open</th>
+    <th class="num" title="Payment rows: total received. Invoice rows: amount of the payment applied to that invoice.">Amount</th>
+  </tr></thead><tbody>
+  {% for g in groups %}
+  <tr class="pay-group" data-g="{{ forloop.counter }}" style="white-space:nowrap" onclick="payToggle({{ forloop.counter }})" title="Click to show or hide this payment's invoices.">
+    <td><span class="pay-caret" id="caret-{{ forloop.counter }}">▾</span>
+      {% if g.p.customer %}<a href="{% url 'dashboard:customer_detail' g.p.customer.sl_customer_id %}" onclick="event.stopPropagation()">{{ g.p.customer_name }}</a>{% else %}{{ g.p.customer_name|default:g.p.customer_id_raw }}{% endif %}
+      <span class="muted mono" style="font-weight:400">{{ g.p.ref_nbr }}</span>
+      {% if g.apps|length > 1 %}<span class="muted" style="font-weight:400">· {{ g.apps|length }} inv</span>{% endif %}
+      {% if g.p.balance > 0 %}<span class="tag moderate" title="Received but not yet applied to invoices.">{{ g.p.balance|money }} unapplied</span>{% endif %}</td>
+    <td class="num muted" {% if g.s.inv_range %}title="{{ g.s.inv_range }}"{% endif %}>{% if g.s.inv_multi %}<span class="ph">(multiple)</span>{% elif g.s.inv_date %}{{ g.s.inv_date|date:"M j y" }}{% endif %}</td>
+    <td class="num muted">{% if g.s.due_multi %}<span class="ph">(multiple)</span>{% elif g.s.due %}{{ g.s.due|date:"M j y" }}{% endif %}</td>
+    <td {% if g.s.paid.title %}title="{{ g.s.paid.title }}"{% endif %}>{% if g.s.paid.label %}<span class="{{ g.s.paid.cls }}">{{ g.s.paid.label }}</span>{% endif %}</td>
+    <td {% if g.s.project_mode == 'one' %}title="{{ g.s.project.display_number }} {{ g.s.project.title }}"{% elif g.s.project_mode == 'multiple' %}title="{{ g.s.projects_title }}"{% elif g.s.project_mode == 'so1' %}title="Every invoice on this payment is a 010 hardware (SO1) order with no job."{% endif %}>{% if g.s.project_mode == 'one' %}<a href="{% url 'dashboard:project_detail' g.s.project.canonical_project_number %}" onclick="event.stopPropagation()">{{ g.s.project.display_number }}</a> <span class="muted" style="font-weight:400">{{ g.s.project.title }}</span>{% elif g.s.project_mode == 'so1' %}<span class="ph">(SO1 Order)</span>{% elif g.s.project_mode == 'multiple' %}<span class="ph">(multiple)</span>{% endif %}</td>
+    <td class="num">{% if g.s.project_mode == 'one' %}{{ g.s.project.pm_percent_complete|pct:0 }}{% endif %}</td>
+    <td class="num">{% if g.s.project_mode == 'one' and g.s.project.contract_value %}<span title="Billed {{ g.s.project.billed_revenue|money }} of {{ g.s.project.contract_value|money }} contract value.">{% widthratio g.s.project.billed_revenue g.s.project.contract_value 100 %}% <span class="muted" style="font-weight:400">of {{ g.s.project.contract_value|money_k }}</span></span>{% endif %}</td>
+    <td class="num">{% if g.apps %}{{ g.s.inv_amt|money:2 }}{% endif %}</td>
+    <td class="num {% if g.s.open %}warn-ink{% else %}muted{% endif %}">{% if g.apps %}{{ g.s.open|money }}{% endif %}</td>
+    <td class="num"><b>{{ g.p.orig_amt|money:2 }}</b></td>
+  </tr>
+  {% for a in g.apps %}
+  <tr class="pay-inv" data-g="{{ forloop.parentloop.counter }}">
+    <td class="pay-indent mono" title="{{ a.invoice_ref }}{% if a.invoice_desc %} · {{ a.invoice_desc }}{% endif %}">{{ a.invoice_ref }}{% if a.invoice_type != 'IN' %} <span class="tag">{{ a.invoice_type }}</span>{% endif %}
+      {% if a.pct_billed != None and a.pct_billed < 0.999 %}<span class="tag" title="Partial payment: {{ a.pct_billed|pct:0 }} of the invoice.">partial</span>{% endif %}
+      {% if a.date_appl != g.p.doc_date %}<span class="muted" style="font-size:11px" title="Applied on a different day than the payment was received.">applied {{ a.date_appl|date:"M j" }}</span>{% endif %}
+      {% if not a.project and a.invoice_desc %}<span class="muted" style="font-size:11px" title="{{ a.invoice_desc }}">{{ a.invoice_desc }}</span>{% endif %}</td>
+    <td class="num muted">{{ a.invoice_date|date:"M j y" }}</td>
+    <td class="num muted">{{ a.due_date|date:"M j y" }}</td>
+    <td>{% if a.days_late != None %}{% if a.days_late > 0 %}<span class="neg" title="Applied {{ a.days_late }} day{{ a.days_late|pluralize }} after the {{ a.due_date|date:'M j, Y' }} due date.">{{ a.paid_label }}</span>{% else %}<span class="pos" title="Applied {% if a.days_late < 0 %}{{ a.days_late|absolute }} day{{ a.days_late|absolute|pluralize }} before{% else %}on{% endif %} the {{ a.due_date|date:'M j, Y' }} due date.">on time</span>{% endif %}{% endif %}</td>
+    <td {% if a.project %}title="{{ a.project.display_number }} {{ a.project.title }}"{% elif a.is_so1 %}title="010 hardware order {{ a.order_nbr }} — no job."{% endif %}>{% if a.project %}<a href="{% url 'dashboard:project_detail' a.project.canonical_project_number %}">{{ a.project.display_number }}</a> <span class="muted">{{ a.project.title }}</span>{% elif a.is_so1 %}<span class="muted">(SO1 Order)</span> {% if a.cnet_number and acc.sales010 %}<a href="{% url 'dashboard:sales010_order_detail' a.cnet_number %}" class="mono" style="font-size:11px">{{ a.order_nbr }}</a>{% else %}<span class="muted mono" style="font-size:11px">{{ a.order_nbr }}</span>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num">{% if a.project %}{{ a.proj_pct|pct:0 }}{% endif %}</td>
+    <td class="num">{% if a.project and a.proj_cv %}<span title="Billed {{ a.proj_billed|money }} of {{ a.proj_cv|money }} contract value.">{% widthratio a.proj_billed a.proj_cv 100 %}% <span class="muted">of {{ a.proj_cv|money_k }}</span></span>{% endif %}</td>
+    <td class="num muted">{{ a.invoice_amt|money:2 }}</td>
+    <td class="num {% if a.invoice_balance %}warn-ink{% else %}muted{% endif %}">{{ a.invoice_balance|default_if_none:0|money }}</td>
+    <td class="num">{{ a.applied|money:2 }}{% if a.discount %} <span class="muted" title="Discount given.">−{{ a.discount|money:2 }}</span>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  {% empty %}<tr><td colspan="10" class="empty">No payments received on {{ day|date:"M j, Y" }}. Use the arrows above to jump to the nearest day with activity.</td></tr>{% endfor %}
+  </tbody>
+  {% if groups %}<tfoot>
+    <tr><td>Total · {{ totals.n }} payment{{ totals.n|pluralize }}</td>
+      <td></td><td></td><td></td><td></td><td></td><td></td>
+      <td class="num" title="Sum of the invoice amounts on the day's payments.">{{ totals.inv_amt|money:2 }}</td>
+      <td class="num" title="Sum of what is still open on those invoices.">{{ totals.open|money }}</td>
+      <td class="num">{{ totals.received|money:2 }}</td></tr>
+    {% if totals.unapplied %}<tr><td class="muted">of which not yet applied to any invoice</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td class="num warn-ink">{{ totals.unapplied|money:2 }}</td></tr>{% endif %}
+  </tfoot>{% endif %}
+  </table></div>
+</div>
+
+{% if late_apps %}
+<div class="card" style="margin-top:12px">
+  <h2>Applied today against older payments <small>{{ late_apps|length }} application{{ late_apps|length|pluralize }} — cash that arrived earlier, matched to invoices today; the emailed report omits these.</small></h2>
+  <div style="overflow:auto"><table class="data dense"><thead><tr>
+    <th>Payment</th><th>Customer</th><th>Invoice</th><th>Project</th><th class="num">% done</th><th class="num">Billed/CV</th><th class="num" style="min-width:110px">Applied</th>
+  </tr></thead><tbody>
+  {% for a in late_apps %}<tr>
+    <td class="mono">{{ a.payment_ref }}</td>
+    <td>{{ a.customer_id_raw }}</td>
+    <td class="mono">{{ a.invoice_ref }}</td>
+    <td class="trunc fluid" style="width:45%">{% if a.project %}<a href="{% url 'dashboard:project_detail' a.project.canonical_project_number %}">{{ a.project.display_number }}</a> <span class="muted" title="{{ a.project.title }}">{{ a.project.title }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num">{% if a.project %}{{ a.proj_pct|pct:0 }}{% endif %}</td>
+    <td class="num">{% if a.project and a.proj_cv %}{% widthratio a.project.billed_revenue a.proj_cv 100 %}% <span class="muted">of {{ a.proj_cv|money_k }}</span>{% endif %}</td>
+    <td class="num">{{ a.applied|money:2 }}</td>
+  </tr>{% endfor %}
+  </tbody><tfoot><tr><td>Total</td><td></td><td></td><td></td><td></td><td></td><td class="num">{{ totals.late|money:2 }}</td></tr></tfoot></table></div>
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+{{ charts|json_script:"paycharts" }}
+<script>
+function payToggle(g) {
+  document.querySelectorAll('.pay-inv[data-g="' + g + '"]').forEach(tr => tr.classList.toggle('pay-hidden'));
+  const c = document.getElementById('caret-' + g);
+  if (c) c.textContent = c.textContent === '▾' ? '▸' : '▾';
+}
+function payToggleAll(open, save) {   // Collapse all / Expand all is remembered across days (PCA.pref, base.html)
+  document.querySelectorAll('.pay-inv').forEach(tr => tr.classList.toggle('pay-hidden', !open));
+  document.querySelectorAll('.pay-caret').forEach(c => c.textContent = open ? '▾' : '▸');
+  if (save !== false) PCA.setPref('expanded', open);
+}
+if (typeof PCA.pref('expanded') === 'boolean') payToggleAll(PCA.pref('expanded'), false);
+const PC = JSON.parse(document.getElementById('paycharts').textContent);
+new Chart(document.getElementById('c_recv'), { type: 'bar',
+  data: { labels: PC.recent.map(r => r.d.slice(5)), datasets: [
+    { label: 'Received', data: PC.recent.map(r => r.amt), backgroundColor: 'rgba(23,138,82,.75)', borderRadius: 2 } ] },
+  options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false },
+      tooltip: { callbacks: { title: c => PC.recent[c[0].dataIndex].d, label: c => '$' + Math.round(c.raw).toLocaleString() + ' · ' + PC.recent[c.dataIndex].n + ' payments' } } },
+    scales: { x: { display: false }, y: { display: false } } } });
+</script>
+{% endblock %}

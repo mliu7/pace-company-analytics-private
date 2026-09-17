@@ -1,0 +1,297 @@
+{% load static pca %}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Pace Company Analytics{% endblock %}</title>
+<link rel="icon" type="image/png" sizes="64x64" href="{% static 'dashboard/favicon.png' %}">
+<link rel="apple-touch-icon" href="{% static 'dashboard/pace-logo-192.png' %}">
+<link rel="stylesheet" href="{% static 'dashboard/app.css' %}?v={{ ASSET_VERSION }}">
+<script src="{% static 'dashboard/vendor/chart.umd.js' %}"></script>
+<style>{% block extra_css %}{% endblock %}</style>
+</head>
+<body data-page="{{ nav }}">
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="brand-mark">
+        <img class="logo" src="{% static 'dashboard/pace-logo-192.png' %}" alt="Pace" width="36" height="36">
+      </span>
+      <div class="name">
+        <span class="brand-title">Pace</span>
+        <span class="brand-subtitle">Company Analytics</span>
+      </div>
+      <button type="button" class="nav-toggle" id="navtoggle" title="Collapse navigation" aria-label="Collapse navigation">‹</button>
+    </div>
+    {% if acc.account %}<div class="gsearch" id="gsearch">
+      <button type="button" class="gsearch-rail" id="gsearch-rail" title="Search (⌘K)" aria-label="Search">⌕</button>
+      <label class="gsearch-box" title="Search projects, people, customers, vendors, orders and pages — ⌘K or / from anywhere">
+        <span class="gsearch-ico">⌕</span>
+        <input id="gsearch-input" type="search" placeholder="Search…" autocomplete="off" spellcheck="false" aria-label="Search"
+               data-suggest="{% url 'dashboard:search_suggest' %}" data-page="{% url 'dashboard:search' %}">
+        <kbd class="gsearch-kbd">⌘K</kbd>
+      </label>
+    </div>{% endif %}
+    {% with g=nav|nav_group %}
+    <nav class="nav">
+      {% if acc.projects and acc.margins %}<a href="{% url 'dashboard:project_snapshot' %}" class="pin {% if nav == 'project-snapshot' %}active{% endif %}"><span class="ico">◧</span> Project Snapshot</a>{% endif %}
+      {% if acc.bids %}<a href="{% url 'bids:bids_snapshot' %}" class="pin {% if nav == 'pipeline-snapshot' %}active{% endif %}"><span class="ico">◫</span> Pipeline Snapshot</a>{% endif %}
+      {% if acc.finance %}<a href="{% url 'dashboard:finance_daily' %}" class="pin {% if nav == 'finance-daily' %}active{% endif %}"><span class="ico">$</span> Daily Financial Snapshot</a>{% endif %}
+      {% if acc.command_center %}<a href="{% url 'dashboard:command_center' %}" class="pin {% if nav == 'home' %}active{% endif %}"><span class="ico">◈</span> Command Center</a>{% endif %}
+
+      {% if acc.projects %}<details class="nav-group" data-group="projects" open{% if g == 'projects' %} data-current{% endif %}>
+        <summary>Projects</summary>
+        <a href="{% url 'dashboard:project_list' %}" class="{% if nav == 'projects' %}active{% endif %}"><span class="ico">▤</span> All Projects</a>
+        {% if acc.margins %}<a href="{% url 'dashboard:forecast' %}" class="{% if nav == 'forecast' %}active{% endif %}"><span class="ico">◔</span> Active Book &amp; Forecast</a>{% endif %}
+        <a href="{% url 'dashboard:project_map' %}" class="{% if nav == 'map' %}active{% endif %}"><span class="ico">⌖</span> Project Map</a>
+        {% if acc.documents %}<a href="{% url 'documents:documents_page' %}" class="{% if nav == 'documents' %}active{% endif %}"><span class="ico">▤</span> Documents</a>{% endif %}
+      </details>{% endif %}
+
+      {% if acc.bids or acc.planning or acc.estimators %}<details class="nav-group" data-group="bidsplanning" open{% if g == 'bidsplanning' %} data-current{% endif %}>
+        <summary>Bids &amp; Planning</summary>
+        {% if acc.bids %}<a href="{% url 'bids:bids_overview' %}" class="{% if nav == 'bids' %}active{% endif %}"><span class="ico">◎</span> Bids</a>{% endif %}
+        {% if acc.planning %}<a href="{% url 'planning:planning_today' %}" class="{% if nav == 'production' %}active{% endif %}"><span class="ico">▦</span> Production</a>{% endif %}
+        {% if acc.planning %}<a href="{% url 'scheduling:planning_schedule' %}" class="{% if nav == 'schedule' %}active{% endif %}"><span class="ico">▥</span> Resource Scheduler</a>{% endif %}
+        {% if acc.estimators %}<a href="{% url 'bids:estimators' %}" class="{% if nav == 'estimators' %}active{% endif %}"><span class="ico">✎</span> Estimators</a>{% endif %}
+        {% if acc.estimating %}<a href="{% url 'estimating:estimating_home' %}" class="{% if nav == 'estimating' %}active{% endif %}"><span class="ico">Σ</span> Estimating</a>{% endif %}
+      </details>{% endif %}
+
+      {% if acc.people or acc.projects or acc.customers or acc.ratings %}<details class="nav-group" data-group="people" open{% if g == 'people' %} data-current{% endif %}>
+        <summary>People &amp; Customers</summary>
+        {% if acc.people %}<a href="{% url 'dashboard:people' %}" class="{% if nav == 'people' %}active{% endif %}"><span class="ico">☺</span> Project Managers</a>{% endif %}
+        {% if acc.projects %}<a href="{% url 'dashboard:field' %}" class="{% if nav == 'field' %}active{% endif %}"><span class="ico">⚒</span> Field Crew</a>{% endif %}
+        {% if acc.customers %}<a href="{% url 'dashboard:customers' %}" class="{% if nav == 'customers' %}active{% endif %}"><span class="ico">▣</span> Customers &amp; Sectors</a>{% endif %}
+        {% if acc.ratings %}<a href="{% url 'dashboard:ratings' %}" class="{% if nav == 'ratings' %}active{% endif %}"><span class="ico">★</span> Ratings</a>{% endif %}
+      </details>{% endif %}
+
+      {% if acc.finance %}<details class="nav-group" data-group="finance" open{% if g == 'finance' %} data-current{% endif %}>
+        <summary>Finance</summary>
+        <a href="{% url 'dashboard:finance_pnl' %}" class="{% if nav == 'finance-pnl' %}active{% endif %}"><span class="ico">Σ</span> Divisional P&amp;L</a>
+        <a href="{% url 'dashboard:finance_wip' %}" class="{% if nav == 'finance-wip' %}active{% endif %}"><span class="ico">≋</span> WIP by Job</a>
+        <a href="{% url 'dashboard:finance_billings' %}" class="{% if nav == 'finance-billings' %}active{% endif %}"><span class="ico">⇢</span> Billings</a>
+        <a href="{% url 'dashboard:finance_ar' %}" class="{% if nav == 'finance-ar' %}active{% endif %}"><span class="ico">⌛</span> Receivables</a>
+        <a href="{% url 'dashboard:finance_payments' %}" class="{% if nav == 'finance-payments' %}active{% endif %}"><span class="ico">⇣</span> Payments Received</a>
+        <a href="{% url 'dashboard:finance_vendors' %}" class="{% if nav == 'finance-vendors' %}active{% endif %}"><span class="ico">⇡</span> Vendors</a>
+        <a href="{% url 'dashboard:finance_bank' %}" class="{% if nav == 'finance-bank' %}active{% endif %}"><span class="ico">⚖</span> Bank Reconciliation</a>
+        {% if acc.salestax %}<a href="{% url 'dashboard:finance_salestax' %}" class="{% if nav == 'finance-salestax' %}active{% endif %}"><span class="ico">%</span> Sales Tax</a>{% endif %}
+      </details>{% endif %}
+
+      {% if acc.sales010 %}<details class="nav-group" data-group="sales"{% if g == 'sales' %} open data-current{% endif %}>
+        <summary>010 Hardware Sales</summary>
+        <a href="{% url 'dashboard:sales010_overview' %}" class="{% if nav == 'sales-overview' %}active{% endif %}"><span class="ico">▦</span> Overview</a>
+        <a href="{% url 'dashboard:sales010_snapshot' %}" class="{% if nav == 'sales-snapshot' %}active{% endif %}"><span class="ico">◔</span> Daily Snapshot</a>
+        <a href="{% url 'dashboard:sales010_pipeline' %}" class="{% if nav == 'sales-pipeline' %}active{% endif %}"><span class="ico">◫</span> Quote Pipeline</a>
+        <a href="{% url 'dashboard:sales010_orders' %}" class="{% if nav == 'sales-orders' %}active{% endif %}"><span class="ico">≡</span> Orders</a>
+        <details class="nav-more" data-group="sales-more"{% if nav == 'sales-products' or nav == 'sales-serials' or nav == 'sales-hygiene' %} open data-current{% endif %}>
+          <summary><span class="ico">⋯</span> More</summary>
+          <a href="{% url 'dashboard:sales010_products' %}" class="{% if nav == 'sales-products' %}active{% endif %}"><span class="ico">◨</span> Products &amp; Drift</a>
+          <a href="{% url 'dashboard:sales010_serials' %}" class="{% if nav == 'sales-serials' %}active{% endif %}"><span class="ico">#</span> Serial Lookup</a>
+          <a href="{% url 'dashboard:sales010_hygiene' %}" class="{% if nav == 'sales-hygiene' %}active{% endif %}"><span class="ico">✎</span> Data Hygiene</a>
+        </details>
+      </details>{% endif %}
+
+      <a href="{% url 'reports:reports_list' %}" class="{% if nav == 'reports' %}active{% endif %}"><span class="ico">▤</span> Ad-hoc Reports</a>
+      {% if EXTENSION_NAV_TEMPLATE %}{% include EXTENSION_NAV_TEMPLATE %}{% endif %}
+
+      <details class="nav-group" data-group="system"{% if g == 'system' %} open data-current{% endif %}>
+        <summary>System</summary>
+        {% if acc.finance %}<a href="{% url 'dashboard:finance_allocations' %}" class="{% if nav == 'finance-alloc' %}active{% endif %}"><span class="ico">÷</span> Overhead Allocation</a>{% endif %}
+        {% if acc.console %}<a href="{% url 'access:console_people' %}" class="{% if nav == 'console' %}active{% endif %}"><span class="ico">⚙</span> People &amp; Access</a>{% endif %}
+        {% if acc.permissions_design %}<a href="{% url 'access:permissions' %}" class="{% if nav == 'permissions' %}active{% endif %}"><span class="ico">🔑</span> Permissions</a>{% endif %}
+        {% if acc.ops %}<a href="{% url 'dashboard:data_quality' %}" class="{% if nav == 'dq' %}active{% endif %}"><span class="ico">✓</span> Data Quality &amp; Refresh</a>{% endif %}
+        <a href="{% url 'dashboard:about' %}" class="{% if nav == 'about' %}active{% endif %}"><span class="ico">ⓘ</span> Definitions</a>
+      </details>
+    </nav>
+    {% endwith %}
+    <script>
+    // Sidebar groups remember whether you left them open or closed (per browser). The group holding the
+    // current page is always open. Runs inline, before the main content, so there is no flash of the wrong state.
+    // The whole sidebar also collapses to an icon rail (logo-width) — remembered the same way; collapsed, every
+    // group is held open so each page stays one click away, and link text becomes the hover title.
+    (function () {
+      const CKEY = 'pca-nav-collapsed-v1', layout = document.querySelector('.layout'), btn = document.getElementById('navtoggle');
+      document.querySelectorAll('.nav a').forEach(a => { if (!a.title) a.title = [...a.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join(' ').replace(/\s+/g, ' ').trim(); });   // link text without the icon glyph
+      function apply(c) {
+        layout.classList.toggle('nav-collapsed', c);
+        document.querySelectorAll('.nav details').forEach(d => {
+          if (c) { if (!('wasOpen' in d.dataset)) d.dataset.wasOpen = d.open ? '1' : '0'; d.open = true; }
+          else if ('wasOpen' in d.dataset) { d.open = d.dataset.wasOpen === '1' || d.hasAttribute('data-current'); delete d.dataset.wasOpen; }
+        });
+        btn.textContent = c ? '›' : '‹';
+        btn.title = btn.ariaLabel = c ? 'Expand navigation' : 'Collapse navigation';
+      }
+      // Remembered open/closed state first (groups, the 010 "More" fold and the weekly-insight date folds alike —
+      // any `.nav details[data-group]`), then the rail: collapsed, it holds every fold open and hands the
+      // remembered state back when expanded again.
+      const KEY = 'pca-nav-v1'; let st = {};
+      try { st = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) { st = {}; }
+      document.querySelectorAll('.nav details[data-group]').forEach(d => {
+        if (d.hasAttribute('data-current')) { d.open = true; return; }
+        if (d.dataset.group in st) d.open = !!st[d.dataset.group];
+      });
+      document.querySelectorAll('.nav details[data-group] > summary').forEach(s => {
+        s.addEventListener('click', () => setTimeout(() => {   // after the browser has flipped `open`
+          const d = s.parentElement; st[d.dataset.group] = d.open;
+          try { localStorage.setItem(KEY, JSON.stringify(st)); } catch (e) {}
+        }, 0));
+      });
+      let collapsed = false;
+      try { collapsed = localStorage.getItem(CKEY) === '1'; } catch (e) {}
+      apply(collapsed);
+      btn.addEventListener('click', () => {
+        collapsed = !collapsed; apply(collapsed);
+        try { localStorage.setItem(CKEY, collapsed ? '1' : '0'); } catch (e) {}
+        window.dispatchEvent(new Event('resize'));   // charts and frozen tables re-measure the wider main column
+      });
+    })();
+    </script>
+    <div class="foot" id="acct-box">
+      {% if acc.account %}
+        <div>Signed in: <b>{{ acc.real_account.display_name }}</b> · <a href="{% url 'access:logout' %}" style="color:#8fa0b8">sign out</a></div>
+      {% endif %}
+      {% if acc.real_is_superadmin %}
+      <div id="viewas-control" style="margin:8px 0 4px">
+        {% if acc.viewing_as %}
+          <form method="post" action="{% url 'access:view_as_stop' %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}">
+            <button class="pill warn" style="cursor:pointer;border:none">⇤ Return to yourself</button></form>
+        {% else %}
+          <form method="post" action="{% url 'access:view_as_start' %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.path }}">
+            <select name="account_id" style="width:100%;background:#1a2740;color:#c9d4e5;border:1px solid #2c3c5c;border-radius:7px;padding:4px 6px;font-size:12px"
+                    onchange="this.form.submit()">
+              <option value="">View as…</option>
+              {% for a in acc.switchable_accounts %}<option value="{{ a.pk }}">{{ a.display_name }}</option>{% endfor %}
+            </select></form>
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+    <div class="foot">
+      {% if freshness %}
+        <div>Last refresh: <b>{{ freshness.last_run.finished_at|date:"M j, g:i A" }}</b></div>
+        <div>PTT entries through {{ freshness.ptt_max|date:"M j" }} · SL postings through {{ freshness.sl_max|date:"M j" }}</div>
+        <div style="margin-top:6px"><span class="pill {% if freshness.checksum_ok %}good{% else %}bad{% endif %}"><span class="dot"></span>{% if freshness.checksum_ok %}SL checksum exact{% else %}Checksum variance{% endif %}</span></div>
+      {% endif %}
+    </div>
+  </aside>
+  <main class="main{% block main_class %}{% endblock %}">
+    {% if acc.viewing_as %}<div id="viewas-banner" style="background:#fff7e8;border:1px solid #e2c58a;color:#8a5a00;border-radius:9px;padding:8px 12px;margin-bottom:12px;font-size:13px">
+      Viewing as <b>{{ acc.viewing_as.display_name }}</b> — this page shows exactly their permissions. Writes are disabled.</div>{% endif %}
+    {% if messages %}{% for m in messages %}<div class="flash">{{ m }}</div>{% endfor %}{% endif %}
+    {% if EXTENSION_BANNER_TEMPLATE %}{% include EXTENSION_BANNER_TEMPLATE %}{% endif %}{% block content %}{% endblock %}
+  </main>
+</div>
+<script>
+Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif';
+Chart.defaults.font.size = 12;
+Chart.defaults.color = '#5d6b7c';
+const PCA = {
+  colors: ['#1f5eff','#178a52','#b7791f','#c62828','#6a3ff0','#0e9aa7','#8d6e63','#546e7a','#e91e63','#3949ab'],
+  money: v => (v==null? '—' : (Math.abs(v)>=1e6? (v/1e6).toFixed(2)+'M' : Math.abs(v)>=1e3? (v/1e3).toFixed(0)+'k' : v.toFixed(0))).replace(/^(-?)/, '$1$'),
+  pct: v => v==null? '—' : (v*100).toFixed(1)+'%',
+};
+// Per-page filter memory: every page load mirrors its current querystring into localStorage,
+// and sidebar links are rewritten to restore each page's last-used filters (div, years, sort,
+// search…). "Last seen state" semantics: resetting a page to defaults also resets its memory.
+// Ephemeral params are never persisted so that page opens fresh — scoped by path: only the Payments Received
+// page's `day` (its day list is a cash-receipts diary). The Project Snapshot's `day=` / `week=` window and the Daily
+// Financial Snapshot's `date=` ARE remembered: leave a snapshot on 070 / Sep 1, and the sidebar brings you back to
+// 070 / Sep 1 (Owner, 2026-09-08 — the snapshot's `day` used to be dropped only because it shared the payments page's name).
+(function () {
+  const KEY = 'pca-filters-v1', EPHEMERAL = {'/finance/payments/': ['day']};
+  let store = {};
+  function remember() {   // mirror the current querystring; pages that update their URL in place (the map) call PCA.rememberFilters() after each change
+    try { store = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) { store = {}; }
+    const params = new URLSearchParams(location.search);
+    (EPHEMERAL[location.pathname] || []).forEach(k => params.delete(k));
+    store[location.pathname] = params.toString();
+    try { localStorage.setItem(KEY, JSON.stringify(store)); } catch (e) {}
+  }
+  remember();
+  PCA.rememberFilters = remember;
+  document.querySelectorAll('.sidebar .nav a[href]').forEach(a => {
+    try {
+      const u = new URL(a.getAttribute('href'), location.origin);
+      if (u.origin !== location.origin || u.search) return;
+      const saved = store[u.pathname];
+      if (saved) a.href = u.pathname + '?' + saved;
+    } catch (e) {}
+  });
+})();
+// UI toggle memory: state that lives only in JavaScript (Collapse all / Expand all, show-hide panels, mode buttons,
+// <details> sections) is remembered per browser, scoped by the page's *view* (`data-page` on <body> = the view's nav
+// key, so every payments day, every project page, every P&L period shares one memory) and never by querystring:
+// collapsing everything on Sep 3 keeps Sep 2 collapsed until you expand again. "Last seen state" semantics.
+//   PCA.pref(key[, default]) → the saved value (or the default);  PCA.setPref(key, value) → save it (null forgets).
+//   <details data-remember="name"> anywhere in the page body restores and saves its own open/closed state by itself;
+//   a server-side default (`open` in the template) only applies until the section has been toggled once.
+(function () {
+  const KEY = 'pca-ui-v1', scope = document.body.dataset.page || location.pathname;
+  const read = () => { try { return JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { return {}; } };
+  PCA.pref = (k, dflt) => { const p = read()[scope]; return p && typeof p === 'object' && k in p ? p[k] : dflt; };
+  PCA.setPref = (k, v) => {
+    const all = read(), p = (all[scope] && typeof all[scope] === 'object') ? all[scope] : (all[scope] = {});
+    if (v == null) delete p[k]; else p[k] = v;
+    try { localStorage.setItem(KEY, JSON.stringify(all)); } catch (e) {}
+  };
+  document.querySelectorAll('main details[data-remember]').forEach(d => {
+    const k = 'details.' + d.dataset.remember, v = PCA.pref(k);
+    if (typeof v === 'boolean') d.open = v;
+    let known = d.open;   // browsers also queue a toggle event for a fold parsed open — only a real change is saved
+    d.addEventListener('toggle', () => { if (d.open === known) return; known = d.open; PCA.setPref(k, d.open); });
+  });
+})();
+// Deep-link highlight: ?hl=<text> (global search results, insight links) finds the first element in <main> that carries
+// the value — data-ref / data-hl / data-k="…-<text>" / a cell or span whose text is exactly <text> — opens the <details> and
+// collapsed group rows around it, clicks an expandable row so its panel opens, scrolls it into view and flashes it.
+document.addEventListener('DOMContentLoaded', function () {   // after every page script has bound its row handlers
+  const hl = new URLSearchParams(location.search).get('hl'); if (!hl) return;
+  const main = document.querySelector('main.main'); if (!main) return;
+  const esc = CSS.escape ? CSS.escape(hl) : hl.replace(/["\\]/g, '\\$&');
+  let el = main.querySelector('[data-ref="' + esc + '"], [data-hl="' + esc + '"], [data-k$="-' + esc + '"]');
+  if (!el) {
+    const want = hl.trim().toLowerCase();
+    el = [...main.querySelectorAll('td, th, span, b, code, a, dd, li')].find(n => n.children.length <= 1 && n.textContent.trim().toLowerCase() === want) || null;
+  }
+  if (!el) return;
+  for (let d = el.closest('details'); d; d = d.parentElement && d.parentElement.closest('details')) d.open = true;
+  const tr = el.closest('tr');
+  if (tr && (tr.classList.contains('pay-hidden') || tr.hidden)) {   // find the group row that reveals it and open the group
+    let g = tr.previousElementSibling;
+    while (g && (g.classList.contains('pay-hidden') || g.hidden || !((tr.dataset.k && g.dataset.k === tr.dataset.k) || (tr.dataset.g && g.dataset.g === tr.dataset.g) || (tr.dataset.hw && g.dataset.hw === tr.dataset.hw)))) g = g.previousElementSibling;
+    if (g) g.click();
+  }
+  if (tr && tr.querySelector('.pay-caret, .bl-caret, .ar-dcaret')) tr.click();   // an expandable row (a document's panel, a check's invoices): open it
+  const target = tr || el;
+  target.classList.add('hl-flash', 'hl-mark');   // the flash fades; the soft mark stays so the row is still findable later
+  setTimeout(() => target.scrollIntoView({block: 'center', behavior: 'smooth'}), 60);
+  setTimeout(() => target.classList.remove('hl-flash'), 4000);
+});
+// Scroll gate: in-page scroll containers (tables that scroll within the page) only take the wheel after a click or
+// keyboard focus inside them; the pointer leaving, a click elsewhere or Escape hands the wheel back to the page.
+(function () {
+  const main = document.querySelector('main.main'); if (!main) return;
+  const gates = [...main.querySelectorAll('.table-wrap, div[style*="overflow:auto"], div[style*="overflow: auto"]')]
+    .filter(el => !el.closest('.fin-modal, #drillmodal') && !el.classList.contains('tall'));
+  if (!gates.length) return;
+  const mark = el => el.classList.toggle('overflows', el.scrollHeight > el.clientHeight + 1);
+  const lock = el => { el.classList.remove('active'); mark(el); };
+  const unlock = el => { gates.forEach(g => { if (g !== el) g.classList.remove('active'); }); el.classList.add('active'); };
+  gates.forEach(el => {
+    el.classList.add('scroll-gate'); mark(el);
+    el.addEventListener('mousedown', () => unlock(el));
+    el.addEventListener('touchstart', () => unlock(el), { passive: true });
+    el.addEventListener('focusin', () => unlock(el));
+    el.addEventListener('mouseenter', () => mark(el));
+    el.addEventListener('mouseleave', e => { if (!e.buttons && !el.contains(document.activeElement)) lock(el); });
+    el.addEventListener('focusout', e => { if (!el.contains(e.relatedTarget) && !el.matches(':hover')) lock(el); });
+  });
+  document.addEventListener('mousedown', e => gates.forEach(el => { if (!el.contains(e.target)) lock(el); }));
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') gates.forEach(lock); });
+  window.addEventListener('resize', () => gates.forEach(mark));
+})();
+</script>
+<script src="{% static 'dashboard/search.js' %}?v={{ ASSET_VERSION }}" defer></script>
+{% block scripts %}{% endblock %}
+{% if EXTENSION_SCRIPT_TEMPLATE %}{% include EXTENSION_SCRIPT_TEMPLATE %}{% endif %}
+</body>
+</html>

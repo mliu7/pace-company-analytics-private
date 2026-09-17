@@ -1,0 +1,87 @@
+{% load humanize pca %}{# 010 hardware quotes & orders card on the customer page — context `s010` from views_sales_pipeline.customer_sales010; sales010.view only #}
+<div class="card" id="customer-s010" style="margin-bottom:14px">
+  <h2>010 hardware quotes &amp; orders <small>every ChannelOnline quote for this customer and the sales orders they became (SO1 in SL), all time · <a href="{% url 'dashboard:sales010_pipeline' %}?cust={{ c.sl_customer_id|urlencode }}&range=all&outcome=all" title="The quote pipeline filtered to this customer — line detail, charts and the rep / author breakdowns.">open in the quote pipeline →</a></small></h2>
+  <div class="row" style="gap:8px;flex-wrap:wrap;align-items:stretch;margin:4px 0 10px">
+    <div class="wip-chip" title="Quotes still 'Open' in ChannelOnline and created within the last {{ s010.pipe_days }} days — the pipeline page's open-pipeline rule. Stale = no ChannelOnline activity for {{ s010.stale_days }}+ days."><div class="label">Open pipeline · ≤ {{ s010.pipe_days }} d</div><div class="val">{{ s010.k.open_amt|money }}</div><div class="sub muted">{{ s010.k.open_n }} quote{{ s010.k.open_n|pluralize }}{% if s010.k.stale_n %} · <b class="warn-ink">{{ s010.k.stale_n }} stale</b>{% endif %}</div></div>
+    <div class="wip-chip" title="Still 'Open' in ChannelOnline but created more than {{ s010.pipe_days }} days ago. CNET never expires a quote, so these are abandoned unless the rep says otherwise — the pipeline page reports them as aged out and keeps them out of the open pipeline."><div class="label">Aged out · still "Open"</div><div class="val muted">{{ s010.k.aged_amt|money }}</div><div class="sub muted">{{ s010.k.aged_n }} quote{{ s010.k.aged_n|pluralize }}</div></div>
+    <div class="wip-chip" title="Quotes that became a ChannelOnline sales order (linked by note reference or matching totals / lines) or are marked Ordered. Win rate = won ÷ every quote ever written for this customer."><div class="label">Won</div><div class="val">{{ s010.k.won_amt|money }}</div><div class="sub muted">{{ s010.k.won_n }} of {{ s010.k.n }} quote{{ s010.k.n|pluralize }}{% if s010.k.n %} · {{ s010.k.win_n|pct:0 }} by count · {{ s010.k.win_amt|pct:0 }} by ${% endif %}{% if s010.k.won12_n %} · last 12 mo {{ s010.k.won12_n }} / {{ s010.k.won12_amt|money_k }}{% endif %}</div></div>
+    <div class="wip-chip" title="ChannelOnline sales orders for this customer (cancelled ones excluded from the totals). Backlog = still open in SL and not cancelled: order total less what has been invoiced."><div class="label">Orders</div><div class="val">{{ s010.o.amt|money }}</div><div class="sub muted">{{ s010.o.n }} order{{ s010.o.n|pluralize }} · invoiced {{ s010.o.invoiced|money_k }}{% if s010.o.backlog_n %} · <b>{{ s010.o.backlog_n }} in backlog · {{ s010.o.backlog_amt|money_k }}</b>{% endif %}{% if s010.o.last %} · last {{ s010.o.last|date:"M j, Y" }}{% endif %}</div></div>
+    {% if s010.k.jumbo_n %}<div class="wip-chip" title="Quotes of $1M or more. The pipeline page keeps these out of its totals as budgetary placeholders; here they count in full because this is the customer's own picture."><div class="label">Quotes ≥ $1M</div><div class="val">{{ s010.k.jumbo_n }}</div><div class="sub muted">{{ s010.k.jumbo_amt|money }} · counted above</div></div>{% endif %}
+  </div>
+
+  <div class="ledger-chips row" id="s010-chips" style="gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
+    <b style="font-size:13px;margin-right:4px">Quotes</b>
+    <span class="lchip on" data-b="all" title="Every quote.">all<small>{{ s010.k.n }}</small></span>
+    <span class="lchip" data-b="open" title="Open in ChannelOnline, created within {{ s010.pipe_days }} days.">open<small>{{ s010.k.open_n }}</small></span>
+    <span class="lchip" data-b="aged" title="Still 'Open' in ChannelOnline but older than {{ s010.pipe_days }} days.">aged out<small>{{ s010.k.aged_n }}</small></span>
+    <span class="lchip" data-b="won" title="Became a sales order.">won<small>{{ s010.k.won_n }}</small></span>
+    <span class="lchip" data-b="lost" title="Marked lost / expired / dead / closed / cancelled, or on hold.">lost / hold<small>{{ s010.k.lost_n|add:s010.k.hold_n }}</small></span>
+    <span class="muted" id="s010-sum" style="font-size:12px;margin-left:6px"></span>
+    <input type="search" id="s010-q" placeholder="filter quotes…" style="margin-left:auto;max-width:220px">
+  </div>
+  <div class="table-wrap" style="max-height:420px"><table class="data dense" id="s010-quotes"><thead><tr>
+    <th title="ChannelOnline quote number — click to open it in the pipeline, where the row expands to its lines. Description, customer PO and ship-to follow.">Quote</th>
+    <th class="num" title="Created in ChannelOnline · age in days.">Created</th>
+    <th title="Salesperson on the quote · who wrote it ('self' = the customer built it on the storefront).">Rep · author</th>
+    <th title="Outcome today: won → the sales order it became (and how many days it took); open (≤ {{ s010.pipe_days }} d; stale after {{ s010.stale_days }} d idle); aged out (older, still 'Open' in CNET); lost / hold.">Outcome</th>
+    <th class="num">Lines</th>
+    <th class="num" title="Quote total in ChannelOnline.">Total</th>
+    <th class="num" title="Σ item cost on the quote (hand-entered in CNET) and GM % = (total − cost) ÷ total. 'cost?' = cost above 1.5× the price, an entry error — left out of GM.">Quoted cost · GM</th>
+    <th class="num" title="Last ChannelOnline activity (created or modified).">Last activity</th>
+  </tr></thead><tbody>
+  {% for q in s010.quotes %}<tr class="q-row" data-b="{{ q.bucket }}" data-amt="{{ q.total|default:0 }}" data-s="{{ q.num }} {{ q.description|default:''|lower }} {{ q.customer_po|default:''|lower }} {{ q.rep|lower }} {{ q.creator|lower }} {{ q.ship|lower }} {{ q.status|lower }} {{ q.so_num|default:''|lower }}">
+    <td class="trunc fluid" style="width:34%;min-width:220px" title="{{ q.description }}{% if q.note %} — {{ q.note }}{% endif %}"><a href="{% url 'dashboard:sales010_pipeline' %}?q={{ q.num }}&range=all&outcome=all" class="mono">{{ q.num }}</a>{% if q.description %} <span class="muted">{{ q.description }}</span>{% endif %}{% if q.customer_po %} <span class="muted">· PO {{ q.customer_po }}</span>{% endif %}{% if q.ship %} <span class="muted">· {{ q.ship }}</span>{% endif %}</td>
+    <td class="num nowrap">{{ q.created_at|date:"M j, Y" }}<div class="muted" style="font-size:11px">{{ q.age }} d</div></td>
+    <td class="nowrap">{{ q.rep }}{% if q.creator and q.creator != q.rep %}<div class="muted" style="font-size:11px">by {{ q.creator }}{% if q.self_service %} <span class="tag" title="Built by the customer on the ChannelOnline storefront.">self</span>{% endif %}</div>{% elif q.self_service %}<div class="muted" style="font-size:11px"><span class="tag">self</span></div>{% endif %}</td>
+    <td class="nowrap">{% if q.bucket == 'won' %}<span class="tag low">won</span>{% if q.so_num %} <a href="{% url 'dashboard:sales010_order_detail' q.so_num %}" class="mono" title="ChannelOnline sales order{% if q.so_sl %} · SL {{ q.so_sl }}{% endif %}">{{ q.so_num }}</a>{% endif %}{% if q.days_to_order != None %} <span class="muted">in {{ q.days_to_order }} d</span>{% endif %}{% if q.so_status == 'O' and not q.so_cancelled %} <span class="tag moderate" title="The order is still open in SL — backlog.">backlog</span>{% elif q.so_cancelled %} <span class="tag canceled">order cancelled</span>{% endif %}
+      {% elif q.bucket == 'open' %}<span class="tag awarded_not_started">open</span>{% if q.stale %} <span class="tag moderate" title="No ChannelOnline activity for {{ q.idle }} days.">stale {{ q.idle }} d</span>{% endif %}
+      {% elif q.bucket == 'aged' %}<span class="tag unknown" title="Still 'Open' in ChannelOnline, created {{ q.age }} days ago — abandoned unless the rep says otherwise.">aged out</span>
+      {% elif q.bucket == 'lost' %}<span class="tag canceled">{{ q.status|lower }}</span>{% else %}<span class="tag">hold</span>{% endif %}{% if q.jumbo %} <span class="tag" title="$1M or more — a budgetary placeholder on the pipeline page, counted in full here.">≥ $1M</span>{% endif %}</td>
+    <td class="num muted">{{ q.line_count }}</td>
+    <td class="num">{{ q.total|money }}</td>
+    <td class="num nowrap">{% if q.costbad %}<span class="tag moderate" title="Cost entered above 1.5× the price — a data-entry slip; left out of GM.">cost?</span>{% elif q.total_item_cost %}<span class="muted">{{ q.total_item_cost|money }}</span>{% if q.gm != None %} · <span class="{% if q.gm < 0 %}neg{% endif %}">{{ q.gm|pct:0 }}</span>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num muted nowrap">{{ q.last_activity|date:"M j, Y" }}{% if q.bucket == 'open' or q.bucket == 'aged' %}<div style="font-size:11px">{{ q.idle }} d idle</div>{% endif %}</td>
+  </tr>{% empty %}<tr><td colspan="8" class="empty">No ChannelOnline quotes for this customer.</td></tr>{% endfor %}
+  </tbody></table></div>
+
+  <div class="row" style="gap:8px;align-items:center;margin:12px 0 6px"><b style="font-size:13px">Sales orders</b> <span class="muted" style="font-size:12px">{{ s010.o.n }} ChannelOnline order{{ s010.o.n|pluralize }} · newest first · click an order for its lines, shipments and quoted-vs-real drift</span></div>
+  <div class="table-wrap" style="max-height:360px"><table class="data dense" id="s010-orders"><thead><tr>
+    <th title="ChannelOnline sales order · SL order number · customer PO.">Order</th><th class="num">Ordered</th><th>Rep</th>
+    <th title="SL status: backlog = open in SL and not cancelled (with the un-invoiced amount); shipped = fully shipped; not in SL = no SL order carries this ChannelOnline number (see 010 Hygiene).">Status</th>
+    <th title="The quote(s) this order came from.">From quote</th><th class="num">Lines</th><th class="num" title="Order total in ChannelOnline.">Total</th>
+    <th class="num" title="Σ SL shipper invoices on the order.">Invoiced</th><th class="num" title="Realized GM % on what has shipped: (invoiced − shipper cost) ÷ invoiced.">Realized GM</th><th class="num">Last ship</th>
+  </tr></thead><tbody>
+  {% for o in s010.orders %}<tr>
+    <td class="nowrap"><a href="{% url 'dashboard:sales010_order_detail' o.num %}" class="mono">{{ o.num }}</a>{% if o.sl_ord_nbr %} <span class="muted mono">{{ o.sl_ord_nbr }}</span>{% endif %}{% if o.customer_po %} <span class="muted">· PO {{ o.customer_po }}</span>{% endif %}</td>
+    <td class="num muted nowrap">{{ o.ordered_at|date:"M j, Y" }}</td><td class="nowrap">{{ o.rep }}</td>
+    <td class="nowrap">{% if o.sl_cancelled %}<span class="tag canceled">cancelled</span>{% elif o.backlog %}<span class="tag moderate">backlog</span>{% if o.backlog_amt %} <span class="muted">{{ o.backlog_amt|money }} open</span>{% endif %}{% elif o.fully_shipped %}<span class="tag low">shipped</span>{% elif o.sl_status == 'C' %}<span class="tag low" title="Closed in SL.">closed</span>{% elif o.sl_ord_nbr %}<span class="tag">{{ o.sl_status|default:"?" }}</span>{% else %}<span class="tag high">not in SL</span>{% endif %}</td>
+    <td class="mono muted">{{ o.from_quotes|default:"" }}</td><td class="num muted">{{ o.line_count }}</td><td class="num">{{ o.total|money }}</td>
+    <td class="num muted">{% if o.realized_revenue %}{{ o.realized_revenue|money }}{% endif %}</td>
+    <td class="num {% if o.real_gm != None and o.real_gm < 0 %}neg{% endif %}">{% if o.real_gm != None %}{{ o.real_gm|pct:0 }}{% endif %}</td>
+    <td class="num muted nowrap">{{ o.last_ship_date|date:"M j, Y"|default:"" }}</td>
+  </tr>{% empty %}<tr><td colspan="10" class="empty">No ChannelOnline sales orders for this customer.</td></tr>{% endfor %}
+  </tbody></table></div>
+</div>
+<script>
+// quote chips + search (client-side over the rows already on the page); the chosen chip is remembered (PCA.pref, base.html).
+// Runs on DOMContentLoaded, i.e. after base.html has defined PCA.
+document.addEventListener('DOMContentLoaded', function () {
+  var chips = document.querySelectorAll('#s010-chips .lchip'), rows = document.querySelectorAll('#s010-quotes tbody tr.q-row'),
+      q = document.getElementById('s010-q'), sum = document.getElementById('s010-sum');
+  var hasPCA = typeof PCA !== 'undefined' && PCA.pref;   // base.html declares PCA with const, so it is not on window
+  var b = hasPCA ? PCA.pref('s010.bucket', 'all') : 'all';
+  function apply() {
+    var t = q.value.trim().toLowerCase(), n = 0, amt = 0;
+    rows.forEach(function (tr) {
+      var hit = (b === 'all' || tr.dataset.b === b || (b === 'lost' && tr.dataset.b === 'hold')) && (!t || tr.dataset.s.indexOf(t) >= 0);
+      tr.style.display = hit ? '' : 'none';
+      if (hit) { n++; amt += parseFloat(tr.dataset.amt) || 0; }
+    });
+    chips.forEach(function (c) { c.classList.toggle('on', c.dataset.b === b); });
+    sum.textContent = n + ' quote' + (n === 1 ? '' : 's') + ' · $' + Math.round(amt).toLocaleString();
+  }
+  chips.forEach(function (c) { c.addEventListener('click', function () { b = c.dataset.b; if (hasPCA) PCA.setPref('s010.bucket', b); apply(); }); });
+  q.addEventListener('input', apply);
+  apply();
+});
+</script>

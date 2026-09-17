@@ -1,0 +1,156 @@
+{% extends "dashboard/base.html" %}{% load humanize pca %}
+{% block title %}Divisional P&amp;L · Pace Company Analytics{% endblock %}
+{% block content %}
+<div class="topbar">
+  <div class="title"><h1>Divisional P&amp;L</h1>
+    <small>The fiscal-period income statement by division — revenue and cost in the month they were posted, the accountants' booked WIP for closed months, PCA's WIP estimate for months not closed yet, an unposted-payroll estimate while payroll is still landing, and each division's share of corporate (000) cost. Click any number for the full statement behind it, down to accounts, postings and projects.</small></div>
+  <div class="row">
+    {% if open_months %}<span class="pill warn" title="Months with no month-end WIP entry (50701) in SL yet. Their rows carry PCA's own WIP change and an unposted-payroll estimate, marked ≈.">open: {% for m in open_months %}{{ m|slice:"4:" }}/{{ m|slice:":4" }}{% if not forloop.last %}, {% endif %}{% endfor %}</span>{% endif %}
+    {% if latest_wip %}<span class="pill info" title="Latest WIP snapshot used for open-month estimates.">WIP as of {{ latest_wip|date:"M j" }}</span>{% endif %}
+    <a class="btn small" href="{% url 'dashboard:finance_allocations' %}">Allocation shares</a>
+  </div>
+</div>
+
+<form method="get" class="card tight" style="margin-bottom:12px" id="pnlform">
+  <div class="row" style="gap:14px;flex-wrap:wrap;align-items:flex-end">
+    <div class="tabs" style="margin:0;border:none">
+      <a href="?grain=month&year={{ year }}&div={{ pnl_div }}&metric={{ metric }}" class="{% if kind == 'month' %}active{% endif %}">Month by month</a>
+      <a href="?grain=quarter&year={{ year }}&div={{ pnl_div }}&metric={{ metric }}" class="{% if kind == 'quarter' %}active{% endif %}">Quarter by quarter</a>
+      <a href="?grain=year&div={{ pnl_div }}&metric={{ metric }}" class="{% if kind == 'year' %}active{% endif %}">Year by year</a>
+    </div>
+    <input type="hidden" name="grain" value="{{ kind }}">
+    <div class="filters" style="margin:0">
+      {% if kind != 'year' %}<label>Year<select name="year" onchange="this.form.submit()">{% for y in years_avail %}<option value="{{ y }}" {% if y|add:0 == year %}selected{% endif %}>{{ y }}</option>{% endfor %}</select></label>{% endif %}
+      <label>Division<select name="div" onchange="this.form.submit()"><option value="ALL">All divisions</option>{% for code, name in pnl_divisions %}<option value="{{ code }}" {% if pnl_div == code %}selected{% endif %}>{{ code }} {{ name }}</option>{% endfor %}</select></label>
+      {% if pnl_div == 'ALL' %}<label title="Which line the trend matrix below shows for every division.">Trend metric<select name="metric" onchange="this.form.submit()">{% for k, l in metrics %}<option value="{{ k }}" {% if metric == k %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>{% endif %}
+      <noscript><button class="btn primary">Apply</button></noscript>
+    </div>
+  </div>
+</form>
+
+{% if pnl_div != 'ALL' %}
+<div class="card pnl" style="margin-bottom:14px">
+  <h2>{{ pnl_div }} {{ pnl_div_name }} <small>{% if kind == 'year' %}every fiscal year{% else %}{{ year }}, {{ kind }} by {{ kind }}{% endif %} · click a cell for the statement behind it · ≈ = period not closed yet (estimates in play)</small></h2>
+  <div class="table-wrap tall">
+  <table class="data dense">
+    <thead><tr><th>Line</th>{% for p in periods %}<th class="num {% if p.key == sel.key %}sorted{% endif %}"><a href="?grain={{ kind }}&year={{ year }}&p={{ p.key }}&div={{ pnl_div }}&metric={{ metric }}" title="Select {{ p.label }} for the by-division table below.">{{ p.label }}</a></th>{% endfor %}{% if ytd %}<th class="num ytd" title="{{ ytd.label }}: the {{ year }} periods shown, summed (percentages recomputed from the year totals). Click for the year-by-year view; click a cell for the full-year statement."><a href="?grain=year&div={{ pnl_div }}&metric={{ metric }}&p={{ ytd.period.key }}">{{ ytd.label }}</a></th>{% endif %}</tr></thead>
+    <tbody>
+    {% for line in matrix %}
+      <tr {% if line.key == 'gross' or line.key == 'op_income' %}style="font-weight:700"{% elif line.pct %}class="muted"{% endif %}>
+        <td>{{ line.name }}</td>
+        {% for c in line.cells %}<td class="num {% if c.period.key == sel.key %}hl{% endif %} {% if line.key == 'costs' or line.key == 'overhead' or line.key == 'corp_alloc' or line.key == 'payroll_lag' %}{% else %}{{ c.v|posneg }}{% endif %}">
+          {% if c.v == None %}<span class="muted">—</span>{% else %}{% if line.anchor %}<a href="{% url 'dashboard:finance_pnl_detail' pnl_div c.period.key %}#{{ line.anchor }}">{% endif %}{% if c.open %}≈{% endif %}{% if line.pct %}{{ c.v|pct:1 }}{% else %}{{ c.v|money }}{% endif %}{% if line.anchor %}</a>{% endif %}{% endif %}</td>{% endfor %}
+        {% if ytd %}{% with c=line.ytd %}<td class="num ytd {% if line.key == 'costs' or line.key == 'overhead' or line.key == 'corp_alloc' or line.key == 'payroll_lag' %}{% else %}{{ c.v|posneg }}{% endif %}">
+          {% if c.v == None %}<span class="muted">—</span>{% else %}{% if line.anchor %}<a href="{% url 'dashboard:finance_pnl_detail' pnl_div c.period.key %}#{{ line.anchor }}">{% endif %}{% if c.open %}≈{% endif %}{% if line.pct %}{{ c.v|pct:1 }}{% else %}{{ c.v|money }}{% endif %}{% if line.anchor %}</a>{% endif %}{% endif %}</td>{% endwith %}{% endif %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <div class="note" style="margin-top:6px">Costs = 5xxxx direct accounts (except 50701) + 60000/60005 salaries; WIP adjustment = −50701 as booked by the accountants for closed months, PCA's snapshot ΔWIP for open ones; gross = revenue − costs + WIP; operating income = gross + other income − overhead − unposted payroll − corporate allocation. Percentages use earned revenue (revenue + WIP).</div>
+</div>
+{% endif %}
+
+<div class="card pnl" style="margin-bottom:14px" id="bydiv">
+  <div class="row" style="justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:8px">
+    <h2 style="margin:0">{{ sel.label }} by division <small>{% if cur.open %}not closed yet — WIP and payroll are estimates (≈){% else %}closed month{% if sel.kind != 'month' %}s{% endif %} — as booked in SL{% endif %} · click any number for the statement behind it</small></h2>
+    <div class="row">
+      {% if prev_p %}<a class="btn small" href="?grain={{ kind }}&year={{ prev_p.year }}&p={{ prev_p.key }}&div={{ pnl_div }}&metric={{ metric }}">◀ {{ prev_p.label }}</a>{% endif %}
+      {% if next_p %}<a class="btn small" href="?grain={{ kind }}&year={{ next_p.year }}&p={{ next_p.key }}&div={{ pnl_div }}&metric={{ metric }}">{{ next_p.label }} ▶</a>{% endif %}
+    </div>
+  </div>
+  <div class="table-wrap tall" style="margin-top:8px">
+  <table class="data">
+    <thead><tr>
+      <th>Division</th>
+      <th class="num" title="Accounts 40000/40001 posted to the division's GL subaccounts in the period.">Revenue</th>
+      <th class="num" title="Direct costs as posted: 5xxxx accounts (materials, labor, burden, subcontractors, other direct) plus 60000/60005 salaries. 50701 (WIP) is shown separately.">Costs</th>
+      <th class="num" title="Earned-not-billed change. Closed months: the accountants' month-end WIP entry (−50701) exactly as booked. Open months: PCA's own ΔWIP from the WIP snapshots (CV × PTT % − billed, per job) — an estimate, marked ≈.">WIP adj</th>
+      <th class="num" title="Revenue − costs + WIP adjustment.">Gross</th>
+      <th class="num" title="Gross as a % of earned revenue (revenue + WIP adjustment).">GP %</th>
+      <th class="num" title="The division's own overhead: 6xxxx/7xxxx accounts on its subaccounts other than 60000/60005 (G&A salaries, employee insurance, phones, dues, travel…).">Overhead</th>
+      {% if cur.open %}<th class="num" title="Payroll that has not been entered in SL yet for the open month(s): the trailing closed-month average of the wage/FICA accounts (60000, 60100, 64910/20, 507xx burden) minus what has posted. Disappears once the month is closed.">Unposted payroll (est.)</th>{% endif %}
+      <th class="num" title="The division's share of corporate (000) overhead — sub-0000 6xxxx/7xxxx cost (plus its unposted-payroll estimate for open months) × the accountants' allocation split for the fiscal year (editable under Overhead Allocation).">Corp. alloc</th>
+      <th class="num" title="Gross + other income − overhead − unposted payroll − corporate allocation: the division's fully loaded operating income for the period.">Op. income</th>
+      <th class="num" title="Operating income as a % of earned revenue.">Op %</th>
+    </tr></thead>
+    <tbody>
+    {% for r in cur.rows %}
+      <tr {% if r.div == pnl_div %}class="rowgood"{% endif %}>
+        <td><a href="{% url 'dashboard:finance_pnl_detail' r.div sel.key %}"><b>{{ r.div }}</b> {{ r.name }}</a>{% if r.open %} <span class="muted" title="Open month(s): {{ r.months_open|join:', ' }} — WIP and payroll are estimates.">≈</span>{% endif %}</td>
+        <td class="num"><a href="{% url 'dashboard:finance_pnl_detail' r.div sel.key %}#revenue">{{ r.revenue|money }}</a></td>
+        <td class="num"><a href="{% url 'dashboard:finance_pnl_detail' r.div sel.key %}#costs">{{ r.costs|money }}</a></td>
+        <td class="num {{ r.wip|posneg }}"><a href="{% url 'dashboard:finance_pnl_detail' r.div sel.key %}#wip">{% if r.wip_pca_missing %}<span class="muted" title="No WIP snapshot for {{ r.wip_pca_missing|join:', ' }} — estimate incomplete.">?</span>{% endif %}{% if r.wip or r.wip_booked %}{{ r.wip|signed_money }}{% else %}<span class="muted">—</span>{% endif %}</a></td>
+        <td class="num {{ r.gross|posneg }}"><a href="{% url 'dashboard:finance_pnl_detail' r.div sel.key %}#gross">{{ r.gross|money }}</a></td>
+        <td class="num {{ r.gross_pct|posneg|default:"muted" }}">{{ r.gross_pct|pct:0 }}</td>
+        <td class="num"><a href="{% url 'dashboard:finance_pnl_detail' r.div sel.key %}#overhead">{{ r.overhead|money }}</a></td>
+        {% if cur.open %}<td class="num muted"><a href="{% url 'dashboard:finance_pnl_detail' r.div sel.key %}#lag">{% if r.payroll_lag %}≈ {{ r.payroll_lag|money }}{% else %}—{% endif %}</a></td>{% endif %}
+        <td class="num muted"><a href="{% url 'dashboard:finance_pnl_detail' r.div sel.key %}#corp">{% if r.corp_alloc %}{{ r.corp_alloc|money }} <span class="muted">{{ r.share|pct:0 }}</span>{% else %}—{% endif %}</a></td>
+        <td class="num {{ r.op_income|posneg }}"><a href="{% url 'dashboard:finance_pnl_detail' r.div sel.key %}#op"><b>{{ r.op_income|money }}</b></a></td>
+        <td class="num {{ r.op_pct|posneg|default:"muted" }}">{{ r.op_pct|pct:0 }}</td>
+      </tr>
+    {% endfor %}
+    {% with u=cur.unallocated %}
+      <tr class="muted" title="Sub-0000 lines nobody absorbs: corporate direct cost/income, plus whatever share of the overhead pool the allocation splits leave unassigned ({{ cur.pool|money }} pool, {{ cur.allocated|money }} allocated).">
+        <td><a href="{% url 'dashboard:finance_pnl_detail' '000' sel.key %}">000 Unallocated corporate</a></td>
+        <td class="num">{% if u.revenue %}{{ u.revenue|money }}{% else %}—{% endif %}</td><td class="num">{% if u.costs %}{{ u.costs|money }}{% else %}—{% endif %}</td>
+        <td class="num">{% if u.wip %}{{ u.wip|signed_money }}{% else %}—{% endif %}</td>
+        <td class="num">{{ u.gross|money }}</td><td class="num"></td>
+        <td class="num">{% if u.overhead %}{{ u.overhead|money }}{% else %}—{% endif %}</td>
+        {% if cur.open %}<td class="num">{% if u.payroll_lag >= 1 %}≈ {{ u.payroll_lag|money }}{% else %}—{% endif %}</td>{% endif %}
+        <td class="num">—</td>
+        <td class="num">{{ u.op_income|money }}</td><td class="num"></td>
+      </tr>
+    {% endwith %}
+    </tbody>
+    <tfoot>{% with t=cur.total %}
+      <tr>
+        <td><a href="{% url 'dashboard:finance_pnl_detail' 'ALL' sel.key %}">Company</a></td>
+        <td class="num"><a href="{% url 'dashboard:finance_pnl_detail' 'ALL' sel.key %}#revenue">{{ t.revenue|money }}</a></td>
+        <td class="num">{{ t.costs|money }}</td>
+        <td class="num {{ t.wip|posneg }}">{{ t.wip|signed_money }}</td>
+        <td class="num {{ t.gross|posneg }}">{{ t.gross|money }}</td>
+        <td class="num {{ t.gross_pct|posneg|default:"muted" }}">{{ t.gross_pct|pct:0 }}</td>
+        <td class="num">{{ t.overhead|money }}</td>
+        {% if cur.open %}<td class="num muted">≈ {{ t.payroll_lag|money }}</td>{% endif %}
+        <td class="num muted">{{ t.corp_alloc|money }}</td>
+        <td class="num {{ t.op_income|posneg }}"><a href="{% url 'dashboard:finance_pnl_detail' 'ALL' sel.key %}#op">{{ t.op_income|money }}</a></td>
+        <td class="num {{ t.op_pct|posneg|default:"muted" }}">{{ t.op_pct|pct:0 }}</td>
+      </tr>
+    {% endwith %}</tfoot>
+  </table>
+  </div>
+  <div class="note" style="margin-top:6px">
+    Company operating income {% if cur.open %}(≈){% endif %} = the ledger's own {{ cur.ledger.revenue|money }} revenue − {{ cur.ledger.costs|money }} costs {% if cur.ledger.wip %}{{ cur.ledger.wip|signed_money }} WIP {% endif %}− {{ cur.ledger.overhead|money }} overhead (all subaccounts){% if cur.open %} − ≈{{ cur.ledger.payroll_lag|money }} unposted payroll{% endif %}: the allocation only moves corporate cost between rows, it never changes the total.
+    Corporate pool {{ cur.pool|money }} split by the {{ cur.share_year|default:"—" }} shares ({{ cur.allocated|money }} allocated; the rest stays in the unallocated row) — <a href="{% url 'dashboard:finance_allocations' %}">edit shares</a>.
+    {% if cur.open %}<b>Open period:</b> the two semi-monthly salary batches post days-to-weeks after the pay date and the month-end WIP entry is booked at close, so posted costs are light and no WIP is booked yet; the ≈ columns fill both gaps with estimates and vanish once the accountants close the month.{% endif %}
+  </div>
+</div>
+
+{% if pnl_div == 'ALL' %}
+<div class="card pnl">
+  <h2>{{ metric_label }} by division, {% if kind == 'year' %}every fiscal year{% else %}{{ year }} {{ kind }} by {{ kind }}{% endif %} <small>click a column header to select that period above, a cell for its statement · ≈ = not closed</small></h2>
+  <div class="table-wrap tall">
+  <table class="data dense">
+    <thead><tr><th>Division</th>{% for p in periods %}<th class="num {% if p.key == sel.key %}sorted{% endif %}"><a href="?grain={{ kind }}&year={{ year }}&p={{ p.key }}&div=ALL&metric={{ metric }}">{{ p.label }}</a></th>{% endfor %}{% if ytd %}<th class="num ytd" title="{{ ytd.label }}: each division's {{ year }} periods shown, summed (percentages recomputed from the year totals). Click for the year-by-year view; click a cell for the division's full-year statement."><a href="?grain=year&div=ALL&metric={{ metric }}&p={{ ytd.period.key }}">{{ ytd.label }}</a></th>{% endif %}</tr></thead>
+    <tbody>
+    {% for line in matrix %}
+      <tr {% if line.div == 'ALL' %}style="font-weight:700;background:#fafbfd"{% elif line.div == '000' %}class="muted"{% endif %}>
+        <td>{% if line.div == 'ALL' %}Company{% else %}<b>{{ line.div }}</b> {{ line.name }}{% endif %}</td>
+        {% for c in line.cells %}<td class="num {% if c.period.key == sel.key %}hl{% endif %} {% if metric == 'costs' or metric == 'overhead' or metric == 'corp_alloc' %}{% else %}{{ c.v|posneg }}{% endif %}">
+          {% if c.v == None or c.row == None %}<span class="muted">—</span>{% else %}<a href="{% url 'dashboard:finance_pnl_detail' line.div c.period.key %}">{% if c.open %}≈{% endif %}{% if metric_pct %}{{ c.v|pct:1 }}{% else %}{{ c.v|money }}{% endif %}</a>{% endif %}</td>{% endfor %}
+        {% if ytd %}{% with c=line.ytd %}<td class="num ytd {% if metric == 'costs' or metric == 'overhead' or metric == 'corp_alloc' %}{% else %}{{ c.v|posneg }}{% endif %}">
+          {% if c.v == None or c.row == None %}<span class="muted">—</span>{% else %}<a href="{% url 'dashboard:finance_pnl_detail' line.div c.period.key %}">{% if c.open %}≈{% endif %}{% if metric_pct %}{{ c.v|pct:1 }}{% else %}{{ c.v|money }}{% endif %}</a>{% endif %}</td>{% endwith %}{% endif %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+<style>
+  table.data td.hl { background: #eef4ff; } table.data tr:hover td.hl { background: #e3ecff; }
+  table.data th.ytd, table.data td.ytd { border-left: 2px solid var(--line-strong); font-weight: 700; background: #fafbfd; }
+  table.data tr:hover td.ytd { background: #f1f4f9; }
+</style>
+{% endblock %}

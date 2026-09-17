@@ -1,0 +1,44 @@
+{% extends "dashboard/base.html" %}{% load humanize pca %}
+{% block title %}Project Managers · Pace Company Analytics{% endblock %}
+{% block content %}
+<div class="topbar">
+  <div class="title"><h1>Project managers — {{ division_label }}</h1>
+    <small>Raw observed results on closed jobs (closed {{ start|date:"M Y" }} → today) {% if acc.ratings %}beside the context-adjusted rating. The adjusted effect controls for customer, sector, solution, mode, size, sold margin and year, and shrinks small samples toward zero.{% endif %}</small></div>
+  {% include "dashboard/_division_bar.html" with show_years=True %}
+</div>
+<div class="card">
+<div class="table-wrap tall"><table class="data dense">
+  <thead><tr>
+    <th title="Project manager (SL PJPROJ.manager1). Click for their full page.">PM</th>
+    <th class="num" title="Closed & stabilized jobs in the selected window (internal/template/canceled excluded).">Closed jobs</th>
+    <th class="num" title="Billed revenue of those closed jobs.">Revenue</th>
+    <th class="num" title="Gross profit: billed revenue − direct cost (labor wages+burden, material, subcontract, other).">GP $</th>
+    <th class="num" title="GP ÷ revenue — the raw observed margin, no adjustment for job mix.">GP %</th>
+    <th class="num" title="Revenue-weighted sold margin (current budget) → final margin, on jobs that have a contract value.">Sold → Final</th>
+    <th class="num" title="Final margin minus sold margin, points. Positive = delivered above the budgeted margin. Current-budget basis — SL keeps no original budget.">Preservation</th>
+    <th class="num" title="Closed jobs that lost money outright.">Losses</th>
+    <th class="num" title="PTT field hours on those closed jobs.">Hours</th>
+    {% if acc.ratings %}<th class="num" title="Context-adjusted margin effect (percentage points ± standard error): how this PM’s jobs land vs what the model expects given customer, sector, solution, mode, size, sold margin and year — shrunk toward zero for small samples. From the current Ratings run.">Adj. GP % effect</th>
+    <th class="num" title="Same model on margin preservation (final − sold).">Adj. preservation</th>
+    <th title="publishable = enough jobs and diversity · provisional = hard to separate from one customer/solution · insufficient = under 12 rated jobs. rel = reliability (shrinkage survival × diversity).">Rating status</th>{% endif %}
+    <th class="num" title="Open projects right now.">Open jobs</th>
+    <th class="num" title="Contract value of those open projects.">Open CV</th>
+    <th class="num" title="Forecast margin at completion across their open book (deterministic EAC).">EAC GP %</th>
+    <th class="num" title="Open projects rated high or critical risk.">At risk</th>
+    <th class="num" title="Active jobs with no PM remaining-hours estimate — the forecast quality depends on these.">Missing rem hrs</th></tr></thead>
+  <tbody>
+  {% for r in rows %}<tr>
+    <td class="nowrap"><a href="{% url 'dashboard:person_detail' r.k %}"><b>{{ r.label }}</b></a></td>
+    <td class="num">{{ r.n }}</td><td class="num">{{ r.revenue|money_k }}</td><td class="num {{ r.gp|posneg }}">{{ r.gp|money_k }}</td><td class="num">{{ r.gp_pct|pct }}</td>
+    <td class="num muted">{{ r.sold_pct|pct }} → {{ r.final_pct_with|pct }}</td><td class="num {{ r.preservation|posneg }}">{{ r.preservation|pts }}</td><td class="num">{{ r.losers }}</td><td class="num">{{ r.hours|hours }}</td>
+    {% if acc.ratings %}<td class="num {% if r.rating %}{{ r.rating.adjusted_effect|posneg }}{% endif %}">{% if r.rating %}{{ r.rating.adjusted_effect|pts }} <span class="muted">±{{ r.rating.standard_error|pts:1|slice:"1:" }}</span>{% else %}—{% endif %}</td>
+    <td class="num {% if r.pres %}{{ r.pres.adjusted_effect|posneg }}{% endif %}">{% if r.pres %}{{ r.pres.adjusted_effect|pts }}{% else %}—{% endif %}</td>
+    <td class="nowrap">{% if r.rating %}<span class="tag {{ r.rating.publication_status }}">{{ r.rating.publication_status }}</span> <span class="muted">rel {{ r.rating.reliability_score|pct:0 }}</span>{% else %}<span class="muted">not rated</span>{% endif %}</td>{% endif %}
+    <td class="num">{{ r.active.n|default:"—" }}</td><td class="num">{{ r.active.cv|money_k }}</td>
+    <td class="num">{% if r.active and r.active.eac_rev %}{% widthratio r.active.eac_gp r.active.eac_rev 100 %}%{% else %}—{% endif %}</td>
+    <td class="num {% if r.active.at_risk %}neg{% endif %}">{{ r.active.at_risk|default:"—" }}</td><td class="num {% if r.active.missing_rem %}warn-ink{% endif %}">{{ r.active.missing_rem|default:"—" }}</td>
+  </tr>{% endfor %}
+  </tbody></table></div>
+<div class="note" style="margin-top:8px">Preservation = final GP % − sold GP % (revenue-weighted, jobs with a contract value).{% if acc.ratings %} "Adj." columns come from the current <a href="{% url 'dashboard:ratings' %}">ratings run</a>; a status of <em>provisional</em> means the PM is hard to separate from a customer or solution, <em>insufficient</em> means fewer than 12 rated jobs.{% endif %} Estimator is not a source field, so estimator effects are not shown.</div>
+</div>
+{% endblock %}

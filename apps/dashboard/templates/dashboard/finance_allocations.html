@@ -1,0 +1,37 @@
+{% extends "dashboard/base.html" %}{% load humanize pca %}
+{% block title %}Overhead Allocation · Pace Company Analytics{% endblock %}
+{% block content %}
+<div class="topbar">
+  <div class="title"><h1>Corporate overhead allocation</h1>
+    <small>How the corporate (000) overhead pool is charged to divisions in the P&amp;L-by-fiscal-year table. The pool = GL subaccount 0000 overhead (6xxxx/7xxxx, excluding 60000/60005 which are cost of sales). Shares are set here per fiscal year (the FY2024 and FY2025 splits were entered by hand). A year without explicit shares inherits the latest earlier year, so the current year follows FY2025's split until you change it. Shares don't have to sum to 100% — the remainder stays at corporate. Stored locally only; SL is never written.</small></div>
+</div>
+<form method="post" class="card">{% csrf_token %}
+  <table class="data"><thead><tr>
+    <th>Division</th>
+    {% for y in years %}<th class="num" title="{% if y == cur_year %}Current year — inherits the latest defined split unless you set explicit values.{% else %}Fiscal year {{ y }}.{% endif %}">{{ y }}{% if y == cur_year %} <span class="muted">current</span>{% endif %}</th>{% endfor %}
+  </tr></thead><tbody>
+  {% for row in grid %}<tr>
+    <td><b>{{ row.division.code }}</b> <span class="muted">{{ row.division.name }}</span></td>
+    {% for c in row.cells %}
+    <td class="num">
+      <input name="share_{{ c.fy }}_{{ row.division.code }}" value="{% if c.explicit != None %}{{ c.explicit|pct:2|slice:":-1" }}{% endif %}"
+             placeholder="{% if c.inherited and c.effective != None %}{{ c.effective|pct:2|slice:":-1" }} (inherited){% else %}—{% endif %}"
+             style="width:138px;text-align:right;border:1px solid var(--line-strong);border-radius:7px;padding:5px 8px;font:inherit"
+             title="Percent of the {{ c.fy }} corporate pool charged to {{ row.division.code }}.{% if c.inherited and c.effective != None %} Currently inheriting {{ c.effective|pct:2 }} — type a value to override for this year, clear to fall back to inheritance.{% endif %}{% if c.alloc %} Allocated: {{ c.alloc|money }}.{% endif %}">
+      {% if c.alloc %}<div class="muted" style="font-size:11px;margin-top:2px">{{ c.alloc|money }}</div>{% endif %}
+    </td>{% endfor %}
+  </tr>{% endfor %}
+  </tbody><tfoot>
+    <tr><td>Total allocated</td>
+      {% for t in col_totals %}<td class="num" title="Sum of effective shares · allocated dollars of the {{ t.fy }} pool.">{{ t.share|pct:1 }}<div class="muted" style="font-size:11px">{{ t.alloc|money }}</div></td>{% endfor %}</tr>
+    <tr><td title="The corporate 0000-sub overhead pool for the year (from the GL).">Pool</td>
+      {% for t in col_totals %}<td class="num">{{ t.pool|money }}</td>{% endfor %}</tr>
+    <tr><td title="Pool minus allocations — stays at corporate, the part of the pool not charged to any division.">Unallocated</td>
+      {% for t in col_totals %}<td class="num {% if t.unalloc < 0 %}neg{% endif %}">{{ t.unalloc|money }}</td>{% endfor %}</tr>
+  </tfoot></table>
+  <div class="row" style="margin-top:12px;gap:10px">
+    <button class="btn primary">Save shares</button>
+    <span class="note">Values are percentages (e.g. 24.78). Blank = no explicit share for that year (inherits). Changes take effect immediately in the {% if acc.command_center %}Command Center{% else %}divisional{% endif %} P&amp;L table's "000 OH" and "Op (loaded)" columns.</span>
+  </div>
+</form>
+{% endblock %}

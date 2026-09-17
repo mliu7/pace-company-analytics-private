@@ -1,0 +1,124 @@
+{% extends "dashboard/base.html" %}{% load humanize pca %}
+{% block title %}Bank rec {{ st.period_end|date:"M Y" }} · Pace Company Analytics{% endblock %}
+{% block content %}
+{% for upload in st.uploads.all %}<p><a class="btn" target="_blank" rel="noopener" href="{% url 'dashboard:finance_bank_file' upload.pk %}">View original PDF</a></p>{% endfor %}
+<div class="crumbs"><a href="{% url 'dashboard:finance_bank' %}">Bank reconciliation</a> › {{ st.period_end|date:"F Y" }}{% if others %} · <span class="muted">other months:</span> {% for o in others %}<a href="{% url 'dashboard:finance_bank_detail' o.pk %}">{{ o.period_end|date:"M y" }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}</div>
+<div class="topbar">
+  <div class="title"><h1>{{ st.account_title|default:"Bank account"|title }} · {{ st.period_end|date:"F Y" }}</h1>
+    <small>{{ st.bank_name|default:"Bank" }} account {{ st.bank_account }} = GL {{ st.gl_account }} · statement {{ st.period_start|date:"M j" }}–{{ st.period_end|date:"M j, Y" }} · file <code>{{ st.file_name }}</code> · {{ n_lines }} lines. Every number below is from the parsed statement or SL's cash GL; hover headers and flags for definitions.</small></div>
+  <div class="row">
+    <span class="pill" title="Ending balance per the bank.">bank {{ st.ending_balance|money:2 }}</span>
+    <span class="pill" title="GL {{ st.gl_account }} book balance at period end from AcctHist (negative when checks written exceed the swept-to-zero bank balance).">book {% if st.book_balance != None %}{{ st.book_balance|money:2 }}{% else %}—{% endif %}</span>
+    <span class="pill {% if res != None and res|absolute < 1 %}good{% elif res != None and res|absolute < 10000 %}warn{% elif res != None %}bad{% endif %}" title="Adjusted bank minus book after every reconciling item. To the penny = the month is fully explained.">residual <b>{% if res != None %}{{ res|signed_money }}{% else %}—{% endif %}</b></span>
+    {% if st.reconciled_at %}<span class="pill info" title="When SL was last read for this statement.">reconciled {{ st.reconciled_at|date:"M j, g:i A" }}</span>{% endif %}
+  </div>
+</div>
+
+{% if not st.parse_ok %}<div class="card" style="margin-bottom:12px"><div class="flag critical"><b>Statement did not parse cleanly</b><ul>{% for n in st.parse_notes %}<li>{{ n }}</li>{% endfor %}</ul></div></div>{% endif %}
+{% if not st.reconciled_at %}<div class="card empty">Not reconciled yet — click <b>Scan folder &amp; reconcile</b> on the list page.</div>{% else %}
+
+<div class="grid" style="grid-template-columns:1.1fr 1.5fr 1.4fr;margin-bottom:12px">
+  <div class="card tight">
+    <h2>Statement <small>bank's own summary</small></h2>
+    <dl class="kv dense">
+      <dt>Previous balance</dt><dd>{{ st.previous_balance|money:2 }}</dd>
+      <dt>Deposits</dt><dd>{{ st.deposits_total|money:2 }} <span class="muted">{{ st.deposits_count }} items</span></dd>
+      <dt>Withdrawals</dt><dd>{{ st.withdrawals_total|money:2 }} <span class="muted">{{ st.withdrawals_count }} items</span></dd>
+      <dt style="padding-left:10px">of which checks</dt><dd>{{ st.checks_total|money:2 }} <span class="muted">{{ st.checks_count }}</span></dd>
+      <dt>Ending balance</dt><dd><b>{{ st.ending_balance|money:2 }}</b></dd>
+    </dl>
+    <div style="border-top:1px solid var(--line);margin:8px 0"></div>
+    <dl class="kv dense">
+      <dt title="AcctHist book balance at the prior period end.">Book, start</dt><dd>{{ st.book_balance_prev|money:2 }}</dd>
+      <dt title="AcctHist book balance at this period end.">Book, end</dt><dd><b>{{ st.book_balance|money:2 }}</b></dd>
+      <dt title="Checks on the statement matched to SL by number and amount.">Checks matched</dt><dd>{{ r.checks.matched }} / {{ r.checks.on_statement }}{% if r.checks.reversed %} <span class="muted">· {{ r.checks.reversed|length }} reversed</span>{% endif %}</dd>
+      <dt title="Does SL's own cleared-check flag for this period equal the statement's check list?">SL clear flags</dt><dd>{% if r.checks.sl_cleared_flags_identical %}<span class="tag low">identical</span>{% else %}<span class="tag moderate">differ</span>{% endif %}</dd>
+    </dl>
+  </div>
+  <div class="card tight">
+    <h2>Bank → book bridge <small>reconciling items at {{ st.period_end|date:"M j" }}</small></h2>
+    <table class="data dense"><tbody>
+    {% for b in bridge %}<tr><td>{{ b.label }}{% if b.n %} <span class="muted">({{ b.n }})</span>{% endif %}</td><td class="num bridge-amt">{% if b.amount != None %}{{ b.amount|money:2 }}{% endif %}</td></tr>{% endfor %}
+    <tr style="font-weight:600"><td>= adjusted bank</td><td class="num">{{ r.adjusted_bank|money:2 }}</td></tr>
+    <tr><td>book balance</td><td class="num">{{ st.book_balance|money:2 }}</td></tr>
+    <tr style="font-weight:700"><td>Residual (adjusted bank − book)</td><td class="num {{ res_css }}">{{ res|signed_money }}</td></tr>
+    </tbody></table>
+  </div>
+  <div class="card tight">
+    <h2>Flags <small>{{ flags|length }}</small></h2>
+    {% for f in flags %}<div class="flag {{ f.level }}"><b>{{ f.text }}</b>{% if f.detail %}<ul>{% for d in f.detail %}<li>{{ d }}</li>{% endfor %}</ul>{% endif %}</div>{% empty %}<div class="empty">No flags.</div>{% endfor %}
+  </div>
+</div>
+
+<div class="grid two" style="margin-bottom:12px">
+  <div class="card tight">
+    <h2>Outstanding checks at {{ st.period_end|date:"M j" }} <small>{{ r.outstanding.n }} · {{ r.outstanding.total|money:2 }}</small></h2>
+    <div class="row" style="gap:10px;flex-wrap:wrap;margin-bottom:8px">
+      {% for label, v in by_age %}<div class="wip-chip" style="min-width:120px"><div class="label">{{ label }}</div><div class="val" style="font-size:14px">{{ v.amount|money }}</div><div class="sub muted">{{ v.n }} check{{ v.n|pluralize }}</div></div>{% endfor %}
+    </div>
+    <div class="table-wrap" style="max-height:320px">
+    <table class="data dense"><thead><tr><th>SL check</th><th>Date</th><th>Payee</th><th class="num">Amount</th><th class="num">Age</th></tr></thead><tbody>
+    {% for o in r.outstanding.items %}<tr {% if o.age > 60 %}class="rowbad"{% endif %}><td class="mono">{{ o.ref }}</td><td class="muted">{{ o.dt }}</td><td class="trunc fluid" style="width:55%" title="{{ o.payee }}">{{ o.payee }}</td><td class="num">{{ o.amt|money:2 }}</td><td class="num muted">{{ o.age }}d</td></tr>{% empty %}<tr><td colspan="5" class="empty">None.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </div>
+  <div class="card tight">
+    <h2>Payroll <small>Paylocity items on the bank vs payroll journals in GL, by week</small></h2>
+    <table class="data dense"><thead><tr><th>Week of</th><th class="num">Bank</th><th class="num">GL (this period)</th><th class="num" title="Bank − GL. Negative = GL recorded more than the bank paid (live checks, later remittances, entries dated after period end).">Diff</th></tr></thead><tbody>
+    {% for w in payroll.weeks %}<tr><td>{{ w.week }}</td><td class="num">{{ w.bank|money:2 }}</td><td class="num">{{ w.gl|money:2 }}</td><td class="num {% if w.diff|absolute >= 1000 %}warn-ink{% endif %}">{{ w.diff|signed_money }}</td></tr>{% endfor %}
+    <tr style="font-weight:600"><td>Total</td><td class="num">{{ payroll.bank_total|money:2 }}</td><td class="num">{{ payroll.gl_total|money:2 }}</td><td class="num">{{ payroll.timing_adjusted_diff|signed_money }} <span class="muted" style="font-weight:400">excl. {{ payroll.gl_dated_after_period|money }} dated after period end</span></td></tr>
+    </tbody></table>
+    {% if payroll.cancelled %}<div class="note" style="margin-top:6px">Accrual + reversal pairs ignored: {% for pair in payroll.cancelled %}{{ pair.0.dt }} / {{ pair.1.dt }} {{ pair.0.amt|money }}{% if not forloop.last %}; {% endif %}{% endfor %}</div>{% endif %}
+    <details data-remember="payroll-gl" style="margin-top:6px"><summary>GL payroll lines ({{ payroll.gl_lines|length }})</summary>
+      <table class="data dense"><tbody>{% for g in payroll.gl_lines %}<tr><td class="muted">{{ g.dt }}</td><td>{{ g.descr }}</td><td class="muted">{{ g.u }}</td><td class="num">{% if g.side == 'cr' %}{{ g.amt|money:2 }}{% else %}<span class="pos">+{{ g.amt|money:2 }}</span>{% endif %}</td></tr>{% endfor %}</tbody></table></details>
+  </div>
+</div>
+
+<div class="grid two" style="margin-bottom:12px">
+  <div class="card tight">
+    <h2>Unmatched <small>items with no counterpart on the other side</small></h2>
+    <h3>Bank items with no SL entry ({{ r.bank_only|length }})</h3>
+    <table class="data dense"><tbody>{% for b in r.bank_only %}<tr><td class="muted">{{ b.dt }}</td><td>{{ b.desc }}</td><td class="num {% if b.kind == 'wd' %}neg{% else %}pos{% endif %}">{{ b.amt|money:2 }}</td></tr>{% empty %}<tr><td class="empty">None — every bank line has an SL counterpart.</td></tr>{% endfor %}</tbody></table>
+    <h3 style="margin-top:8px">GL entries this period with no bank item ({{ r.gl_only|length }})</h3>
+    <table class="data dense"><tbody>{% for g in r.gl_only %}<tr><td class="muted">{{ g.dt }}</td><td class="muted">{{ g.m }} {{ g.ref }}</td><td>{{ g.descr }} <span class="muted">{{ g.u }}</span></td><td class="num {% if g.side == 'cr' %}neg{% else %}pos{% endif %}">{{ g.amt|money:2 }}</td></tr>{% empty %}<tr><td class="empty">None.</td></tr>{% endfor %}</tbody></table>
+    {% if r.eft_open or r.eft_prior %}<h3 style="margin-top:8px">SL EFT payments not yet on a statement ({{ r.eft_open|length|add:r.eft_prior|length }})</h3>
+    <table class="data dense"><tbody>{% for g in r.eft_prior %}<tr><td class="muted">{{ g.dt }}</td><td class="mono">{{ g.ref }}</td><td>{{ g.payee|default:g.descr }}</td><td class="num">{{ g.amt|money:2 }}</td></tr>{% endfor %}{% for g in r.eft_open %}<tr><td class="muted">{{ g.dt }}</td><td class="mono">{{ g.ref }}</td><td>{{ g.payee|default:g.descr }}</td><td class="num">{{ g.amt|money:2 }}</td></tr>{% endfor %}</tbody></table>{% endif %}
+    {% if r.cancelled %}<h3 style="margin-top:8px">Self-cancelling SL pairs ignored ({{ r.cancelled|length }})</h3>
+    <table class="data dense"><tbody>{% for c in r.cancelled %}<tr><td class="muted">{{ c.why }}</td><td>{{ c.a.dt }} {{ c.a.descr }}{% if c.b %} ↔ {{ c.b.dt }} {{ c.b.descr }}{% endif %}</td><td class="num">{{ c.a.amt|money:2 }}</td></tr>{% endfor %}</tbody></table>{% endif %}
+  </div>
+  <div class="card tight">
+    <h2>How the month matched <small>by rule</small></h2>
+    <table class="data dense"><thead><tr><th>Rule</th><th class="num">Matches</th><th class="num">Amount</th></tr></thead><tbody>
+    {% for m in r.match_summary %}<tr><td>{{ m.kind }}</td><td class="num">{{ m.n }}</td><td class="num">{{ m.amount|money:2 }}</td></tr>{% endfor %}
+    </tbody></table>
+    <div class="note" style="margin-top:8px">Checks match by number (bank drops the leading digit) and must agree on amount. "ACH settlement" = one bank ACH-origination debit rebuilt from SL's 01-series EFT payments dated 0–7 days earlier. "deposit" = a remote/package deposit rebuilt from the AR receipt batch(es) it contains. Payroll is compared as a category (left table) rather than line by line because Paylocity splits net pay, trust and tax collections differently from the GL journals.</div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Statement lines <small>{{ lines|length }} of {{ n_lines }} shown</small></h2>
+  <form method="get" class="filters">
+    <label>Type<select name="bucket"><option value="">all</option>{% for b in buckets_present %}<option value="{{ b }}" {% if g.bucket == b %}selected{% endif %}>{{ bucket_labels|getitem:b|default:b }}</option>{% endfor %}</select></label>
+    <label>Status<select name="status"><option value="">all</option><option value="matched" {% if g.status == 'matched' %}selected{% endif %}>matched</option><option value="unmatched" {% if g.status == 'unmatched' %}selected{% endif %}>unmatched</option></select></label>
+    <label>Sort<select name="sort"><option value="line" {% if sort == 'line' %}selected{% endif %}>statement order</option><option value="-amount" {% if sort == '-amount' %}selected{% endif %}>largest first</option><option value="date" {% if sort == 'date' %}selected{% endif %}>date</option><option value="desc" {% if sort == 'desc' %}selected{% endif %}>description</option></select></label>
+    <label>Search<input type="search" name="q" value="{{ g.q }}" placeholder="description, payee, SL ref"></label>
+    <button class="btn">Apply</button> <a class="btn" href="{% url 'dashboard:finance_bank_detail' st.pk %}">Reset</a>
+    <label style="margin-left:auto">Quick filter<input type="search" id="qf" placeholder="type to filter…" oninput="qfilter(this.value)"></label>
+  </form>
+  <div class="table-wrap" style="max-height:70vh">
+  <table class="data dense" id="bltable"><thead><tr><th>#</th><th>Posted</th><th>Type</th><th>Description</th><th>Payee / SL</th><th class="num">Amount</th><th>Matched by</th><th>SL detail</th></tr></thead><tbody>
+  {% for l in lines %}<tr class="{{ l.status }}">
+    <td class="muted">{{ l.line_no }}</td><td class="muted">{{ l.posted_date|date:"M j" }}</td>
+    <td><span class="tag">{{ bucket_labels|getitem:l.bucket|default:l.bucket }}</span></td>
+    <td class="trunc fluid" style="width:30%" title="{{ l.description }}">{{ l.description }}</td>
+    <td class="trunc fluid" style="width:18%" title="{% if l.sl_ref %}{{ l.sl_ref }} · {% endif %}{{ l.payee }}">{% if l.sl_ref %}<span class="mono">{{ l.sl_ref }}</span> {% endif %}{{ l.payee }}</td>
+    <td class="num {{ l.signed|posneg }}">{{ l.signed|signed_money }}</td>
+    <td>{% if l.match_kind %}{{ l.match_kind }}{% else %}<span class="tag high">unmatched</span>{% endif %}</td>
+    <td class="muted" style="font-size:11.5px">{% for d in l.match_detail|slice:":4" %}{{ d.dt }} {{ d.m }} {{ d.ref }} {{ d.descr }} {{ d.amt|money }}{% if not forloop.last %} · {% endif %}{% endfor %}{% if l.match_detail|length > 4 %} · +{{ l.match_detail|length|add:"-4" }} more{% endif %}</td></tr>
+  {% empty %}<tr><td colspan="8" class="empty">No lines match these filters.</td></tr>{% endfor %}
+  </tbody></table></div>
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}<script>
+function qfilter(q) { q = q.trim().toLowerCase(); document.querySelectorAll('#bltable tbody tr').forEach(tr => { tr.style.display = !q || tr.textContent.toLowerCase().includes(q) ? '' : 'none'; }); }
+</script>{% endblock %}

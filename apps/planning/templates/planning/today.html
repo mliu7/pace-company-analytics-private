@@ -1,0 +1,35 @@
+{% extends "dashboard/base.html" %}
+{% load humanize pca static %}
+{% block title %}Production · Today · Pace Company Analytics{% endblock %}
+{% block extra_css %}@import url("{% static 'planning/planning.css' %}?v={{ PL_VERSION }}");{% endblock %}
+{% block content %}
+<div class="topbar"><div class="title"><h1>Production</h1><small>Today — what needs attention in each division, from the status board, punch lists and approval queue. Every number is a link.</small></div></div>
+{% include "planning/_tabs.html" %}
+{% if queue and queue.n %}<div class="callout{% if queue.overdue %} warn{% endif %}" style="margin-bottom:14px">
+  <b>{{ queue.n }} request{{ queue.n|pluralize }} waiting for your approval</b>{% if queue.overdue %} · {{ queue.overdue }} past the needed-by date{% endif %} — <a href="{% url 'planning:planning_approvals' %}?filter=pending">open the approvals queue</a>.
+</div>{% endif %}
+{% for c in cards %}
+<div class="card td-div">
+  <h2>{{ c.div }} <small>active tasks and open punch items · <a href="{% url 'planning:planning_status' %}?div={{ c.div }}">status board</a> · <a href="{% url 'planning:planning_punch' %}?div={{ c.div }}">punch lists</a></small></h2>
+  <div class="td-grid">
+    <a href="{% url 'planning:planning_tasks' %}?div={{ c.div }}" class="{% if not c.active %}zero{% endif %}" title="Status rows that are not completed and under 100 % complete"><span class="l">Active tasks</span><span class="v">{{ c.active }}</span></a>
+    <a href="{% url 'planning:planning_tasks' %}?div={{ c.div }}&priority=red" class="{% if c.past_stop %}red{% else %}zero{% endif %}" title="Active tasks whose critical stop date is before today"><span class="l">Past critical stop</span><span class="v">{{ c.past_stop }}</span></a>
+    <a href="{% url 'planning:planning_tasks' %}?div={{ c.div }}&priority=yellow" class="{% if c.due_soon %}amber{% else %}zero{% endif %}" title="Critical stop today through {{ soon|date:'M j' }} (14 days)"><span class="l">Due ≤ 14 days</span><span class="v">{{ c.due_soon }}</span></a>
+    <a href="{% url 'planning:planning_status' %}?div={{ c.div }}&status=NEED+TO+SCHEDULE" class="{% if c.needs_schedule %}amber{% else %}zero{% endif %}" title="Active tasks with NEED TO SCHEDULE in either status pill — the scheduler's Needs Staffing rail (Phase E) reads the same rows"><span class="l">Needs scheduling</span><span class="v">{{ c.needs_schedule }}</span></a>
+    <a href="{% url 'planning:planning_tasks' %}?div={{ c.div }}&priority=none" class="{% if not c.missing_stop %}zero{% endif %}" title="Active tasks with no critical stop date"><span class="l">Missing stop date</span><span class="v">{{ c.missing_stop }}</span></a>
+    <a href="{% url 'planning:planning_punch' %}?div={{ c.div }}&view=overdue" class="{% if c.overdue_punch %}red{% else %}zero{% endif %}" title="Open punch items due before today (Date Completed empty)"><span class="l">Overdue punches</span><span class="v">{{ c.overdue_punch }}</span></a>
+    <a href="{% url 'planning:planning_punch' %}?div={{ c.div }}&view=projects&status=critical" class="{% if c.critical_punch %}amber{% else %}zero{% endif %}" title="Open punch items at criticality 4 or 5"><span class="l">Critical punches</span><span class="v">{{ c.critical_punch }}</span></a>
+    <a href="{% url 'planning:planning_approvals' %}?filter=pending&q={{ c.div }}" class="{% if c.pending_approvals %}amber{% else %}zero{% endif %}" title="BOM / labor requests awaiting a decision on this division's SL projects"><span class="l">Pending approvals</span><span class="v">{{ c.pending_approvals }}</span></a>
+    {% if c.bids_due is not None %}<a href="{% url 'bids:bids_calendar' %}?div={{ c.div }}" class="{% if not c.bids_due %}zero{% endif %}" title="Bids due in the next 7 days (Bids › Calendar)"><span class="l">Bids due this week</span><span class="v">{{ c.bids_due }}</span></a>{% endif %}
+  </div>
+</div>
+{% endfor %}
+{% if unlinked_pending %}<div class="note" style="margin-bottom:12px">{{ unlinked_pending }} pending approval request{{ unlinked_pending|pluralize }} carr{{ unlinked_pending|pluralize:"ies,y" }} no SL project yet and so count{{ unlinked_pending|pluralize:"s," }} under no division — <a href="{% url 'planning:planning_approvals' %}?filter=pending">see the queue</a>.</div>{% endif %}
+<div class="card tight">
+  <h2>Recent status-board changes <small>who changed what, most recent first</small></h2>
+  {% if recent %}<table class="data dense"><thead><tr><th>When</th><th>Who</th><th>Row</th><th>Field</th><th>From</th><th>To</th></tr></thead><tbody>
+  {% for h in recent %}<tr><td class="muted" title="{{ h.at }}">{{ h.at|date:"M j, H:i" }}</td><td>{{ h.by }}</td><td><a href="{% url 'planning:planning_status' %}?hl={{ h.row.id }}">{{ h.row.division }} · {{ h.row.name|truncatechars:60 }}</a></td><td class="mono">{{ h.field }}</td><td class="muted">{{ h.old|truncatechars:40 }}</td><td>{{ h.new|truncatechars:60 }}</td></tr>{% endfor %}
+  </tbody></table>{% else %}<div class="empty">No changes recorded yet.</div>{% endif %}
+</div>
+{% endblock %}
+{% block scripts %}<script src="{% static 'planning/planning.js' %}?v={{ PL_VERSION }}"></script>{% endblock %}

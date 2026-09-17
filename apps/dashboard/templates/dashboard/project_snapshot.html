@@ -1,0 +1,382 @@
+{% extends "dashboard/base.html" %}{% load humanize pca %}
+{% block title %}Project Snapshot {{ label }} · Pace Company Analytics{% endblock %}
+{% block content %}
+<div class="topbar">
+  <div class="title"><h1>Project Snapshot</h1>
+    <small>What happened on the jobs in this window — who worked where, whether the work paid for itself, how those jobs are trending, and the money and material that moved. {% if view == 'day' %}Friday's page covers Fri–Sun.{% else %}Calendar weeks, Monday–Sunday.{% endif %} Every term is click-defined; every job, PM, customer and person links to its page.</small></div>
+  <div class="row">
+    <a class="btn small {% if view == 'day' %}primary{% endif %}" href="?view=day{% if div_code %}&div={{ div_code }}{% endif %}{% if pm_sel %}&pm={{ pm_sel }}{% endif %}{% for k in upd_sel %}&upd={{ k }}{% endfor %}">Day</a>
+    <a class="btn small {% if view == 'week' %}primary{% endif %}" href="?view=week{% if div_code %}&div={{ div_code }}{% endif %}{% if pm_sel %}&pm={{ pm_sel }}{% endif %}{% for k in upd_sel %}&upd={{ k }}{% endfor %}">Week</a>
+    {% if prev_key %}<a class="btn small" href="?view={{ view }}&{{ view }}={{ prev_key|date:'Y-m-d' }}{% if div_code %}&div={{ div_code }}{% endif %}{% if pm_sel %}&pm={{ pm_sel }}{% endif %}{% for k in upd_sel %}&upd={{ k }}{% endfor %}" title="Previous {{ view }} with activity ({{ prev_key|date:'D M j' }}).">←</a>{% else %}<span class="btn small" style="visibility:hidden">←</span>{% endif %}
+    <b style="white-space:nowrap;text-align:center;min-width:{% if view == 'week' %}215px{% else %}165px{% endif %};font-size:14px">{{ label }}</b>
+    {% if next_key %}<a class="btn small" href="?view={{ view }}&{{ view }}={{ next_key|date:'Y-m-d' }}{% if div_code %}&div={{ div_code }}{% endif %}{% if pm_sel %}&pm={{ pm_sel }}{% endif %}{% for k in upd_sel %}&upd={{ k }}{% endfor %}" title="Next {{ view }} with activity ({{ next_key|date:'D M j' }}).">→</a>{% else %}<span class="btn small" style="visibility:hidden">→</span>{% endif %}
+    <form method="get" style="display:inline">
+      <input type="hidden" name="view" value="{{ view }}">{% if div_code %}<input type="hidden" name="div" value="{{ div_code }}">{% endif %}{% if pm_sel %}<input type="hidden" name="pm" value="{{ pm_sel }}">{% endif %}{% for k in upd_sel %}<input type="hidden" name="upd" value="{{ k }}">{% endfor %}
+      <input type="date" name="{{ view }}" value="{{ start|date:'Y-m-d' }}" onchange="this.form.submit()" style="font:inherit;padding:5px 8px;border:1px solid var(--line-strong);border-radius:8px" title="Jump to any date — it snaps to its {{ view }} window.">
+    </form>
+  </div>
+</div>
+
+<form method="get" class="card tight" style="margin-bottom:12px">
+  <input type="hidden" name="view" value="{{ view }}"><input type="hidden" name="{{ view }}" value="{{ start|date:'Y-m-d' }}">
+  <div class="filters" style="margin-bottom:0">
+    {% include "dashboard/_division_stepper.html" %}
+    <label title="Filter to one project manager's jobs — the view PMs will use.">Project manager
+      <select name="pm" onchange="this.form.submit()"><option value="">All PMs</option>
+      {% for p in pms %}<option value="{{ p.k }}" {% if pm_sel == p.k %}selected{% endif %}>{{ p.n }}</option>{% endfor %}</select></label>
+    <div class="flab" title="Narrow the Job activity table to the people who saved a PTT % update in this window (pick several), or to the jobs nobody updated. The page's totals, flags and money stay window-wide.">Updated by
+      <details class="msel" id="upd-msel"><summary>{% if upd_sel %}{{ upd_names|join:", "|truncatechars:34 }}{% else %}Anyone{% endif %}</summary>
+        <div class="panel"><div class="opts">
+          {% for u in updaters %}<label><input type="checkbox" name="upd" value="{{ u.key }}" {% if u.key in upd_sel %}checked{% endif %}>{{ u.name }}<span class="n">{{ u.n }}</span></label>{% endfor %}
+          {% if upd_none %}<label><input type="checkbox" name="upd" value="none" {% if 'none' in upd_sel %}checked{% endif %}><i>no % update</i><span class="n">{{ upd_none }}</span></label>{% endif %}
+          {% if not updaters and not upd_none %}<div class="muted" style="padding:4px 6px">No jobs in this window.</div>{% endif %}
+        </div><div class="row">{% if upd_sel %}<a class="btn small" href="?{% qs_without request 'upd' %}">Clear</a>{% endif %}<button class="btn small primary" type="submit">Apply</button></div></div>
+      </details></div>
+    {% if filtered %}<span class="note" style="align-self:center">filtered — company-wide AP checks hidden</span>{% endif %}
+    <span style="margin-left:auto"><div class="chart" style="height:40px;width:280px" title="Field hours per {{ view }}, recent windows — click-free context strip."><canvas id="c_strip"></canvas></div></span>
+  </div>
+</form>
+
+<div class="grid four" style="margin-bottom:12px">
+  <div class="card kpi"><div class="label">Field hours</div><div class="value">{{ tot.hours|hours }}</div>
+    <div class="sub">{{ tot.people }} people · {{ tot.jobs }} job{{ tot.jobs|pluralize }}{% if oh_tot.hours %} · <a href="#overhead" title="Hours on 9999 overhead buckets — see the Overhead buckets section.">{{ oh_tot.hours|hours }} overhead</a>{% endif %}{% if tot.ot %} · <span class="warn-ink">{{ tot.ot|hours }} OT</span>{% endif %}</div></div>
+  <div class="card kpi"><div class="label" title="The Job-activity net across EVERY job with window activity — Σ Δ% × contract value (earned-value WIP basis) minus estimated loaded labor minus other posted costs (material, subs, other direct) — minus the estimated cost of overhead-bucket hours. Equals the Work margin row at the foot of the Job activity table (All activity net − overhead buckets). PMs update % sporadically: expect noise on single days; the week view is the fairer read.">Work margin (window)</div>
+    <div class="value sm {{ tot.margin|posneg }}">{{ tot.margin|signed_money }}</div>
+    <div class="sub">earned {{ tot.d_earned|money_k }}{% if tot.no_ev %} <span class="muted" title="Service agreements and T&amp;M whose PTT % moved in the window: outside WIP by rule, so their % moves are not priced as earned value.">(excl. {{ tot.no_ev }} SA/T&amp;M)</span>{% endif %} − labor {{ tot.labor_cost|money_k }} − other {{ tot.other|money_k }} − <a href="#overhead" title="Estimated cost of hours on 9999 overhead buckets.">overhead {{ oh_tot.cost|money_k }}</a></div></div>
+  <div class="card kpi"><div class="label" title="Invoices issued in the window (credit memos negative) and payments applied to jobs.">Billing out / cash in</div>
+    <div class="value sm">{{ tot.billing|money_k }} <span class="muted">/</span> {{ tot.cash_in|money_k }}</div>
+    <div class="sub">{{ invoices|length }} invoice{{ invoices|length|pluralize }} · {{ payments|length }} payment application{{ payments|length|pluralize }}</div></div>
+  <div class="card kpi"><div class="label" title="New purchase orders cut and PO receipts posted in the window{% if not filtered %}, plus AP checks out the door{% endif %}.">Material &amp; AP</div>
+    <div class="value sm">{{ tot.ordered|money_k }} <span class="muted">ord /</span> {{ tot.received|money_k }} <span class="muted">rcvd</span></div>
+    <div class="sub">{% if not filtered %}AP paid out {{ tot.ap_out|money }}{% if tot.ap_card %} · <span title="Settled with a company credit card — no cash out.">{{ tot.ap_card|money }} by card</span>{% endif %}{% else %}AP checks hidden under filters{% endif %}</div></div>
+</div>
+
+{% if big_ot or spread or no_hours or lone_jobs %}
+<div class="card tight" style="margin-bottom:12px">
+  <div class="row" style="gap:10px;flex-wrap:wrap">
+    <b title="Exception flags for the window — click any chip to expand the list.">Flags</b>
+    {% if big_ot %}<a class="tag high" href="#" onclick="snapToggle('flag-ot');return false" title="Person-days with more than 2 OT hours or over 10 total hours.">big OT · {{ big_ot|length }}</a>{% endif %}
+    {% if spread %}<a class="tag moderate" href="#" onclick="snapToggle('flag-spread');return false" title="People logged on 3+ different jobs in a single day.">spread thin · {{ spread|length }}</a>{% endif %}
+    {% if lone_jobs %}<a class="tag" href="#" onclick="snapToggle('flag-lone');return false" title="Jobs worked by exactly one person in the window.">lone worker · {{ lone_jobs|length }}</a>{% endif %}
+    {% if no_hours %}<a class="tag moderate" href="#" onclick="snapToggle('flag-nohours');return false" title="PTT-active field-hourly employees with no hours logged in this window.">no hours logged · {{ no_hours|length }}</a>{% endif %}
+  </div>
+  <div id="flag-ot" style="display:none;margin-top:8px"><table class="data dense"><thead><tr><th>Person</th><th class="num">Date</th><th class="num">Hours</th><th class="num">OT</th></tr></thead><tbody>
+    {% for r in big_ot %}<tr><td><a href="{% url 'dashboard:person_detail' r.employee_key %}">{{ r.canonical_name }}</a></td><td class="num">{{ r.work_date|date:"D M j" }}</td><td class="num">{{ r.h|num:1 }}</td><td class="num warn-ink">{{ r.ot|num:1 }}</td></tr>{% endfor %}</tbody></table></div>
+  <div id="flag-spread" style="display:none;margin-top:8px"><table class="data dense"><thead><tr><th>Person</th><th class="num">Date</th><th class="num">Jobs</th><th class="num">Hours</th></tr></thead><tbody>
+    {% for r in spread %}<tr><td><a href="{% url 'dashboard:person_detail' r.employee_key %}">{{ r.canonical_name }}</a></td><td class="num">{{ r.work_date|date:"D M j" }}</td><td class="num">{{ r.jobs }}</td><td class="num">{{ r.h|num:1 }}</td></tr>{% endfor %}</tbody></table></div>
+  <div id="flag-lone" style="display:none;margin-top:8px"><table class="data dense"><thead><tr><th>Job</th><th>Person</th><th class="num">Hours</th></tr></thead><tbody>
+    {% for j in lone_jobs %}<tr><td class="trunc fluid" style="width:60%" title="{{ j.title }}"><a href="{% url 'dashboard:project_detail' j.cpn %}">{{ j.display_number }}</a> <span class="muted">{{ j.title }}</span></td><td>{{ j.crew.0.name }}</td><td class="num">{{ j.hours|num:1 }}</td></tr>{% endfor %}</tbody></table></div>
+  <div id="flag-nohours" style="display:none;margin-top:8px"><div class="row" style="flex-wrap:wrap;gap:6px 14px">
+    {% for r in no_hours %}<span><a href="{% url 'dashboard:person_detail' r.employee_key %}">{{ r.canonical_name }}</a> <span class="muted">{{ r.home_subaccount }}</span></span>{% endfor %}</div></div>
+</div>
+{% endif %}
+{% load bids %}{% bids_week_card div_code start end %}
+
+<div class="card" style="margin-bottom:12px">
+  <h2>Job activity <small>{{ label }} · every job with a % update, field hours, or posted costs · <span id="jobact-help">net = Δ earned − est. labor − other costs</span><span id="jobwip-help" hidden>the WIP by Job columns for this window — WIP {% if jt.per.live %}as it stands now{% else %}at the window end{% endif %}, Δ WIP since {{ jt.per.start|date:"M j" }}, the window's GP + Δ WIP</span> · click a job for its crew &amp; notes · click headers to sort</small>
+    <span style="margin-left:auto">
+      <a href="#" class="btn small primary" id="view-act" onclick="snapView('activity');return false" title="Window accountability: % update, Δ earned, hours, estimated labor, other posted costs, net.">Activity</a>
+      <a href="#" class="btn small" id="view-wip" onclick="snapView('wip');return false" title="The same jobs in the WIP by Job layout: progress, WIP = earned − billed with the change over the window, the window's result (GP + Δ WIP) and profitability. PM, Updated by and the crew drill stay.">WIP view</a>
+      <span class="muted" style="margin:0 6px">·</span>
+      <a href="#" class="btn small" id="filt-worked" onclick="snapFilter('worked');return false" title="Only jobs where field labor was logged in the window.">Worked · {{ tot.jobs }}</a>
+      <a href="#" class="btn small primary" id="filt-all" onclick="snapFilter('all');return false" title="Every job with a % update, hours, or posted costs.">All activity · {{ prog_rows|length }}</a>
+      {% if upd_sel %}<a class="tag info" href="?{% qs_without request 'upd' %}" title="The table is narrowed to jobs updated by {{ upd_names|join:', ' }} ({{ prog_rows|length }} of {{ prog_all_n }}). Click to clear.">updated by: {{ upd_names|join:", " }} ✕</a>{% endif %}
+      <a href="#" class="btn small" onclick="snapAll(false);return false">Collapse</a>
+      <a href="#" class="btn small" onclick="snapAll(true);return false">Expand</a></span></h2>
+  <div id="jobwip-view" hidden>{% include "dashboard/_job_table.html" %}</div>
+  <div id="jobact-view" style="overflow:auto;max-height:80vh"><table class="data dense pay-table snap-stick" id="jobact"><thead><tr>
+    <th class="snap-sort" data-c="0" style="min-width:220px">Job / crew member</th>
+    <th class="snap-sort" data-c="1">PM</th>
+    <th class="snap-sort" data-c="2" title="Who saved the % update in PTT (latest in the window). 'no % update' = hours or costs landed but the estimate was not touched.">Updated by</th>
+    <th class="num snap-sort" data-c="3" title="% complete over the window: old → new when it moved; the standing % otherwise.">% complete</th>
+    <th class="num snap-sort" data-c="4" title="Δ% × contract value — earned value moved in the window (earned-value WIP basis).">Δ earned</th>
+    <th class="num snap-sort" data-c="5" title="PTT field hours in the window (crew rows: that person's hours). ⚡ = part of these hours were logged in PTT's overtime column — hover the bolt for how many.">Hours</th>
+    <th class="num snap-sort" data-c="6" title="Window hours × loaded rate (person 13-week loaded rates, division fallback — same pricing as the EAC). Estimated, not payroll.">Est. labor</th>
+    <th class="num snap-sort" data-c="7" title="SL cost postings dated in the window: material (incl. purchase variance), subcontract, other direct. Labor postings excluded — Est. labor covers labor.">Other costs</th>
+    <th class="num snap-sort" data-c="8" title="Δ earned − est. labor − other costs. With no % update the window's spend earned nothing on record — usually a stale estimate, not a real loss.">Net +/−</th>
+    <th class="num snap-sort" data-c="9" title="Gross margin: sold GP% (current SL budget) → projected GP% at completion (EAC), in bold. Green = the EAC is above the sold margin, red = below. Hover a value for the points difference and the 7 / 30-day EAC movement.">GP% sold → EAC</th>
+    <th class="snap-sort" data-c="10" title="EAC risk level.">Risk</th>
+  </tr></thead><tbody>
+  {% for r in prog_rows %}
+  <tr class="pay-group" data-g="j{{ forloop.counter }}" data-w="{% if r.worked %}1{% else %}0{% endif %}" {% if r.crew %}onclick="snapToggleRows('j{{ forloop.counter }}')" title="Click to show or hide the crew."{% endif %}>
+    <td class="trunc fluid" style="width:42%;min-width:240px" data-v="{{ r.display_number }}" title="{{ r.display_number }} — {{ r.title }}">{% if r.crew %}<span class="pay-caret" id="caret-j{{ forloop.counter }}">▸</span>{% endif %}<a href="{% url 'dashboard:project_detail' r.cpn %}" onclick="event.stopPropagation()">{{ r.display_number }}</a>
+      <span class="muted" style="font-weight:400">{{ r.title }}</span>
+      <span class="tag">{{ r.division }}</span>{% if r.lone %} <span class="tag" title="Only one person on this job in the window.">lone</span>{% endif %}</td>
+    <td style="white-space:nowrap" data-v="{{ r.pm_name|default:'' }}">{% if r.pm_key %}<a href="{% url 'dashboard:person_detail' r.pm_key %}" onclick="event.stopPropagation()">{{ r.pm_name }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td data-v="{{ r.updated_by|default:'' }}">{% if r.touched %}{{ r.updated_by|default:"—" }}{% if r.bad_pct != None %} <span class="tag high" title="PTT reports {{ r.bad_pct|pct:0 }} complete — its derived % is outside 0–100 because the remaining costs typed by the PM exceed the job's cost basis in PTT. PCA ignores the value: no earned value moves and the last valid % stands. Fix the remaining costs in PTT (Data Quality: ptt_pct_out_of_range).">% invalid</span>{% elif not r.changed %} <span class="muted" title="Saved the % again without changing it.">(unchanged)</span>{% endif %}{% else %}<span class="tag" title="Hours or costs landed but the % estimate was not touched in this window.">no % update</span>{% endif %}</td>
+    <td class="num" style="white-space:nowrap" data-v="{{ r.pct_now|default_if_none:'' }}">{% if r.changed %}<span class="muted">{{ r.p0|pct:0 }} →</span> <b>{{ r.p1|pct:0 }}</b>{% elif r.bad_pct != None %}{% if r.pct_now != None %}<b>{{ r.pct_now|pct:0 }}</b>{% else %}<span class="muted">—</span>{% endif %} <span class="neg" title="What PTT currently reports for this job — ignored.">({{ r.bad_pct|pct:0 }} in PTT)</span>{% elif r.pct_now != None %}<span class="muted">{{ r.pct_now|pct:0 }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num" data-v="{{ r.d_earned|default_if_none:'' }}">{% if r.d_earned != None %}<span class="{{ r.d_earned|posneg }}">{{ r.d_earned|signed_money }}</span>{% elif r.no_ev and r.changed %}<span class="tag" title="{% if r.mode == 'service_agreement' %}Service agreement — bills on a schedule, so a PTT % move carries no earned value and the job is outside WIP by rule.{% else %}T&amp;M — billed as worked; no earned value, outside WIP by rule.{% endif %}">{% if r.mode == 'service_agreement' %}SA{% else %}T&amp;M{% endif %} · no EV</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num" data-v="{{ r.hours }}">{% if r.hours %}<b>{{ r.hours|num:1 }}</b>{% if r.ot %} <span class="warn-ink" style="cursor:help" title="Overtime: {{ r.ot|num:1 }} of the {{ r.hours|num:1 }} hours on this job in the window were logged in PTT's overtime column (crew log onsite, overtime and offsite hours separately on each job report). The estimated labor cost uses the flat loaded rate — no overtime premium is added.">⚡</span>{% endif %} <span class="muted">({{ r.crew|length }})</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num" data-v="{{ r.labor }}">{% if r.labor %}{{ r.labor|money }}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num" data-v="{{ r.other }}">{% if r.other %}{{ r.other|money }}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num {{ r.net|posneg }}" data-v="{{ r.net }}"><b>{{ r.net|signed_money }}</b></td>
+    <td class="num" style="white-space:nowrap" data-v="{{ r.eac_pct|default_if_none:'' }}" title="{% if r.eac_pct != None %}Sold {{ r.sold_pct|pct }} → EAC {{ r.eac_pct|pct }}{% if r.vs_sold != None %} ({{ r.vs_sold|pts }} vs sold){% endif %}{% if r.trend7 != None %} · EAC moved {{ r.trend7|pts }} in 7 days{% endif %}{% if r.trend30 != None %} · {{ r.trend30|pts }} in 30 days{% endif %}{% elif r.sold_pct != None %}Sold {{ r.sold_pct|pct }} — no EAC yet{% else %}No sold margin or EAC on record.{% endif %}">{% if r.eac_pct != None %}{% if r.sold_pct != None %}<span class="muted">{{ r.sold_pct|pct }} →</span> {% endif %}<b class="{{ r.vs_sold|posneg }}">{{ r.eac_pct|pct }}</b>{% elif r.sold_pct != None %}<span class="muted">{{ r.sold_pct|pct }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td data-v="{{ r.risk|default:'' }}">{% if r.risk %}<span class="tag {{ r.risk }}">{{ r.risk|slice:":4" }}</span>{% endif %}</td>
+  </tr>
+  {% for c in r.crew %}
+  <tr class="pay-inv pay-hidden" data-g="j{{ forloop.parentloop.counter }}">
+    <td class="pay-indent"><a href="{% url 'dashboard:person_detail' c.key %}">{{ c.name }}</a>
+      {% if c.work_types %}<span class="muted" style="font-size:11px">{{ c.work_types|join:", " }}</span>{% endif %}</td>
+    <td colspan="2" class="muted" style="font-size:11.5px;white-space:normal" title="Latest PTT note in the window: {{ c.note }}"><div class="clamp2">{{ c.note }}</div></td>
+    <td class="num"></td><td class="num"></td>
+    <td class="num">{{ c.h|num:1 }}{% if c.ot %} <span class="warn-ink" style="cursor:help" title="Overtime: {{ c.ot|num:1 }} of {{ c.name }}'s {{ c.h|num:1 }} hours on this job in the window were logged in PTT's overtime column (crew log onsite, overtime and offsite hours separately on each job report). The estimated labor cost uses the flat loaded rate — no overtime premium is added.">⚡</span>{% endif %}{% if view == 'week' %} <span class="muted">· {{ c.days }}d</span>{% endif %}</td>
+    <td class="num muted">{{ c.cost|money }}</td>
+    <td colspan="4"></td>
+  </tr>
+  {% endfor %}
+  {% empty %}<tr><td colspan="11" class="empty">No job activity in this window{% if filtered %} for this filter{% endif %}.</td></tr>{% endfor %}
+  </tbody>
+  {% if prog_rows %}<tfoot>
+  <tr id="tf-worked"><td>Jobs worked · {{ tot_worked.n }}</td><td></td><td></td><td></td>
+    <td class="num {{ tot_worked.d_earned|posneg }}">{{ tot_worked.d_earned|signed_money }}</td>
+    <td class="num">{{ tot_worked.hours|num:1 }}</td>
+    <td class="num">{{ tot_worked.labor|money }}</td>
+    <td class="num">{{ tot_worked.other|money }}</td>
+    <td class="num {{ tot_worked.net|posneg }}"><b>{{ tot_worked.net|signed_money }}</b></td>
+    <td colspan="2"></td></tr>
+  <tr id="tf-all"><td>All activity · {{ prog_tot.n }}</td><td></td><td></td><td></td>
+    <td class="num {{ prog_tot.d_earned|posneg }}">{{ prog_tot.d_earned|signed_money }}</td>
+    <td class="num">{{ prog_tot.hours|num:1 }}</td>
+    <td class="num">{{ prog_tot.labor|money }}</td>
+    <td class="num">{{ prog_tot.other|money }}</td>
+    <td class="num {{ prog_tot.net|posneg }}"><b>{{ prog_tot.net|signed_money }}</b></td>
+    <td colspan="2"></td></tr>
+  {% if oh_tot.hours and not upd_sel %}<tr id="tf-oh" class="tf-sub"><td><a href="#overhead" title="9999 overhead buckets — internal time not attached to a billable job; its estimated cost comes off the work margin. See the Overhead buckets section.">Overhead buckets</a> · {{ oh_rows|length }}</td><td></td><td></td><td></td>
+    <td class="num muted">—</td>
+    <td class="num">{{ oh_tot.hours|num:1 }}</td>
+    <td class="num">{{ oh_tot.cost|money }}</td>
+    <td class="num muted">—</td>
+    <td class="num neg"><b>-{{ oh_tot.cost|money }}</b></td>
+    <td colspan="2"></td></tr>{% endif %}
+  {% if not upd_sel %}<tr id="tf-margin" class="tf-total" title="Work margin (window) = All activity net − overhead-bucket labor. The same figure as the KPI at the top of the page."><td><b>Work margin</b></td><td></td><td></td><td></td>
+    <td class="num {{ prog_tot.d_earned|posneg }}">{{ prog_tot.d_earned|signed_money }}</td>
+    <td class="num">{{ tot.hours|num:1 }}</td>
+    <td class="num">{{ tot.labor_all|money }}</td>
+    <td class="num">{{ prog_tot.other|money }}</td>
+    <td class="num {{ tot.margin|posneg }}"><b>{{ tot.margin|signed_money }}</b></td>
+    <td colspan="2"></td></tr>{% endif %}
+  </tfoot>{% endif %}</table></div>
+</div>
+
+{% if oh_rows %}
+<div class="card" style="margin-bottom:12px" id="overhead">
+  <h2>Overhead buckets <small>9999 jobs — internal time not attached to a billable project, grouped by bucket · click a bucket for its people</small></h2>
+  <div style="overflow:auto;max-height:60vh"><table class="data dense pay-table snap-stick"><thead><tr>
+    <th>Bucket / person</th>
+    <th title="Division of the bucket job the time was charged to.">Div</th>
+    <th>Latest note</th>
+    <th class="num" title="PTT hours on this bucket in the window. ⚡ = part of these hours were logged in PTT's overtime column — overtime spent on internal, non-billable time; hover the bolt for how many.">Hours</th>
+    <th class="num" title="Estimated loaded cost of these hours (13-week loaded rates) — unbilled overhead, subtracted from the work margin.">Est. cost</th>
+  </tr></thead><tbody>
+  {% for b in oh_rows %}
+  <tr class="pay-group" data-g="oh{{ forloop.counter }}" onclick="snapToggleRows('oh{{ forloop.counter }}')" title="Click to show who charged this bucket.">
+    <td class="trunc fluid" style="width:35%;min-width:220px" title="{{ b.bucket }} — {{ b.title }}"><span class="pay-caret" id="caret-oh{{ forloop.counter }}">▸</span><span class="mono">{{ b.bucket }}</span> <span class="muted" style="font-weight:400">{{ b.title }}</span></td>
+    <td><span class="tag">{{ b.division }}</span></td>
+    <td class="muted">{{ b.people|length }} {{ b.people|length|pluralize:"person,people" }}</td>
+    <td class="num"><b>{{ b.hours|num:1 }}</b>{% if b.ot %} <span class="warn-ink" style="cursor:help" title="Overtime: {{ b.ot|num:1 }} of the {{ b.hours|num:1 }} hours charged to this bucket in the window were logged in PTT's overtime column — overtime spent on internal, non-billable time (crew log onsite, overtime and offsite hours separately). The estimated cost uses the flat loaded rate — no overtime premium is added.">⚡</span>{% endif %}</td>
+    <td class="num"><b>{{ b.cost|money }}</b></td></tr>
+  {% for p in b.people %}
+  <tr class="pay-inv pay-hidden" data-g="oh{{ forloop.parentloop.counter }}">
+    <td class="pay-indent"><a href="{% url 'dashboard:person_detail' p.key %}">{{ p.name }}</a></td>
+    <td></td>
+    <td class="muted" style="font-size:11.5px;white-space:normal;width:40%" title="{{ p.note }}"><div class="clamp2">{{ p.note }}</div></td>
+    <td class="num">{{ p.h|num:1 }}{% if p.ot %} <span class="warn-ink" style="cursor:help" title="Overtime: {{ p.ot|num:1 }} of {{ p.name }}'s {{ p.h|num:1 }} hours on this bucket in the window were logged in PTT's overtime column — overtime spent on internal, non-billable time (crew log onsite, overtime and offsite hours separately on each job report). The estimated cost uses the flat loaded rate — no overtime premium is added.">⚡</span>{% endif %}{% if view == 'week' %} <span class="muted">· {{ p.days }}d</span>{% endif %}</td>
+    <td class="num muted">{{ p.cost|money }}</td></tr>
+  {% endfor %}
+  {% endfor %}
+  </tbody><tfoot><tr>
+    <td>Total</td><td></td><td></td>
+    <td class="num">{{ oh_tot.hours|num:1 }}{% if oh_tot.ot %} <span class="warn-ink" style="cursor:help" title="Overtime: {{ oh_tot.ot|num:1 }} of the {{ oh_tot.hours|num:1 }} overhead-bucket hours in the window were logged in PTT's overtime column — overtime spent on internal, non-billable time. The estimated cost uses the flat loaded rate — no overtime premium is added.">⚡</span>{% endif %}</td>
+    <td class="num">{{ oh_tot.cost|money }}</td>
+  </tr></tfoot></table></div>
+</div>
+{% endif %}
+
+<div class="grid two" style="margin-bottom:12px">
+  <div class="card">
+    <h2>Billing out <small>invoices issued · credit memos negative · big ≥ {{ big.invoice|money_k }}</small></h2>
+    <div style="overflow:auto"><table class="data dense"><thead><tr>
+      <th>Invoice</th><th>Customer</th><th>Job</th><th class="num" style="min-width:96px">Amount</th></tr></thead><tbody>
+    {% for i in invoices %}<tr {% if i.amount >= big.invoice %}class="snap-big"{% endif %}>
+      <td class="mono">{{ i.ref_nbr }}{% if i.doc_type != 'IN' %} <span class="tag">{{ i.doc_type }}</span>{% endif %}</td>
+      <td class="trunc fluid" style="width:45%;min-width:150px" title="{{ i.customer_name }}">{% if i.customer %}<a href="{% url 'dashboard:customer_detail' i.customer.sl_customer_id %}">{{ i.customer_name }}</a>{% else %}{{ i.customer_name }}{% endif %}</td>
+      <td class="trunc fluid" style="width:25%;min-width:200px">{% if i.project %}<a href="{% url 'dashboard:project_detail' i.project.canonical_project_number %}">{{ i.project.display_number }}</a> <span class="muted" title="PM % complete {{ i.project.pm_percent_complete|pct:0 }}, billed of CV.">{{ i.project.pm_percent_complete|pct:0 }} done</span>{% elif i.doc_desc %}<span class="muted">{{ i.doc_desc }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="num {% if i.doc_type == 'CM' %}neg{% endif %}">{% if i.doc_type == 'CM' %}−{% endif %}{{ i.amount|money:2 }}</td></tr>
+    {% empty %}<tr><td colspan="4" class="empty">No invoices issued in this window{% if filtered %} for this filter{% endif %}.</td></tr>{% endfor %}
+    </tbody>{% if invoices %}<tfoot><tr><td>Total · {{ invoices|length }}</td><td></td><td></td><td class="num">{{ tot.billing|money:2 }}</td></tr></tfoot>{% endif %}</table></div>
+  </div>
+  <div class="card">
+    <h2>Cash in <small>payments applied to jobs · big ≥ {{ big.payment|money_k }} · <a href="{% url 'dashboard:finance_payments' %}?day={{ start|date:'Y-m-d' }}">full payments page</a></small></h2>
+    <div style="overflow:auto"><table class="data dense"><thead><tr>
+      <th>Payment</th><th>Customer</th><th>Job</th><th class="num" style="min-width:96px">Applied</th></tr></thead><tbody>
+    {% for a in payments %}<tr {% if a.applied >= big.payment %}class="snap-big"{% endif %}>
+      <td class="mono">{{ a.payment_ref }}</td>
+      <td class="trunc fluid" style="width:45%;min-width:150px" title="{{ a.customer.canonical_name|default:a.customer_name|default:a.customer_id_raw }} · {{ a.customer_id_raw }}">{% if a.customer %}<a href="{% url 'dashboard:customer_detail' a.customer.sl_customer_id %}">{{ a.customer.canonical_name|default:a.customer_name }}</a>{% else %}{{ a.customer_name|default:a.customer_id_raw }}{% endif %}</td>
+      <td style="white-space:nowrap">{% if a.project %}<a href="{% url 'dashboard:project_detail' a.project.canonical_project_number %}">{{ a.project.display_number }}</a> <span class="muted">{{ a.project.pm_percent_complete|pct:0 }} done</span>{% else %}<span class="muted">{{ a.invoice_ref }}</span>{% endif %}</td>
+      <td class="num">{{ a.applied|money:2 }}</td></tr>
+    {% empty %}<tr><td colspan="4" class="empty">No payments applied in this window{% if filtered %} for this filter{% endif %}.</td></tr>{% endfor %}
+    </tbody>{% if payments %}<tfoot><tr><td>Total · {{ payments|length }}</td><td></td><td></td><td class="num">{{ tot.cash_in|money:2 }}</td></tr></tfoot>{% endif %}</table></div>
+  </div>
+</div>
+
+<div class="grid two" style="margin-bottom:12px">
+  <div class="card">
+    <h2>Material ordered <small>new POs · big ≥ {{ big.po|money_k }} · click a PO for its lines</small></h2>
+    <div style="overflow:auto"><table class="data dense pay-table"><thead><tr>
+      <th>PO / line</th><th>Vendor</th><th>Job</th><th class="num">Qty</th><th class="num" style="min-width:96px">Cost</th></tr></thead><tbody>
+    {% for g in ordered %}
+    <tr class="pay-group {% if g.total >= big.po %}snap-big{% endif %}" data-g="o{{ forloop.counter }}" onclick="snapToggleRows('o{{ forloop.counter }}')">
+      <td><span class="pay-caret" id="caret-o{{ forloop.counter }}">▸</span><span class="mono">{{ g.first.po_nbr }}</span> <span class="muted">{{ g.first.po_date|date:"M j" }}</span></td>
+      <td class="trunc fluid" style="width:40%;min-width:140px" title="{{ g.first.vendor_name|default:g.first.vendor_id }}">{% if acc.finance %}<a href="{% url 'dashboard:finance_vendor' g.first.vendor_id %}" onclick="event.stopPropagation()">{{ g.first.vendor_name|default:g.first.vendor_id }}</a>{% else %}{{ g.first.vendor_name|default:g.first.vendor_id }}{% endif %}</td>
+      <td class="trunc fluid" style="width:25%;min-width:150px">{% if g.first.project %}<a href="{% url 'dashboard:project_detail' g.first.project.canonical_project_number %}" onclick="event.stopPropagation()">{{ g.first.project.display_number }}</a>{% elif g.first.deduced_project %}<a href="{% url 'dashboard:project_detail' g.first.deduced_project.canonical_project_number %}" class="snap-ded" onclick="event.stopPropagation()" title="Deduced from sales-order demand ({{ g.first.deduced_so }}) — SL has no job on this PO. Pace cuts warehouse POs against SO demand without linking them.">≈ {{ g.first.deduced_project.display_number }}</a>{% elif g.first.deduced_customer %}<span class="muted snap-ded" title="Matches customer order {{ g.first.deduced_so }} — a product sale with no SL job.">{{ g.first.deduced_customer }}</span>{% else %}<span class="muted" title="Stock/warehouse purchase — no job or customer order found in SO demand.">stock</span>{% endif %}</td>
+      <td class="num muted">{{ g.lines|length }} line{{ g.lines|length|pluralize }}</td>
+      <td class="num"><b>{{ g.total|money:2 }}</b></td></tr>
+    {% for ln in g.lines %}
+    <tr class="pay-inv pay-hidden" data-g="o{{ forloop.parentloop.counter }}">
+      <td class="pay-indent mono" colspan="{% if g.mixed %}2{% else %}3{% endif %}">{{ ln.item_id|default:"—" }} <span class="muted" style="font-family:inherit">{{ ln.descr }}</span></td>
+      {% if g.mixed %}<td class="trunc fluid">{% if ln.project %}<a href="{% url 'dashboard:project_detail' ln.project.canonical_project_number %}">{{ ln.project.display_number }}</a>{% elif ln.deduced_project %}<a href="{% url 'dashboard:project_detail' ln.deduced_project.canonical_project_number %}" class="snap-ded" title="Deduced from sales-order demand ({{ ln.deduced_so }}) — SL has no job on this line.">≈ {{ ln.deduced_project.display_number }}</a>{% elif ln.deduced_customer %}<span class="muted snap-ded" title="Matches customer order {{ ln.deduced_so }} — a product sale with no SL job.">{{ ln.deduced_customer }}</span>{% else %}<span class="muted">stock</span>{% endif %}</td>{% endif %}
+      <td class="num muted">{{ ln.qty_ord|num:1 }} × {{ ln.unit_cost|money:2 }}</td>
+      <td class="num">{{ ln.ext_cost|money:2 }}</td></tr>
+    {% endfor %}
+    {% empty %}<tr><td colspan="5" class="empty">No purchase orders cut in this window{% if filtered %} for this filter{% endif %}.</td></tr>{% endfor %}
+    </tbody>{% if ordered %}<tfoot><tr><td>Total · {{ ordered|length }} PO{{ ordered|length|pluralize }}</td><td></td><td></td><td></td><td class="num">{{ tot.ordered|money:2 }}</td></tr></tfoot>{% endif %}</table></div>
+  </div>
+  <div class="card">
+    <h2>Material received <small>PO receipts · big ≥ {{ big.receipt|money_k }} · click a receipt for its lines</small></h2>
+    <div style="overflow:auto"><table class="data dense pay-table"><thead><tr>
+      <th>Receipt / line</th><th>Vendor</th><th>Job</th><th class="num">Qty</th><th class="num" style="min-width:96px">Cost</th></tr></thead><tbody>
+    {% for g in received %}
+    <tr class="pay-group {% if g.total >= big.receipt %}snap-big{% endif %}" data-g="r{{ forloop.counter }}" onclick="snapToggleRows('r{{ forloop.counter }}')">
+      <td><span class="pay-caret" id="caret-r{{ forloop.counter }}">▸</span><span class="mono">{{ g.first.rcpt_nbr }}</span> <span class="muted">{{ g.first.rcpt_date|date:"M j" }} · PO {{ g.first.po_nbr }}</span></td>
+      <td class="trunc fluid" style="width:40%;min-width:140px" title="{{ g.first.vendor_name|default:g.first.vendor_id }}">{% if acc.finance %}<a href="{% url 'dashboard:finance_vendor' g.first.vendor_id %}" onclick="event.stopPropagation()">{{ g.first.vendor_name|default:g.first.vendor_id }}</a>{% else %}{{ g.first.vendor_name|default:g.first.vendor_id }}{% endif %}</td>
+      <td class="trunc fluid" style="width:25%;min-width:150px">{% if g.first.project %}<a href="{% url 'dashboard:project_detail' g.first.project.canonical_project_number %}" onclick="event.stopPropagation()">{{ g.first.project.display_number }}</a>{% elif g.first.deduced_project %}<a href="{% url 'dashboard:project_detail' g.first.deduced_project.canonical_project_number %}" class="snap-ded" onclick="event.stopPropagation()" title="Deduced from sales-order demand ({{ g.first.deduced_so }}) — SL has no job on this PO. Pace cuts warehouse POs against SO demand without linking them.">≈ {{ g.first.deduced_project.display_number }}</a>{% elif g.first.deduced_customer %}<span class="muted snap-ded" title="Matches customer order {{ g.first.deduced_so }} — a product sale with no SL job.">{{ g.first.deduced_customer }}</span>{% else %}<span class="muted" title="Stock/warehouse purchase — no job or customer order found in SO demand.">stock</span>{% endif %}</td>
+      <td class="num muted">{{ g.lines|length }} line{{ g.lines|length|pluralize }}</td>
+      <td class="num"><b>{{ g.total|money:2 }}</b></td></tr>
+    {% for ln in g.lines %}
+    <tr class="pay-inv pay-hidden" data-g="r{{ forloop.parentloop.counter }}">
+      <td class="pay-indent mono" colspan="{% if g.mixed %}2{% else %}3{% endif %}">{{ ln.item_id|default:"—" }} <span class="muted" style="font-family:inherit">{{ ln.descr }}</span></td>
+      {% if g.mixed %}<td class="trunc fluid">{% if ln.project %}<a href="{% url 'dashboard:project_detail' ln.project.canonical_project_number %}">{{ ln.project.display_number }}</a>{% elif ln.deduced_project %}<a href="{% url 'dashboard:project_detail' ln.deduced_project.canonical_project_number %}" class="snap-ded" title="Deduced from sales-order demand ({{ ln.deduced_so }}) — SL has no job on this line.">≈ {{ ln.deduced_project.display_number }}</a>{% elif ln.deduced_customer %}<span class="muted snap-ded" title="Matches customer order {{ ln.deduced_so }} — a product sale with no SL job.">{{ ln.deduced_customer }}</span>{% else %}<span class="muted">stock</span>{% endif %}</td>{% endif %}
+      <td class="num muted">{{ ln.qty|num:1 }} × {{ ln.unit_cost|money:2 }}</td>
+      <td class="num">{{ ln.ext_cost|money:2 }}</td></tr>
+    {% endfor %}
+    {% empty %}<tr><td colspan="5" class="empty">No receipts in this window{% if filtered %} for this filter{% endif %}.</td></tr>{% endfor %}
+    </tbody>{% if received %}<tfoot><tr><td>Total · {{ received|length }} receipt{{ received|length|pluralize }}</td><td></td><td></td><td></td><td class="num">{{ tot.received|money:2 }}</td></tr></tfoot>{% endif %}</table></div>
+  </div>
+</div>
+
+{% if checks and acc.finance %}
+<div class="card" style="margin-bottom:12px">
+  <h2>AP paid out <small>checks / EFTs cut in the window (company-wide) · big ≥ {{ big.check|money_k }}{% if tot.ap_card %} · <span class="warn-ink">card</span> = settled with a company credit card through the holding account, no cash out{% endif %}</small></h2>
+  <div style="overflow:auto"><table class="data dense pay-table"><thead><tr>
+    <th>Ref</th><th>Vendor</th>
+    <th class="num" title="Vendor invoice dates this payment covered (from the paid vouchers).">Invoices from</th>
+    <th class="num" title="Dollar-weighted days from the vendor's invoice date to the check date. ! = paid under 30 days from the invoice — earlier than necessary.">Held</th>
+    <th class="num" style="min-width:96px">Amount</th></tr></thead><tbody>
+  {% for c in checks %}
+  <tr class="pay-group {% if c.amount >= big.check and c.doc_type != 'VC' %}snap-big{% endif %}" data-g="c{{ forloop.counter }}" onclick="snapToggleRows('c{{ forloop.counter }}')" title="Click to show the vendor invoices this payment covered.">
+    <td><span class="pay-caret" id="caret-c{{ forloop.counter }}">▸</span><span class="mono">{{ c.ref_nbr }}</span> {% if c.doc_type == 'VC' %}<span class="tag critical" title="Void check.">void</span>{% elif c.doc_type != 'CK' %}<span class="muted">{{ c.doc_type }}</span>{% endif %}{% if c.settled_by_card %} <span class="tag moderate" title="Settled with a company credit card: cleared through the card holding account (GL 10450), no cash to the vendor. SL does not record which card.">card</span>{% endif %}</td>
+    <td class="trunc fluid" style="width:45%;min-width:180px" title="{{ c.vendor_name|default:c.vendor_id }}"><a href="{% url 'dashboard:finance_vendor' c.vendor_id %}" onclick="event.stopPropagation()">{{ c.vendor_name|default:c.vendor_id }}</a></td>
+    <td class="num" style="white-space:nowrap">{% if c.inv_min %}{{ c.inv_min|date:"M j" }}{% if c.inv_max != c.inv_min %} – {{ c.inv_max|date:"M j" }}{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num">{% if c.wait_days != None %}{{ c.wait_days }}d{% if c.early %} <span class="warn-ink" title="Paid under 30 days from the vendor invoice — earlier than necessary.">!</span>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num {% if c.doc_type == 'VC' %}neg{% endif %}">{% if c.doc_type == 'VC' %}−{% endif %}{{ c.amount|money:2 }}</td></tr>
+  {% for a in c.vouchers %}
+  <tr class="pay-inv pay-hidden" data-g="c{{ forloop.parentloop.counter }}">
+    <td class="pay-indent mono">{{ a.voucher_ref }} <span class="muted" style="font-family:inherit" title="{{ a.doc_desc }}">{{ a.invoice_nbr|default:a.doc_desc }}</span></td>
+    <td class="muted">invoiced {{ a.inv_date|date:"M j" }}{% if a.due_date %} · due {{ a.due_date|date:"M j" }}{% endif %}</td>
+    <td class="num"></td>
+    <td class="num">{% if a.wait != None %}<span {% if a.early %}class="warn-ink" title="Paid under 30 days from this invoice — earlier than necessary."{% endif %}>{{ a.wait }}d</span>{% endif %}</td>
+    <td class="num">{{ a.adj_amount|money:2 }}</td></tr>
+  {% endfor %}
+  {% endfor %}
+  </tbody><tfoot><tr><td>Total · {{ checks|length }} <span class="muted" style="font-weight:400">cash from the bank{% if tot.ap_card %} · plus {{ tot.ap_card|money }} settled by card{% endif %}</span></td><td></td><td></td><td></td><td class="num">{{ tot.ap_out|money:2 }}</td></tr></tfoot></table></div>
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+{{ charts|json_script:"snapcharts" }}
+<script>
+function snapToggleRows(g) {
+  document.querySelectorAll('.pay-inv[data-g="' + g + '"]').forEach(tr => tr.classList.toggle('pay-hidden'));
+  const c = document.getElementById('caret-' + g);
+  if (c) c.textContent = c.textContent === '▾' ? '▸' : '▾';
+}
+function snapAll(open, save) {   // Collapse / Expand is remembered across days (PCA.pref, base.html)
+  document.querySelectorAll('.pay-table .pay-inv').forEach(tr => tr.classList.toggle('pay-hidden', !open));
+  document.querySelectorAll('.pay-caret').forEach(c => c.textContent = open ? '▾' : '▸');
+  if (save !== false) PCA.setPref('expanded', open);
+}
+function snapToggle(id, save) {   // a flag chip's list; open/closed remembered per flag
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+  if (save !== false) PCA.setPref('panel.' + id, el.style.display !== 'none');
+}
+function snapFilter(mode, save) {   // Worked / All activity — applies to both layouts of the Job activity table
+  document.querySelectorAll('#jobact tbody tr.pay-group, #jobwip tbody tr[data-w]:not(.jt-k)').forEach(tr => {
+    const hide = mode === 'worked' && tr.dataset.w === '0';
+    tr.style.display = hide ? 'none' : '';
+    if (tr.dataset.g) tr.closest('table').querySelectorAll('tbody tr[data-g="' + tr.dataset.g + '"]:not(.pay-group):not(.jt-g)').forEach(k => { k.style.display = hide ? 'none' : ''; });
+  });
+  const fw = document.getElementById('filt-worked'), fa = document.getElementById('filt-all');
+  if (fw && fa) { fw.classList.toggle('primary', mode === 'worked'); fa.classList.toggle('primary', mode === 'all'); }
+  ['tf-all', 'tf-oh', 'tf-margin'].forEach(id => { const el = document.getElementById(id); if (el) el.style.display = mode === 'worked' ? 'none' : ''; });
+  document.querySelectorAll('#jobwip tr.jt-tot').forEach(tr => { tr.hidden = tr.dataset.set !== (mode === 'worked' ? 'worked' : 'all'); });
+  if (window.PCAJobTable) PCAJobTable.restripe('jobwip');
+  if (save !== false) PCA.setPref('jobfilter', mode);
+}
+function snapView(mode, save) {   // Activity (window accountability) / WIP view (the WIP by Job layout); remembered
+  const wip = mode === 'wip';
+  const av = document.getElementById('jobact-view'), wv = document.getElementById('jobwip-view');
+  if (av) av.hidden = wip;
+  if (wv) wv.hidden = !wip;
+  const ah = document.getElementById('jobact-help'), wh = document.getElementById('jobwip-help');
+  if (ah) ah.hidden = wip;
+  if (wh) wh.hidden = !wip;
+  const ba = document.getElementById('view-act'), bw = document.getElementById('view-wip');
+  if (ba && bw) { ba.classList.toggle('primary', !wip); bw.classList.toggle('primary', wip); }
+  if (wip) window.dispatchEvent(new Event('resize'));   // the frozen table measures itself once visible
+  if (save !== false) PCA.setPref('jobview', mode);
+}
+function snapSortTable(th) {
+  const table = th.closest('table'), col = +th.dataset.c;
+  const dir = table.dataset.sort === col + ':desc' ? 'asc' : 'desc';
+  table.dataset.sort = col + ':' + dir;
+  const tbody = table.tBodies[0];
+  const blocks = []; let cur = null;
+  [...tbody.rows].forEach(tr => {
+    if (tr.classList.contains('pay-group')) { cur = { g: tr, kids: [] }; blocks.push(cur); }
+    else if (cur) cur.kids.push(tr);
+  });
+  const val = tr => {
+    const td = tr.cells[col];
+    if (!td) return null;
+    const v = td.dataset.v !== undefined ? td.dataset.v : td.textContent.trim();
+    if (v === '' || v === '—') return null;
+    const n = parseFloat(v);
+    return isNaN(n) ? v.toLowerCase() : n;
+  };
+  blocks.sort((a, b) => {
+    const va = val(a.g), vb = val(b.g);
+    if (va === null && vb === null) return 0;
+    if (va === null) return 1;
+    if (vb === null) return -1;
+    if (typeof va === 'number' && typeof vb === 'number') return dir === 'desc' ? vb - va : va - vb;
+    return dir === 'desc' ? String(vb).localeCompare(String(va)) : String(va).localeCompare(String(vb));
+  });
+  blocks.forEach(b => { tbody.appendChild(b.g); b.kids.forEach(k => tbody.appendChild(k)); });
+}
+document.querySelectorAll('th.snap-sort').forEach(th => th.addEventListener('click', () => snapSortTable(th)));
+document.addEventListener('click', e => { document.querySelectorAll('details.msel[open]').forEach(d => { if (!d.contains(e.target)) d.open = false; }); });
+// restore the remembered toggles: Worked / All activity, Collapse / Expand, and any flag list left open
+snapFilter(PCA.pref('jobfilter', 'all'), false);
+snapView(PCA.pref('jobview', 'activity'), false);
+if (typeof PCA.pref('expanded') === 'boolean') snapAll(PCA.pref('expanded'), false);
+document.querySelectorAll('[id^="flag-"]').forEach(el => { if (PCA.pref('panel.' + el.id)) snapToggle(el.id, false); });
+const SC = JSON.parse(document.getElementById('snapcharts').textContent);
+new Chart(document.getElementById('c_strip'), { type: 'bar',
+  data: { labels: SC.strip.map(r => r.d.slice(5)), datasets: [{ data: SC.strip.map(r => r.h), backgroundColor: 'rgba(31,94,255,.6)', borderRadius: 2 }] },
+  options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false },
+      tooltip: { callbacks: { title: c => SC.strip[c[0].dataIndex].d, label: c => Math.round(c.raw) + ' field hours' } } },
+    scales: { x: { display: false }, y: { display: false } } } });
+</script>
+{% endblock %}

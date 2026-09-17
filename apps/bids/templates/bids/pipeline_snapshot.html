@@ -1,0 +1,136 @@
+{% extends "dashboard/base.html" %}{% load humanize pca bids static %}
+{% block title %}Pipeline Snapshot {{ label }} · Pace Company Analytics{% endblock %}
+{% block extra_css %}{% include "bids/_css.html" %}
+  .ps .filters { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: flex-end; }
+  .ps .filters label { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; color: var(--muted); font-weight: 600; }
+  .ps .filters select { font-weight: 400; }
+  .ps table.pst { width: auto; min-width: 100%; }
+  .ps table.pst th, .ps table.pst td { white-space: nowrap; }
+  .ps table.pst td.trunc { max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
+  .ps table.pst th.sorted { color: var(--ink); } .ps table.pst th.sorted::after { content: attr(data-dir); font-size: 9px; margin-left: 4px; color: var(--accent); }
+  .ps table.pst tr.exp > td { background: #f7f9fc; white-space: normal; }
+  .ps .caret { display: inline-block; width: 14px; color: var(--muted); cursor: pointer; user-select: none; }
+  .ps .att { display: inline-block; font-size: 10.5px; font-weight: 600; padding: 1px 6px; border-radius: 5px; background: var(--warn-bg); color: #6b4a00; margin: 0 3px 2px 0; white-space: nowrap; }
+  .ps .att.bad { background: var(--bad-bg); color: var(--bad); }
+  .ps .pbar { display: inline-block; width: 46px; height: 6px; background: #e6eaf0; border-radius: 3px; vertical-align: middle; margin-right: 4px; overflow: hidden; }
+  .ps .pbar i { display: block; height: 100%; background: var(--accent); }
+  .ps .pbar.pca i { background: var(--good); }
+  .ps .detail { display: grid; grid-template-columns: 1.1fr 1fr 1fr; gap: 14px; padding: 8px 4px; font-size: 12.5px;
+                position: sticky; left: 0; width: max(720px, calc(100vw - 340px)); box-sizing: border-box; }   /* stays in view while the wide table scrolls */
+  .layout.nav-collapsed .ps .detail { width: max(720px, calc(100vw - 120px)); }
+  .ps .detail h4 { margin: 0 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .ps .detail table.bd td { padding: 1px 6px 1px 0; font-size: 12px; }
+  .ps .detail .docs a.ext { margin-left: 4px; }
+  .ps .table-wrap { overflow: auto; scrollbar-width: auto; }
+  .ps .facets { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; align-items: center; }
+  .ps .facets .chip { cursor: pointer; margin: 0; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--muted); }
+  .ps .facets .chip.on { color: var(--ink); border-color: var(--line-strong); background: var(--info-bg); }
+  .ps .facets .chip small { color: var(--muted); }
+  .ps .grp td.num { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .ps .grp tr.tot td { font-weight: 700; background: #fafbfd; border-top: 2px solid var(--line-strong); }
+  .ps table.pst tbody tr.alt td { background: #f4f6fa; } .ps table.pst tbody tr.alt:hover td { background: #eaeff6; }
+  .ps table.pst tbody tr.sec td { background: #e9eef6; font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #2c3e5a; border-top: 2px solid var(--line-strong); }
+  .ps table.pst tbody tr.sec td > span { position: sticky; left: 8px; }
+  .ps table.pst tbody tr.sec.s-window td { background: #dfe9ff; color: #123a9e; }
+  .ps table.pst tbody tr.sec.s-awarded td { background: #d9f2e3; color: #0f6b3a; }
+  .ps table.pst tbody tr.sec.s-lost td { background: #fbe0dd; color: #9b1c1c; }
+  .ps table.pst tbody tr.sec.s-due td { background: #fff0cc; color: #7a5200; }
+  .ps table.pst tbody tr.sub td, .ps table.pst tbody tr.sub td.fz { background: #eef2f8; font-weight: 700; font-size: 13px; border-top: 2px solid #b9c4d6; border-bottom: 3px double #b9c4d6; color: #1b2430; }
+  .ps table.pst tbody tr.sub td.dim { color: #1b2430; font-weight: 600; }
+  .ps table.pst td.faded, .ps table.pst tbody tr.sub td.faded { color: #c3c9d2; font-weight: 400; cursor: help; }   /* the subtotal rule is more specific — repeat it here */
+  .ps table.pst td.faded .pbar { opacity: .3; }
+  .ps .table-wrap.grow { max-height: none; overflow-y: visible; }
+  .ps table.pst td.name { font-weight: 600; max-width: 230px; overflow: hidden; text-overflow: ellipsis; }
+  .ps table.pst td.name a { color: var(--ink); } .ps table.pst td.name a:hover { color: var(--accent); }
+  .ps table.pst td.client { max-width: 150px; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 12px; }
+  .ps table.pst td.client a { color: var(--muted); } .ps table.pst td.client a:hover { color: var(--accent); }
+  .ps table.pst td.est a, .ps table.pst td.client a { text-decoration: underline; text-decoration-color: #c9d4e5; text-underline-offset: 2px; }
+  .ps table.pst td.est a:hover, .ps table.pst td.client a:hover { text-decoration-color: var(--accent); }
+  .ps table.pst td.attcell { max-width: 130px; white-space: normal; line-height: 1.5; }
+  .ps table.pst td.money { font-weight: 600; } .ps table.pst td.money.strong { font-weight: 700; font-size: 13px; }
+  .ps table.pst td.dim { color: var(--muted); font-weight: 400; } .ps table.pst td.dt { color: var(--muted); font-size: 12px; }
+  .ps table.pst td.est a { color: var(--ink); } .ps table.pst td.est { max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
+  .ps table.pst td.tag-cell { font-size: 12px; color: #3a4a63; }
+  .ps .fbar { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; margin: 4px 0 8px; }
+  .ps .fbar select { font-size: 12px; padding: 4px 6px; max-width: 170px; }
+  .ps .fbar input[type=search] { font-size: 12px; padding: 4px 8px; width: 150px; }
+  .ps .fbar .n { color: var(--muted); font-size: 12px; margin-left: auto; white-space: nowrap; }
+{% endblock %}
+{% block content %}
+<div class="ps">
+<div class="topbar">
+  <div class="title"><h1>Pipeline Snapshot</h1>
+    <small>What the estimators put out the door in this window — submitted, won, lost and due — then the whole open book: every submitted proposal and every quote still in progress, with the value, the budget, the GP quoted, the estimator's stated chance, PCA's own estimated win rate and what each is worth on expectation. {% if view == 'day' %}Friday's page covers Fri–Sun.{% else %}Calendar weeks, Monday–Sunday.{% endif %} Project Portal + SL only.</small></div>
+  <div class="row">
+    <a class="btn small {% if view == 'day' %}primary{% endif %}" href="?view=day{% if div_code %}&div={{ div_code }}{% endif %}{% if est_key %}&est={{ est_key }}{% endif %}&by={{ by }}">Day</a>
+    <a class="btn small {% if view == 'week' %}primary{% endif %}" href="?view=week{% if div_code %}&div={{ div_code }}{% endif %}{% if est_key %}&est={{ est_key }}{% endif %}&by={{ by }}">Week</a>
+    {% if prev_key %}<a class="btn small" href="?view={{ view }}&{{ view }}={{ prev_key|date:'Y-m-d' }}{% if div_code %}&div={{ div_code }}{% endif %}{% if est_key %}&est={{ est_key }}{% endif %}&by={{ by }}" title="Previous {{ view }} with a submission">‹</a>{% endif %}
+    <b style="white-space:nowrap;text-align:center;min-width:{% if view == 'week' %}215px{% else %}165px{% endif %};font-size:14px">{{ label }}</b>
+    {% if next_key %}<a class="btn small" href="?view={{ view }}&{{ view }}={{ next_key|date:'Y-m-d' }}{% if div_code %}&div={{ div_code }}{% endif %}{% if est_key %}&est={{ est_key }}{% endif %}&by={{ by }}" title="Next {{ view }} with a submission">›</a>{% endif %}
+    <form method="get" style="display:inline"><input type="hidden" name="view" value="{{ view }}">{% if div_code %}<input type="hidden" name="div" value="{{ div_code }}">{% endif %}{% if est_key %}<input type="hidden" name="est" value="{{ est_key }}">{% endif %}<input type="hidden" name="by" value="{{ by }}">
+      <input type="date" name="{{ view }}" value="{{ start|date:'Y-m-d' }}" onchange="this.form.submit()" style="font:inherit;padding:5px 8px;border:1px solid var(--line-strong);border-radius:8px" title="Jump to any date — it snaps to its {{ view }} window."></form>
+  </div>
+</div>
+
+<form method="get" class="card tight" style="margin-bottom:12px">
+  <input type="hidden" name="view" value="{{ view }}"><input type="hidden" name="{{ view }}" value="{{ start|date:'Y-m-d' }}">
+  <div class="filters">
+    {% include "dashboard/_division_stepper.html" %}
+    <label title="Estimator of record (the portal's Bidder); the number is how many they submitted in this window.">Estimator
+      <select name="est" onchange="this.form.submit()"><option value="">All estimators</option>{% for e in estimators %}<option value="{{ e.k }}" {% if est_key == e.k %}selected{% endif %}>{{ e.n }} ({{ e.c }})</option>{% endfor %}</select></label>
+    <label title="How the window's submissions are grouped in the summary table.">Summarise by
+      <select name="by" onchange="this.form.submit()"><option value="division" {% if by == 'division' %}selected{% endif %}>division</option><option value="estimator" {% if by == 'estimator' %}selected{% endif %}>estimator</option></select></label>
+    {% if div_code or est_key %}<a class="btn small" href="?view={{ view }}&{{ view }}={{ start|date:'Y-m-d' }}" style="align-self:center">Clear</a>{% endif %}
+    <span style="margin-left:auto"><div class="chart" style="height:40px;width:300px" title="Value submitted per {{ view }}, recent windows."><canvas id="c_strip"></canvas></div></span>
+  </div>
+</form>
+
+<div class="grid four" style="margin-bottom:12px">
+  <div class="card kpi"><div class="label" title="Proposals with a Submitted date inside the window (Project List rows): Σ value, Σ GP quoted (value − budget) and GP quoted ÷ value.">Submitted</div>
+    <div class="value">{{ tot_sub.value|money_k }}</div>
+    <div class="sub"><b>{{ tot_sub.n }}</b> proposal{{ tot_sub.n|pluralize }} · GP quoted <b>{{ tot_sub.gp|money_k }}</b>{% if tot_sub.gp_pct != None %} · <b>{{ tot_sub.gp_pct|pct:1 }}</b>{% endif %}</div>
+    <div class="sub" title="At the estimators' stated Probability of Close: Σ value × chance, and Σ GP quoted × chance.">expect to win {{ tot_sub.exp_value|money_k }} · expected GP {{ tot_sub.exp_gp|money_k }}</div></div>
+  <div class="card kpi"><div class="label" title="Awarded in the window (portal Date Awarded): Σ value, Σ GP quoted on those proposals and GP ÷ value.">Awarded</div>
+    <div class="value pos">{{ tot_aw.value|money_k }}</div>
+    <div class="sub"><b>{{ tot_aw.n }}</b> won · GP awarded <b>{{ tot_aw.gp|money_k }}</b>{% if tot_aw.gp_pct != None %} · <b>{{ tot_aw.gp_pct|pct:1 }}</b>{% endif %}</div></div>
+  <div class="card kpi"><div class="label" title="Set to Lost in the window: Σ value, the GP those proposals carried and GP ÷ value.">Lost</div>
+    <div class="value neg">{{ tot_lost.value|money_k }}</div>
+    <div class="sub"><b>{{ tot_lost.n }}</b> lost · GP quoted <b>{{ tot_lost.gp|money_k }}</b>{% if tot_lost.gp_pct != None %} · <b>{{ tot_lost.gp_pct|pct:1 }}</b>{% endif %}</div></div>
+  <div class="card kpi"><div class="label" title="Open bids whose Bid Due Date falls in the window, and who is carrying them.">Due in window</div>
+    <div class="value">{{ tot_due.n }}</div>
+    <div class="sub">{{ tot_due.value|money_k }}{% if tot_due.attention %} · <span class="warn-ink">{{ tot_due.attention }} flagged</span>{% endif %}</div>
+    {% if due_by_est %}<div class="sub" title="Estimator of record and how many of the window's due bids each carries.">{{ due_by_est }}</div>{% endif %}</div>
+</div>
+
+<div class="card" style="margin-bottom:12px">
+  <h2>Submitted this {{ view }} by {{ by }} <small>{{ label }}{% if div_code %} · division {{ div_code }}{% endif %}{% if est %} · {{ est.canonical_name }}{% endif %}</small></h2>
+  {% if groups %}<div class="table-wrap"><table class="data dense grp"><thead><tr><th title="Click a row to narrow the table below to these submissions.">{{ by|capfirst }}</th><th class="num" title="Proposals with a Submitted date in the window.">Proposals</th><th class="num" title="Σ Project Value as typed in the portal.">Value</th><th class="num" title="Σ Budget (estimated cost) as typed in the portal.">Budget</th><th class="num" title="Σ (value − budget).">GP quoted</th><th class="num" title="GP quoted ÷ value.">GP %</th><th class="num" title="Σ GP quoted × the estimator's stated Probability of Close.">Exp. GP (stated)</th><th class="num" title="Σ GP quoted × PCA's estimated win rate.">Exp. GP (PCA)</th><th class="num" title="PCA's estimated win rate, weighted by value.">PCA rate</th><th class="num" title="Submissions carrying at least one hygiene flag.">Flags</th></tr></thead><tbody>
+    {% for g in groups %}<tr class="drillgrp" data-ids="{{ g.rows|join:',' }}" title="Click to show only these submissions in the table below"><td><b>{% if g.url %}<a href="{{ g.url }}">{{ g.key }}</a>{% else %}{{ g.key }}{% endif %}</b></td><td class="num">{{ g.n }}</td><td class="num">{{ g.value|money_k }}</td><td class="num">{{ g.budget|money_k }}</td><td class="num">{{ g.gp|money_k }}</td><td class="num">{% if g.gp_pct != None %}{{ g.gp_pct|pct:1 }}{% else %}—{% endif %}</td><td class="num">{{ g.exp_gp|money_k }}</td><td class="num">{{ g.exp_gp_pca|money_k }}</td><td class="num">{% if g.pca_avg != None %}{{ g.pca_avg|pct:0 }}{% else %}—{% endif %}</td><td class="num">{% if g.attention %}<span class="att">{{ g.attention }}</span>{% else %}—{% endif %}</td></tr>{% endfor %}
+    <tr class="tot"><td>Total</td><td class="num">{{ tot_sub.n }}</td><td class="num">{{ tot_sub.value|money_k }}</td><td class="num">{{ tot_sub.budget|money_k }}</td><td class="num">{{ tot_sub.gp|money_k }}</td><td class="num">{% if tot_sub.gp_pct != None %}{{ tot_sub.gp_pct|pct:1 }}{% else %}—{% endif %}</td><td class="num">{{ tot_sub.exp_gp|money_k }}</td><td class="num">{{ tot_sub.exp_gp_pca|money_k }}</td><td class="num">{% if tot_sub.pca_avg != None %}{{ tot_sub.pca_avg|pct:0 }}{% else %}—{% endif %}</td><td class="num">{{ tot_sub.attention|default:"—" }}</td></tr>
+  </tbody></table></div>{% else %}<div class="empty">Nothing submitted in this window{% if div_code or est_key %} under these filters{% endif %}.</div>{% endif %}
+  <div id="t_window" data-table="window" style="margin-top:12px"></div>
+</div>
+
+<div class="card" style="margin-bottom:12px" id="open">
+  <h2>All open proposals <small>{{ open_tot.n }} submitted, awaiting a decision · {{ open_tot.value|money_k }} value · GP quoted {{ open_tot.gp|money_k }}{% if open_tot.gp_pct != None %} ({{ open_tot.gp_pct|pct:1 }}){% endif %} · expected GP {{ open_tot.exp_gp|money_k }} stated / {{ open_tot.exp_gp_pca|money_k }} PCA{% if open_tot.attention %} · <span class="warn-ink">{{ open_tot.attention }} need attention</span>{% endif %}</small></h2>
+  <div id="t_open" data-table="open"></div>
+</div>
+
+<div class="card" style="margin-bottom:12px" id="quoting">
+  <h2>In progress — quoting <small>{{ quoting_tot.n }} quote{{ quoting_tot.n|pluralize }} being priced (incl. on hold) · value typed so far {{ quoting_tot.value|money_k }}{% if quoting_tot.attention %} · <span class="warn-ink">{{ quoting_tot.attention }} need attention</span>{% endif %}</small></h2>
+  <div id="t_quoting" data-table="quoting"></div>
+</div>
+
+<div class="card tight">
+  <details data-remember="ps-about"><summary><b>How the numbers are made</b> <span class="muted">value, budget, GP quoted, stated chance, PCA win rate, expected GP, attention labels</span></summary>
+  <div class="note" style="margin-top:8px">
+    <p><b>Value and budget</b> are the Project Portal's Project Value and Budget as typed by the estimator; <b>GP quoted</b> = value − budget and <b>GP %</b> = GP quoted ÷ value. <b>Stated chance</b> is the portal's Probability of Close (blank = unscored, never 0 %). <b>Expected GP (stated)</b> = GP quoted × stated chance; <b>Expected GP (PCA)</b> = GP quoted × PCA's estimated win rate.</p>
+    <p><b>PCA's estimated win rate</b> blends the historical hit rate of the estimator, the client, the division, the work type (from the project name), the size band, the market sector and the sales rep on {{ model.n|intcomma }} decided bids since 2019 (base rate {{ model.base|pct:1 }}), in log-odds, each factor weighted by how much evidence it has (12 decided bids = half weight) and the total damped by {{ model.damping }} because the factors overlap. Expand a row to see the factors behind its number.{% if model.cal %} Self-check on a time split (trained on {{ model.cal.train|intcomma }} bids decided before {{ model.cal.split|date:'M j, Y' }}, scored on {{ model.cal.test|intcomma }} decided since): Brier score {{ model.cal.brier }} vs {{ model.cal.brier_base }} for the base rate alone — lower is better. Predicted vs actual by bucket: {% for b in model.cal.buckets %}{{ b.bucket }} → {{ b.actual|pct:0 }} actual ({{ b.n }}){% if not forloop.last %}; {% endif %}{% endfor %}.{% endif %} It is a descriptive average, not a rating of anyone; the concealed estimator ratings live on the Ratings page.</p>
+    <p><b>Needs attention</b> repeats the portal's own hygiene rules on each row: missing bidder, missing due date, no value, no budget, no submitted date, BOM needed, past due, unscored, untouched for 60 days.</p>
+    <p><b>Work type</b> is read from the project name (cameras, access control, AV, network, IT services, box sale, service, RFP) — the portal has no type column; it falls back to the division's trade.</p>
+  </div></details>
+</div>
+</div>
+<script id="ps-data" type="application/json">{{ data_json|safe }}</script>
+{% endblock %}
+{% block scripts %}<script src="{% static 'bids/snapshot.js' %}"></script><script>PCASnapshot.init();</script>{% endblock %}

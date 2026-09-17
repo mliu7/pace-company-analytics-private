@@ -1,0 +1,12 @@
+{% load humanize pca documents %}{# Shared by the project / customer / bid cards: D = the tag's dict, scope = a pref key prefix #}
+{% for g in D.groups %}<details class="doc-group" data-remember="{{ scope }}-{{ g.repo.id }}" {% if forloop.first or D.n <= 40 %}open{% endif %}>
+  <summary>{% if g.is_share %}P: drive{% else %}{{ g.repo.name }}{% endif %} <small>{{ g.n }} file{{ g.n|pluralize }}{% if g.prefix %} · <span class="mono" title="{{ g.prefix }}">{{ g.prefix|truncatechars:80 }}</span>{% endif %}</small></summary>
+  <div class="table-wrap" style="max-height:392px;margin-bottom:6px"><table class="data dense"><thead><tr><th>File</th><th>Type</th><th class="num">Size</th><th class="num" title="The source's own modified time.">Modified</th><th>By</th><th title="How PCA tied the file to this job: the rule and its confidence. 'check' = confirm or reject on the file's page.">Link</th></tr></thead><tbody>
+  {% for fo in g.folders %}{% if fo.path %}<tr class="doc-folder"><td colspan="6" title="{{ fo.path }}">{{ fo.label }}</td></tr>{% endif %}
+  {% for f in fo.files %}<tr data-ref="{{ f.id }}"{% if f.is_recent %} class="rowgood"{% endif %}>
+    <td class="name" title="{{ f.path }}"><a href="{{ f.preview_url }}">{{ f.name }}</a>{% if f.open_url %}<a class="ext" href="{{ f.open_url }}" target="_blank" rel="noopener" title="{% if g.is_share %}Open on the P: drive (smb://) · Windows: {{ f.unc }}{% else %}Open in SharePoint with your own login{% endif %}">↗</a>{% endif %}</td>
+    <td><span class="tag">{{ f.ext|upper|default:"—" }}</span></td><td class="num muted">{{ f.size|filesize }}</td>
+    <td class="num muted" title="{{ f.mtime|date:'M j, Y g:i a' }}">{{ f.mtime|date:"M j, Y" }}{% if f.is_recent %} <span class="chip pos" title="Changed in the last 14 days.">new</span>{% endif %}</td>
+    <td class="muted">{{ f.modified_by|truncatechars:22 }}</td>
+    <td><span class="tag {{ f.link_confidence|conf_label }}" title="{{ f.link_rule|nice }} ({{ f.link_via }} name) · confidence {{ f.link_confidence|pct:0 }}">{{ f.link_confidence|conf_label }}</span></td></tr>{% endfor %}{% endfor %}
+  </tbody></table></div></details>{% endfor %}

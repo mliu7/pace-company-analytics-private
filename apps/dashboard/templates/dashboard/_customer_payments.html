@@ -1,0 +1,209 @@
+{% load humanize pca %}{# Payment history card — gated by the effective customer_payments page rule, also used by its JSON endpoint. Context `pay` from analytics.customer_payments.page_context (docs/06 "Customer payment history"). #}
+<div class="card" id="customer-pay" style="margin-bottom:14px">
+  <h2>Payment history <small>{% if pay.n_apps %}every payment since 2013 · <b>{{ pay.collected|money }}</b> over {{ pay.n_payments }} payment{{ pay.n_payments|pluralize }} on {{ pay.n_apps }} invoice application{{ pay.n_apps|pluralize }}{% if pay.first_pay %} · {{ pay.first_pay|date:"M Y" }} → {{ pay.last_pay|date:"M j, Y" }}{% endif %}{% else %}no payments on record since 2013{% endif %}</small>
+    {% if pay.grade %}<span class="pill {{ pay.grade.css }}" style="margin-left:auto" title="{{ pay.grade.why }} PCA's payer grade: dollar-weighted days from invoice to payment{% if pay.terms_d %} against the {{ pay.terms_d }}-day terms on this customer's invoices{% endif %}, retention releases and reversals excluded — prompt ≤ 10 days over terms, fair ≤ 30, slow ≤ 60, very late beyond.">{{ pay.grade.label }} <b>{% if pay.grade.over > 0 %}+{% endif %}{{ pay.grade.over }}d vs terms</b></span>{% endif %}</h2>
+  {% if pay.n_apps %}
+  <div class="grid kpi" style="margin:4px 0 12px">
+    <div class="card kpi tight"><div class="label" title="Dollar-weighted days from the invoice date to the payment date (the check / wire date in SL), every application since 2013 with retention releases and reversals left out. The muted figure is the same thing over the last 12 months.">Pays in</div>
+      <div class="value sm">{% if pay.days != None %}{{ pay.days|floatformat:0 }}d{% if pay.terms_d %} <span class="muted" style="font-size:14px;font-weight:500">/ terms {{ pay.terms_d }}</span>{% endif %}{% else %}—{% endif %}</div>
+      <div class="sub">{% if pay.days_12 != None %}last 12 mo <b class="{% if pay.grade_12 %}{% if pay.grade_12.key == 'prompt' %}pos{% elif pay.grade_12.key == 'poor' %}neg{% elif pay.grade_12.key == 'slow' %}warn-ink{% endif %}{% endif %}">{{ pay.days_12|floatformat:0 }}d</b> on {{ pay.collected_12|money_k }}{% else %}nothing collected in the last 12 months{% endif %}{% if pay.median_days != None %} · median {{ pay.median_days|floatformat:0 }}d{% endif %}</div></div>
+    <div class="card kpi tight"><div class="label" title="Share of dollars that arrived on or before the invoice due date (dollar-weighted, retention releases excluded).">Within terms</div>
+      <div class="value sm {% if pay.on_time_share != None %}{% if pay.on_time_share >= 0.6 %}pos{% elif pay.on_time_share < 0.25 %}neg{% endif %}{% endif %}">{{ pay.on_time_share|pct:0 }}</div>
+      <div class="sub">{% for k, label, amt, share in pay.buckets %}{% if k != 'on_time' and share %}<span title="{{ amt|money }} paid {{ label|lower }}." class="{% if k == 'late90p' and share >= 0.2 %}neg{% endif %}">{{ label|lower }} {{ share|pct:0 }}</span>{% if not forloop.last %} · {% endif %}{% endif %}{% endfor %}</div></div>
+    <div class="card kpi tight"><div class="label" title="When they do pay late: dollar-weighted days past the due date over the late applications only, and the single worst one.">Typically late by</div>
+      <div class="value sm {% if pay.late_days != None and pay.late_days > 45 %}neg{% elif pay.late_days != None and pay.late_days > 15 %}warn-ink{% endif %}">{% if pay.late_days != None %}{{ pay.late_days|floatformat:0 }}d{% else %}never late{% endif %}</div>
+      <div class="sub">{% if pay.late_n %}{{ pay.late_n }} late application{{ pay.late_n|pluralize }}{% if pay.max_late %} · worst <b>{{ pay.max_late }}d</b>{% if pay.max_late_row %} on {{ pay.max_late_row.invoice_ref }} ({{ pay.max_late_row.applied|money_k }}){% endif %}{% endif %}{% else %}every dollar arrived by its due date{% endif %}</div></div>
+    <div class="card kpi tight"><div class="label" title="Invoices and debit memos issued since 2013 (zero-dollar shipment invoices left out), how many are fully paid, and what is still open today.">Invoices</div>
+      <div class="value sm">{{ pay.invoices_n }} <span class="muted" style="font-size:14px;font-weight:500">· {{ pay.invoiced|money_k }}</span></div>
+      <div class="sub">{{ pay.paid_n }} paid in full{% if pay.open_n %} · <span class="{% if pay.oldest_open and pay.oldest_open > 90 %}neg{% elif pay.oldest_open and pay.oldest_open > 0 %}warn-ink{% endif %}">{{ pay.open_n }} open · {{ pay.open_amt|money_k }}</span>{% endif %}{% if pay.credits_n %} · {{ pay.credits_n }} credit{{ pay.credits_n|pluralize }} {{ pay.credited|money_k }}{% endif %}{% if pay.zero_n %} · <span class="muted" title="Zero-dollar invoices — SO2 shipment paperwork against the job, nothing to collect.">{{ pay.zero_n }} at $0</span>{% endif %}</div></div>
+    {% if pay.holds_retention %}<div class="card kpi tight"><div class="label" title="This customer pays progress bills to a 5 % or 10 % retention and releases the holdback when the job closes. Those applications are 'paid to retention' (on time if the 90–95 % arrived by the due date); the later release is shown but kept out of the pays-in figure.">Retainage</div>
+      <div class="value sm">{{ pay.retention_open|money_k }} <span class="muted" style="font-size:14px;font-weight:500">held now</span></div>
+      <div class="sub">{{ pay.retention_apps }} application{{ pay.retention_apps|pluralize }} paid to retention{% if pay.reversed %} · <span class="warn-ink">{{ pay.reversed|money_k }} reversed</span>{% endif %}</div></div>
+    {% elif pay.reversed %}<div class="card kpi tight"><div class="label" title="Payments reversed in SL (returned checks, misapplied cash).">Reversed</div><div class="value sm warn-ink">{{ pay.reversed|money }}</div></div>{% endif %}
+  </div>
+
+  {% if pay.by_year|length > 1 %}
+  <details data-remember="cust-pay-years" open style="margin-bottom:10px"><summary><b>By year</b> <span class="muted">· how the behaviour has moved — collected by payment year, invoiced by invoice year</span></summary>
+  <div class="table-wrap tall" style="margin-top:6px"><table class="data dense" style="width:auto;min-width:640px"><thead><tr>
+    <th>Year</th><th class="num" title="Invoices and debit memos dated in the year.">Invoiced</th><th class="num" title="Payments applied in the year (payment date).">Collected</th><th class="num" title="Applications in the year.">Apps</th>
+    <th class="num" title="Dollar-weighted days from invoice to payment for the year's applications (retention releases excluded).">Pays in</th>
+    <th class="num" title="Share of the year's dollars that arrived by the due date.">Within terms</th><th class="num" title="Share of the year's dollars that arrived more than 90 days after the due date.">90+ late</th><th title="PCA's payer grade for the year (same rule as the headline).">Grade</th>
+  </tr></thead><tbody>
+  {% for y in pay.by_year %}<tr><td><b>{{ y.year }}</b></td><td class="num muted">{% if y.inv_n %}{{ y.invoiced|money }} <span class="muted">({{ y.inv_n }})</span>{% else %}—{% endif %}</td><td class="num">{% if y.n %}{{ y.collected|money }}{% else %}—{% endif %}</td><td class="num muted">{{ y.n|default:"—" }}</td>
+    <td class="num {% if y.grade %}{% if y.grade.key == 'poor' %}neg{% elif y.grade.key == 'slow' %}warn-ink{% elif y.grade.key == 'prompt' %}pos{% endif %}{% endif %}">{% if y.days != None %}<b>{{ y.days|floatformat:0 }}d</b>{% else %}—{% endif %}</td>
+    <td class="num">{{ y.on_time_share|pct:0 }}</td><td class="num {% if y.late90p_share and y.late90p_share >= 0.2 %}neg{% endif %}">{{ y.late90p_share|pct:0 }}</td>
+    <td>{% if y.grade %}<span class="pill {{ y.grade.css }}" style="padding:1px 8px;font-size:11px">{{ y.grade.label }}</span>{% endif %}</td></tr>{% endfor %}
+  </tbody></table></div></details>
+  {% endif %}
+
+  <details data-remember="cust-pay-table" open><summary><b>Every payment</b> <span class="muted" id="cpay-sum"></span></summary>
+  <div class="ledger-bar">
+    <input type="search" id="cpay-q" placeholder="search payment or invoice number, project, description, PO, PM, or an exact amount…" title="Matches the payment reference (check number / wire batch), invoice number, project number or title, invoice description, customer PO, order number or PM. A number finds applications, invoices or payments of exactly that amount.">
+    <label title="Paid on or after">From <input type="date" id="cpay-from"></label>
+    <label title="Paid on or before">To <input type="date" id="cpay-to"></label>
+    <a href="#" id="cpay-clear" class="btn small" hidden>clear filters</a>
+    <a href="#" id="cpay-sort-reset" class="btn small" hidden title="Back to newest payment first">reset sort</a>
+  </div>
+  <div class="ledger-chips" id="cpay-chips"></div>
+  <div class="table-wrap freeze ledger-wrap" id="cpay-wrap">
+    <table class="data dense ledger-table" id="cpay-table"><thead><tr>
+      <th class="num sortable" data-sort="paid" title="Payment date — the check / wire date on the SL payment document (the day it appears on the Payments Received page). Bold on the first invoice of a payment; the payment's other invoices follow. Click to sort; click again to flip, a third time to remove.">Paid on</th>
+      <th class="sortable" data-sort="ref" title="Payment reference: check number, WT… wire / ACH batch, CC… card.{% if customer_payment_links.payday %} Click the reference for that day's Payments Received page.{% endif %}">Payment</th>
+      <th class="num sortable" data-sort="pamt" title="Total of the payment document (all invoices it covered; a wire batch shows this customer's share).">Pay total</th>
+      <th class="sortable" data-sort="inv" title="Invoice the money was applied to (DM = debit memo). Hover for the invoice description and customer PO.">Invoice</th>
+      <th class="num sortable" data-sort="idate" title="Invoice date.">Inv date</th>
+      <th class="num sortable" data-sort="due" title="Due date from the invoice terms (terms code muted).">Due</th>
+      <th class="num sortable" data-sort="days" title="Days from the invoice date to the payment date — how long the money took.">Days to pay</th>
+      <th class="num sortable" data-sort="vs_due" title="Payment date minus due date: negative = paid early, positive = paid late. Red over 60 days late, amber over 15.">vs due</th>
+      <th class="num sortable" data-sort="iamt" title="Invoice original amount.">Invoice amt</th>
+      <th class="num sortable" data-sort="applied" title="Amount of this payment applied to the invoice (discount taken shown muted).">Applied</th>
+      <th class="num sortable" data-sort="open" title="What was left open on the invoice right after this application. A 5 % / 10 % remainder is retainage held by contract, not a short payment.">Left open</th>
+      <th class="sortable fluid" data-sort="proj" style="width:26%;min-width:220px" title="The job the invoice bills: project number (click for the job), title, division, PM, state — or the 010 order for hardware invoices.">Job</th>
+      <th class="num sortable" data-sort="cv" title="Job contract value, and how much of it had been billed to date (job-level figures as of the latest refresh, not as of the payment).">Job CV · billed</th>
+    </tr></thead><tbody id="cpay-body"></tbody></table>
+    <div id="cpay-more" class="empty" style="padding:8px"></div>
+  </div>
+  <div class="note" style="margin-top:6px">One row per invoice application; a payment that covered several invoices shows them consecutively under the default sort. Days to pay run from the invoice date to the payment date (the check / wire date in SL); "vs due" is against the invoice's due date. A payment that leaves exactly 5 % or 10 % of the invoice open is <b>paid to retention</b> — the customer paid what was owed and the rest is the contractual holdback; the later <b>retention release</b> is listed but kept out of the pays-in figures. Click a column heading to sort; more headings add secondary sorts (a heading's number is its rank; click again to flip, a third time to remove). The table keeps to ten rows and scrolls on its own — more rows load as you scroll.</div>
+  </details>
+  {{ pay.facets|json_script:"cpayfacets" }}
+  <script>
+  (function () {
+    const body = document.getElementById('cpay-body');
+    if (!body) return;
+    const L = {url: '{% url "dashboard:customer_payments" c.sl_customer_id %}',
+               proj: {% if customer_payment_links.project %}'{% url "dashboard:project_detail" "KEY" %}'{% else %}null{% endif %},
+               person: {% if customer_payment_links.person %}'{% url "dashboard:person_detail" "KEY" %}'{% else %}null{% endif %},
+               order: {% if customer_payment_links.order %}'{% url "dashboard:sales010_order_detail" "KEY" %}'{% else %}null{% endif %},
+               payday: {% if customer_payment_links.payday %}'{% url "dashboard:finance_payments" %}?day='{% else %}null{% endif %}, n: {{ pay.n_apps|default:0 }},
+               facets: JSON.parse(document.getElementById('cpayfacets').textContent)};
+    const wrap = document.getElementById('cpay-wrap'), more = document.getElementById('cpay-more'), sum = document.getElementById('cpay-sum');
+    const esc = t => String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+    const fmt$ = (v, c) => v == null ? '—' : (v < 0 ? '-' : '') + '$' + Math.abs(v).toLocaleString('en-US', {minimumFractionDigits: c ? 2 : 0, maximumFractionDigits: c ? 2 : 0});
+    const fmtk = v => v == null ? '—' : (v < 0 ? '-' : '') + (Math.abs(v) >= 1e6 ? '$' + (Math.abs(v) / 1e6).toFixed(2) + 'M' : Math.abs(v) >= 1e3 ? '$' + Math.round(Math.abs(v) / 1e3) + 'k' : '$' + Math.round(Math.abs(v)));
+    const dt = s => { if (!s) return '—'; const d = new Date(s + 'T00:00:00'); return d.toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: 'numeric'}); };
+    const METHOD = {wire: 'wire', card: 'card', check: 'check', other: ''};
+    const DIMS = [['year', 'Year'], ['timing', 'Timing'], ['method', 'How'], ['div', 'Division'], ['proj', 'Job']];
+    const DEFAULT_SORT = [{k: 'paid', d: -1}, {k: 'ref', d: 1}, {k: 'applied', d: -1}];
+    const DESC_FIRST = new Set(['paid', 'pamt', 'idate', 'due', 'cv', 'iamt', 'applied', 'open', 'days', 'vs_due']);
+    const S = {q: '', from: '', to: '', dims: {year: new Set(), timing: new Set(), method: new Set(), div: new Set(), proj: new Set()}, sort: [], offset: 0, more: true, loading: false, seq: 0, last: null};
+    const hasFilter = () => !!(S.q || S.from || S.to || DIMS.some(([d]) => S.dims[d].size));
+    const isDefault = () => !S.sort.length;
+
+    function row(r) {
+      const first = isDefault() && !(S.last && S.last.pref === r.pref && S.last.paid === r.paid);
+      S.last = r;
+      const pcell = first ? '<b>' + dt(r.paid) + '</b>' : '<span class="muted">' + dt(r.paid) + '</span>';
+      const pref = (L.payday ? '<a class="mono" href="' + L.payday + esc(r.paid) + '" title="Open the Payments Received page for ' + dt(r.paid) + '.">' + esc(r.pref) + '</a>' : '<span class="mono">' + esc(r.pref) + '</span>') +
+        (METHOD[r.method] ? ' <span class="ar-chip">' + METHOD[r.method] + '</span>' : '') +
+        (first && r.pn > 1 ? ' <span class="muted" title="This payment covered ' + r.pn + ' invoices.">×' + r.pn + '</span>' : '') +
+        (first && r.pbal > 0.005 ? ' <span class="ar-chip neg" title="Part of this payment is not yet applied to any invoice.">' + fmtk(r.pbal) + ' unapplied</span>' : '');
+      let job = '';
+      if (r.cpn) job = (L.proj ? '<a href="' + L.proj.replace('KEY', encodeURIComponent(r.cpn)) + '" title="' + esc(r.disp + ' ' + r.title) + '">' + esc(r.disp) + '</a>' : '<span class="mono">' + esc(r.disp) + '</span>') + ' <span class="muted">' + esc(r.title) + '</span>' +
+        (r.div ? ' <span class="ar-chip">' + esc(r.div) + '</span>' : '') + (r.state ? ' <span class="ar-chip" title="Job state">' + esc(r.state.replace(/_/g, ' ')) + '</span>' : '') +
+        (r.pm ? ' <span class="muted">· ' + (r.pm_key && L.person ? '<a href="' + L.person.replace('KEY', encodeURIComponent(r.pm_key)) + '">' + esc(r.pm) + '</a>' : esc(r.pm)) + '</span>' : '');
+      else if (r.order) job = (r.cnet && L.order ? '<a href="' + L.order.replace('KEY', encodeURIComponent(r.cnet)) + '" title="010 order ' + esc(r.cnet) + '">order ' + esc(r.order) + '</a>' : '<span class="mono">order ' + esc(r.order) + '</span>') + (r.div ? ' <span class="ar-chip">' + esc(r.div) + '</span>' : '');
+      else job = '<span class="muted">' + esc(r.desc || '—') + '</span>';
+      if ((r.cpn || r.order) && r.desc) job += ' <span class="muted">· ' + esc(r.desc) + '</span>';
+      const cv = r.cv ? fmtk(r.cv) + (r.billed != null && r.cv ? ' <span class="muted">· ' + Math.round(100 * r.billed / r.cv) + '% billed</span>' : '') : '<span class="muted">—</span>';
+      let open = r.open == null ? '—' : Math.abs(r.open) < 0.005 ? '<span class="muted">paid off</span>' : fmt$(r.open, true);
+      if (r.retention) open += ' <span class="ar-chip info" title="Exactly ' + Math.round(r.retention * 100) + '% of the invoice left open — retainage held by contract until the job closes.">' + Math.round(r.retention * 100) + '% retention</span>';
+      if (r.release) open = '<span class="ar-chip info" title="This application paid the retention held on the invoice — job closeout, not a late payment; excluded from the pays-in figures.">retention release</span> ' + open;
+      if (r.reversal) open = '<span class="ar-chip neg" title="A reversed application (returned check or misapplied cash) — the invoice reopened.">reversal</span> ' + open;
+      const days = r.days == null ? '—' : r.days + 'd';
+      let vs = '—', vcls = '';
+      if (r.vs_due != null && !r.reversal) {
+        if (r.release) { vs = '<span class="muted">' + (r.vs_due > 0 ? '+' : '') + r.vs_due + 'd</span>'; }
+        else if (r.vs_due <= 0) { vs = (r.vs_due === 0 ? 'on the day' : (-r.vs_due) + 'd early'); vcls = 'pos'; }
+        else { vs = r.vs_due + 'd late'; vcls = r.vs_due > 60 ? 'neg' : r.vs_due > 15 ? 'warn-ink' : ''; }
+      }
+      return '<tr' + (first && isDefault() && r.pn > 1 ? ' class="cpay-first"' : '') + '><td class="num">' + pcell + '</td><td>' + pref + '</td><td class="num ' + (first ? '' : 'muted') + '">' + fmt$(r.pamt, true) + '</td>' +
+        '<td class="mono" title="' + esc((r.desc ? r.desc : '') + (r.po ? ' · PO ' + r.po : '') + (r.n_apps > 1 ? ' · application ' + r.seq + ' of ' + r.n_apps + ' on this invoice' : '')) + '">' + esc(r.inv) + (r.itype !== 'IN' ? ' <span class="ar-chip">' + esc(r.itype) + '</span>' : '') + (r.n_apps > 1 ? ' <span class="muted">' + r.seq + '/' + r.n_apps + '</span>' : '') + '</td>' +
+        '<td class="num muted">' + dt(r.idate) + '</td><td class="num muted">' + dt(r.due) + (r.terms ? ' <span class="muted" style="font-size:10.5px">' + esc(r.terms) + '</span>' : '') + '</td>' +
+        '<td class="num"><b>' + days + '</b></td><td class="num ' + vcls + '">' + vs + '</td>' +
+        '<td class="num">' + fmt$(r.iamt, true) + '</td><td class="num"><b>' + fmt$(r.applied, true) + '</b>' + (r.disc ? ' <span class="muted" title="Discount taken">−' + fmt$(r.disc, true) + '</span>' : '') + '</td>' +
+        '<td class="num">' + open + '</td>' +
+        '<td class="trunc fluid" style="width:26%;min-width:220px">' + job + '</td><td class="num muted">' + cv + '</td></tr>';
+    }
+
+    function params() {
+      const q = new URLSearchParams();
+      if (S.q) q.set('q', S.q);
+      if (S.from) q.set('date_from', S.from);
+      if (S.to) q.set('date_to', S.to);
+      for (const [d] of DIMS) if (S.dims[d].size) q.set(d, [...S.dims[d]].join(','));
+      q.set('sort', (S.sort.length ? S.sort : DEFAULT_SORT).map(s => (s.d < 0 ? '-' : '') + s.k).join(','));
+      q.set('offset', S.offset);
+      return q;
+    }
+    function load(reset) {
+      if (reset) { S.offset = 0; S.more = true; S.loading = false; S.last = null; body.innerHTML = ''; wrap.scrollTop = 0; }
+      if (S.loading || !S.more) return;
+      S.loading = true;
+      const seq = ++S.seq;
+      more.textContent = 'loading…';
+      fetch(L.url + '?' + params().toString()).then(r => r.json()).then(res => {
+        if (seq !== S.seq) return;
+        S.loading = false; S.offset = res.offset + res.rows.length; S.more = res.has_more;
+        if (!res.n) body.innerHTML = '<tr><td colspan="13" class="empty" style="padding:14px">no payments match</td></tr>';
+        else body.insertAdjacentHTML('beforeend', res.rows.map(row).join(''));
+        sum.textContent = '· ' + res.n.toLocaleString() + (res.n !== L.n ? ' of ' + L.n.toLocaleString() : '') + ' application' + (res.n === 1 ? '' : 's') + ' · ' + res.payments.toLocaleString() + ' payment' + (res.payments === 1 ? '' : 's') + ' · ' + fmt$(res.total) +
+          (res.days != null ? ' · pays in ' + Math.round(res.days) + 'd' : '') + (res.on_time != null ? ' · ' + Math.round(res.on_time * 100) + '% within terms' : '');
+        more.textContent = S.more ? 'scroll for more · ' + (res.n - S.offset).toLocaleString() + ' remaining' : (res.n ? 'all ' + res.n.toLocaleString() + ' rows shown' : '');
+        if (S.more && wrap.scrollHeight <= wrap.clientHeight + 4) load(false);
+      }).catch(() => { if (seq === S.seq) { S.loading = false; more.textContent = 'failed to load'; } });
+    }
+    wrap.addEventListener('scroll', () => { if (wrap.scrollTop + wrap.clientHeight >= wrap.scrollHeight - 160) load(false); });
+
+    function renderChips() {
+      let html = '';
+      for (const [d, label] of DIMS) {
+        const items = L.facets[d] || [];
+        if (!items.length || (d !== 'year' && d !== 'timing' && items.length < 2)) continue;
+        html += '<span class="dim">' + label + ':</span>' + items.map(f => '<span class="lchip' + (S.dims[d].has(String(f.v)) ? ' on' : '') + '" data-dim="' + d + '" data-v="' + esc(f.v) +
+          '" title="' + f.n.toLocaleString() + ' application' + (f.n > 1 ? 's' : '') + ' · ' + fmt$(f.amt) + ' · click to toggle">' + esc(f.label || f.v) + '<small>' + fmtk(f.amt) + '</small></span>').join('');
+      }
+      document.getElementById('cpay-chips').innerHTML = html;
+      document.getElementById('cpay-clear').hidden = !hasFilter();
+    }
+    document.getElementById('cpay-chips').addEventListener('click', e => {
+      const c = e.target.closest('.lchip');
+      if (!c) return;
+      const set = S.dims[c.dataset.dim];
+      set.has(c.dataset.v) ? set.delete(c.dataset.v) : set.add(c.dataset.v);
+      renderChips(); load(true);
+    });
+    let timer = null;
+    document.getElementById('cpay-q').addEventListener('input', e => { clearTimeout(timer); timer = setTimeout(() => { S.q = e.target.value.trim(); renderChips(); load(true); }, 250); });
+    document.getElementById('cpay-from').addEventListener('change', e => { S.from = e.target.value; renderChips(); load(true); });
+    document.getElementById('cpay-to').addEventListener('change', e => { S.to = e.target.value; renderChips(); load(true); });
+    document.getElementById('cpay-clear').addEventListener('click', e => {
+      e.preventDefault();
+      S.q = S.from = S.to = ''; for (const [d] of DIMS) S.dims[d].clear();
+      document.getElementById('cpay-q').value = ''; document.getElementById('cpay-from').value = ''; document.getElementById('cpay-to').value = '';
+      renderChips(); load(true);
+    });
+    function renderSort() {
+      const eff = S.sort.length ? S.sort : DEFAULT_SORT;
+      document.querySelectorAll('#cpay-table th.sortable').forEach(th => {
+        const i = eff.findIndex(s => s.k === th.dataset.sort);
+        th.querySelectorAll('.sortn').forEach(n => n.remove());
+        th.classList.toggle('sorted', i >= 0);
+        if (i >= 0) th.insertAdjacentHTML('beforeend', '<span class="sortn' + (S.sort.length ? '' : ' dflt') + '">' + (eff.length > 1 ? (i + 1) : '') + (eff[i].d < 0 ? '▾' : '▴') + '</span>');
+      });
+      document.getElementById('cpay-sort-reset').hidden = !S.sort.length;
+    }
+    document.querySelectorAll('#cpay-table th.sortable').forEach(th => th.addEventListener('click', () => {
+      const k = th.dataset.sort, i = S.sort.findIndex(s => s.k === k);
+      if (i < 0) S.sort.push({k, d: DESC_FIRST.has(k) ? -1 : 1, flipped: false});
+      else if (!S.sort[i].flipped) { S.sort[i].d = -S.sort[i].d; S.sort[i].flipped = true; }
+      else S.sort.splice(i, 1);
+      renderSort(); load(true);
+    }));
+    document.getElementById('cpay-sort-reset').addEventListener('click', e => { e.preventDefault(); S.sort = []; renderSort(); load(true); });
+    renderChips(); renderSort(); load(true);
+  })();
+  </script>
+  {% else %}
+  <div class="empty" style="padding:16px">No payment applications on record for this customer since 2013{% if pay.invoices_n %} — {{ pay.invoices_n }} invoice{{ pay.invoices_n|pluralize }} totalling {{ pay.invoiced|money }} issued{% if pay.open_n %}, {{ pay.open_amt|money }} still open{% endif %}{% endif %}.</div>
+  {% endif %}
+</div>

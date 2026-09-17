@@ -1,0 +1,10 @@
+{# Generic JSON drill-down modal (finance pages). Wired by PCADrill.bind(url) in finance_modals.js. #}
+<div class="fin-modal" id="drillmodal" onclick="if(event.target===this)this.style.display='none'">
+  <div class="fin-modal-box">
+    <div class="fin-modal-head"><h2 id="drilltitle">…</h2><span id="drillsum" class="muted"></span>
+      <input id="drillsearch" type="search" placeholder="filter rows…" style="margin-left:auto;max-width:220px" oninput="window.__drillFilter && window.__drillFilter(this.value)">
+      <a href="#" onclick="document.getElementById('drillmodal').style.display='none';return false" class="fin-modal-close">✕</a></div>
+    <div id="drillnote" class="callout warn" style="margin:0 0 10px" hidden></div>
+    <div class="table-wrap freeze" style="max-height:62vh"><div id="drillbody" class="empty">loading…</div></div>
+  </div>
+</div>

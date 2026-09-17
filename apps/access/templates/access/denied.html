@@ -1,0 +1,9 @@
+{% load static %}<!doctype html><html lang="en"><head><meta charset="utf-8"><title>No access · Pace Company Analytics</title>
+<link rel="stylesheet" href="{% static 'dashboard/app.css' %}">
+<style>.gate{min-height:100vh;display:flex;align-items:center;justify-content:center;background:#101a2b}
+.gate .card{background:#fff;border-radius:14px;padding:34px 38px;max-width:430px}</style></head>
+<body><div class="gate"><div class="card"><h2 style="margin:0 0 6px">No access</h2>
+{% if reason == "unknown" %}<p>Your Microsoft account signed in, but no Pace Company Analytics account exists for it yet. Ask the Pace permission administrator (HR) to set you up.</p>
+{% elif reason == "disabled" %}<p>This account has been disabled. Contact the Pace permission administrator.</p>
+{% else %}<p>You don't have permission to view that page.</p>{% endif %}
+<p style="margin-top:12px"><a href="/">← Back</a> · <a href="{% url 'access:logout' %}">Sign out</a></p></div></div></body></html>

@@ -1,0 +1,395 @@
+{% extends "dashboard/base.html" %}{% load humanize pca %}
+{% block title %}010 Snapshot {{ label }} · Pace Company Analytics{% endblock %}
+{% block content %}
+<div class="topbar">
+  <div class="title"><h1>Project Snapshot <small style="display:inline;font-size:14px">010 Hardware Sales</small></h1>
+    <small>What happened in the box-sales business in this window — what was quoted, sold, shipped and invoiced (and at what margin), what was bought for those orders, what came back, what got paid, and where the backlog and pipeline stood at the end. {% if view == 'day' %}Friday's page covers Fri–Sun.{% else %}Calendar weeks, Monday–Sunday.{% endif %} Only SO1 hardware orders count; project material (SO2) never appears. Every term is click-defined.</small></div>
+  <div class="row">
+    <a class="btn small {% if view == 'day' %}primary{% endif %}" href="?view=day&div=010{% if rep_sel %}&rep={{ rep_sel|urlencode }}{% endif %}">Day</a>
+    <a class="btn small {% if view == 'week' %}primary{% endif %}" href="?view=week&div=010{% if rep_sel %}&rep={{ rep_sel|urlencode }}{% endif %}">Week</a>
+    {% if prev_key %}<a class="btn small" href="?view={{ view }}&{{ view }}={{ prev_key|date:'Y-m-d' }}&div=010{% if rep_sel %}&rep={{ rep_sel|urlencode }}{% endif %}" title="Previous {{ view }} with 010 activity ({{ prev_key|date:'D M j' }}).">←</a>{% else %}<span class="btn small" style="visibility:hidden">←</span>{% endif %}
+    <b style="white-space:nowrap;text-align:center;min-width:{% if view == 'week' %}215px{% else %}165px{% endif %};font-size:14px">{{ label }}</b>
+    {% if next_key %}<a class="btn small" href="?view={{ view }}&{{ view }}={{ next_key|date:'Y-m-d' }}&div=010{% if rep_sel %}&rep={{ rep_sel|urlencode }}{% endif %}" title="Next {{ view }} with 010 activity ({{ next_key|date:'D M j' }}).">→</a>{% else %}<span class="btn small" style="visibility:hidden">→</span>{% endif %}
+    <form method="get" style="display:inline">
+      <input type="hidden" name="view" value="{{ view }}"><input type="hidden" name="div" value="010">{% if rep_sel %}<input type="hidden" name="rep" value="{{ rep_sel }}">{% endif %}
+      <input type="date" name="{{ view }}" value="{{ start|date:'Y-m-d' }}" onchange="this.form.submit()" style="font:inherit;padding:5px 8px;border:1px solid var(--line-strong);border-radius:8px" title="Jump to any date — it snaps to its {{ view }} window.">
+    </form>
+  </div>
+</div>
+
+<form method="get" action="{% url 'dashboard:project_snapshot' %}" class="card tight" style="margin-bottom:12px">
+  <input type="hidden" name="view" value="{{ view }}"><input type="hidden" name="{{ view }}" value="{{ start|date:'Y-m-d' }}">
+  <div class="filters" style="margin-bottom:0">
+    {% include "dashboard/_division_stepper.html" %}
+    <label title="Filter every attributable section to one rep (CNET salesperson; House = the shared buckets). Ledger, backlog and pipeline tiles stay division-wide.">Salesperson
+      <select name="rep" onchange="this.form.submit()"><option value="">All reps</option>
+      {% for r in reps %}<option value="{{ r }}" {% if rep_sel == r %}selected{% endif %}>{{ r }}</option>{% endfor %}</select></label>
+    {% if filtered %}<span class="note" style="align-self:center">filtered to {{ rep_sel }} — ledger, backlog, pipeline and AR aging stay division-wide</span>{% endif %}
+    <span style="margin-left:auto"><div class="chart" style="height:40px;width:280px" title="SO1 orders sold ($) per {{ view }}, recent windows — context strip."><canvas id="c_strip"></canvas></div></span>
+  </div>
+</form>
+
+<div class="grid four" style="margin-bottom:12px">
+  <div class="card kpi"><div class="label" title="CNET quotes created in the window (Central time), placeholders ≥ $1M excluded; quoted GM = price − hand-typed cost on quotes with a sane cost.">Quoted</div>
+    <div class="value sm">{{ qtot.amt|money_k }} <span class="muted">· {{ qtot.n }}</span></div>
+    <div class="sub">quoted GM {{ qtot.gm|pct:0 }}{% if qtot.customer_built %} · {{ qtot.customer_built }} customer-built{% endif %}{% if qtot.jumbo %} · {{ qtot.jumbo }} placeholder ≥ $1M excluded{% endif %} · <a href="#quotes" title="Quotes created in this window that have since become orders (as of today).">{{ qtot.won }} won so far</a></div></div>
+  <div class="card kpi"><div class="label" title="SO1 orders by SL order date (Owner: SL order date is the 'sold' basis). Quoted GM = CNET price − CNET cost over orders with a sane cost; 'cost?' orders are excluded from the margin, not from the dollars.">Sold</div>
+    <div class="value sm">{{ sold.amt|money_k }} <span class="muted">· {{ sold.n }}</span></div>
+    <div class="sub">quoted GM <b>{{ sold.gm|pct:0 }}</b>{% if sold.unlinked %} · <span class="warn-ink">{{ sold.unlinked }} not in CNET</span>{% endif %}{% if sold.cancelled %} · {{ sold.cancelled }} cancelled{% endif %}{% if sold.customer_built %} · {{ sold.customer_built }} customer-built{% endif %}{% if sold.n %} · <a href="#sold" title="Orders that trace back to a CNET quote — the From-quote column.">{{ sold.from_quote }} from quotes</a>{% endif %}</div></div>
+  <div class="card kpi"><div class="label" title="SO1 shippers by ship date: invoiced dollars and SL's shipped cost — the realized margin. Drift = SL cost − CNET quoted cost over orders that finished shipping in the window (positive = paid more than quoted).">Shipped &amp; invoiced</div>
+    <div class="value sm">{{ shipped.invc|money_k }} <span class="muted">· {{ shipped.n }}</span></div>
+    <div class="sub">realized GM <b class="{% if shipped.gm != None and shipped.gm < 0.05 %}neg{% endif %}">{{ shipped.gm|pct:0 }}</b> ({{ shipped.gp|money_k }}){% if shipped.drift_n %} · drift <span class="{{ shipped.drift|posneg_inv }}">{{ shipped.drift|signed_money }}</span> on {{ shipped.drift_n }} finished{% endif %}</div></div>
+  <div class="card kpi"><div class="label" title="Purchase orders placed and receipts posted for SO1 demand: project-less PO lines that the material-tie logic matched to an SO1 order (stock bought without a matching order is listed separately below, not counted here).">Purchased / received</div>
+    <div class="value sm">{{ purch.po_amt|money_k }} <span class="muted">ord /</span> {{ purch.rc_amt|money_k }} <span class="muted">rcvd</span></div>
+    <div class="sub">{{ purch.po_n }} PO{{ purch.po_n|pluralize }} · {{ purch.rc_n }} receipt{{ purch.rc_n|pluralize }}{% if backorder.lines %} · <a href="#purch" title="Open SO1 lines on backorder today (cost basis).">{{ backorder.lines }} lines on backorder ({{ backorder.cost|money_k }}, today)</a>{% endif %}</div></div>
+  <div class="card kpi"><div class="label" title="Payments applied to SO1 invoices in the window. Days = dollar-weighted invoice-to-payment age of what was paid.">Cash in</div>
+    <div class="value sm">{{ cash.amt|money_k }} <span class="muted">· {{ cash.n }}</span></div>
+    <div class="sub">{% if cash.days_wavg != None %}paid {{ cash.days_wavg|floatformat:0 }} days after invoice{% else %}no payments{% endif %} · SO1 AR {{ ar_total|money_k }} today{% if ar_buckets.over90 %}, <span class="neg">{{ ar_buckets.over90.bal|money_k }} over 90</span>{% endif %}</div></div>
+  <div class="card kpi"><div class="label" title="RMA orders (RM1) created and 'SO1 Return' credit memos issued in the window.">Returns</div>
+    <div class="value sm {% if ret.credit %}neg{% endif %}">{% if ret.n %}−{{ ret.credit|money_k }}{% else %}—{% endif %} <span class="muted">· {{ ret.n }}</span></div>
+    <div class="sub">{% if ret.n %}RMA{{ ret.n|pluralize }} and credit memos → <a href="#returns">detail</a>{% else %}no returns{% endif %}</div></div>
+  <div class="card kpi"><div class="label" title="GL postings created in the window under subaccounts 0100 + 0101: sales (3I except interest), COGS (5xxxx except freight), rebates 50730, freight 50750/50760. Batch-posted: a day's ledger rarely equals the day's shipments; the month-to-date tie-out is in the Ledger card.">GL day · 0100 + 0101</div>
+    <div class="value sm">{% if gl_ok %}{{ gl.all.revenue|money_k }} <span class="muted">rev ·</span> <span class="{{ gl.all.gp|posneg }}">{{ gl.all.gp|money_k }}</span> <span class="muted">GP</span>{% else %}<span class="muted">outside window</span>{% endif %}</div>
+    <div class="sub">{% if gl_ok %}COGS {{ gl.all.cogs|money_k }}{% if gl.all.rebates %} · rebates {{ gl.all.rebates|signed_money }}{% endif %}{% if gl.all.freight %} · freight {{ gl.all.freight|money }}{% endif %} · <a href="#ledger">tie-out</a>{% else %}postings older than {{ today|date:"M j" }} − 93 days are not kept; month totals in the Ledger card{% endif %}</div></div>
+  <div class="card kpi"><div class="label" title="Open SO1 orders at the end of the window that had not fully shipped: count and unshipped value (SL merchandise total − shipped). Orders older than {{ dead_days }} days are treated as a hygiene list, not demand, and sit outside this figure. Δ = vs the start of the window.">Backlog · end of window</div>
+    <div class="value sm">{{ bl.live_amt|money_k }} <span class="muted">· {{ bl.live_n }}</span> {% if bl.delta %}<span class="chip {{ bl.delta|posneg }}">{{ bl.delta|signed_money }}</span>{% endif %}</div>
+    <div class="sub">{% if bl.old_n %}{{ bl.old_n }} older than 60 days · {% endif %}{% if bl.dead_n %}<a href="#dead" class="warn-ink">{{ bl.dead_n }} over {{ dead_days }} days ({{ bl.dead_amt|money_k }}) — hygiene</a>{% else %}none over {{ dead_days }} days{% endif %} · pipeline {{ pipe.amt|money_k }} <span class="muted">({{ pipe.n }} open quotes ≤ {{ pipe_days }} d{% if pipe.stale %}, {{ pipe.stale }} stale{% endif %}{% if pipe.delta %}, {{ pipe.delta|signed_money }} vs start{% endif %})</span></div></div>
+</div>
+
+{% if flags.negative or flags.cost or flags.unlinked or flags.mismatch or flags.pass_through or flags.dead or sold.unknown_mfr_share > 0.2 %}
+<div class="card tight" style="margin-bottom:12px">
+  <div class="row" style="gap:10px;flex-wrap:wrap">
+    <b title="Exception flags for the window — click a chip to expand its list.">Flags</b>
+    {% if flags.negative %}<a class="tag critical" href="#" onclick="snapToggle('flag-neg');return false" title="Orders or shipments whose margin is negative (price below cost).">negative margin · {{ flags.negative|length }}</a>{% endif %}
+    {% if flags.pass_through %}<a class="tag moderate" href="#" onclick="snapToggle('flag-pass');return false" title="Shipments at under 3% realized margin — pass-through deals that dilute the day's headline margin.">pass-through · {{ flags.pass_through|length }}</a>{% endif %}
+    {% if flags.cost %}<a class="tag moderate" href="#" onclick="snapToggle('flag-cost');return false" title="CNET cost typed at more than 1.5× the price — a data-entry slip, excluded from every margin figure.">cost? · {{ flags.cost|length }}</a>{% endif %}
+    {% if flags.unlinked %}<a class="tag high" href="#" onclick="snapToggle('flag-unl');return false" title="SL orders with no matching CNET sales order (SOHeader.User2 blank or mistyped) — see 010 Hygiene.">not in CNET · {{ flags.unlinked|length }}</a>{% endif %}
+    {% if flags.mismatch %}<a class="tag moderate" href="#" onclick="snapToggle('flag-mis');return false" title="CNET total and SL order total differ by more than $1.">CNET ≠ SL · {{ flags.mismatch|length }}</a>{% endif %}
+    {% if sold.unknown_mfr_share > 0.2 %}<span class="tag" title="Share of CNET lines on today's orders with no manufacturer — a hygiene signal for the products pages.">manufacturer unknown on {{ sold.unknown_mfr_share|pct:0 }} of lines</span>{% endif %}
+    {% if flags.dead %}<a class="tag high" href="#dead" title="Open SL orders older than {{ dead_days }} days with unshipped value — probably dead orders never closed in SL.">dead backlog · {{ flags.dead|length }}</a>{% endif %}
+  </div>
+  <div id="flag-neg" style="display:none;margin-top:8px"><table class="data dense"><thead><tr><th>Order / shipper</th><th>Customer</th><th class="num">Price</th><th class="num">Cost</th><th class="num">GM</th></tr></thead><tbody>
+    {% for r in flags.negative %}<tr><td class="mono">{{ r.ref }}</td><td>{{ r.customer }}</td><td class="num">{{ r.price|money }}</td><td class="num">{{ r.cost|money }}</td><td class="num neg">{{ r.gm|pct }}</td></tr>{% endfor %}</tbody></table></div>
+  <div id="flag-pass" style="display:none;margin-top:8px"><table class="data dense"><thead><tr><th>Shipper</th><th>Customer</th><th class="num">Invoiced</th><th class="num">Cost</th><th class="num">GM</th></tr></thead><tbody>
+    {% for r in flags.pass_through %}<tr><td class="mono">{{ r.ref }}</td><td>{{ r.customer }}</td><td class="num">{{ r.price|money }}</td><td class="num">{{ r.cost|money }}</td><td class="num">{{ r.gm|pct }}</td></tr>{% endfor %}</tbody></table></div>
+  <div id="flag-cost" style="display:none;margin-top:8px"><table class="data dense"><thead><tr><th>Doc</th><th>Customer</th><th class="num">Price</th><th class="num">Cost as typed</th></tr></thead><tbody>
+    {% for r in flags.cost %}<tr><td class="mono">{{ r.ref }} <span class="muted" style="font-family:inherit">{{ r.kind }}</span></td><td>{{ r.customer }}</td><td class="num">{{ r.price|money }}</td><td class="num neg">{{ r.cost|money }}</td></tr>{% endfor %}</tbody></table></div>
+  <div id="flag-unl" style="display:none;margin-top:8px"><div class="row" style="flex-wrap:wrap;gap:6px 14px">{% for r in flags.unlinked %}<span class="mono">{{ r.ref }} <span class="muted">{{ r.customer }} · {{ r.sl|money }} · User2 "{{ r.user2 }}"</span></span>{% endfor %}</div></div>
+  <div id="flag-mis" style="display:none;margin-top:8px"><div class="row" style="flex-wrap:wrap;gap:6px 14px">{% for r in flags.mismatch %}<span class="mono">{{ r.ref }} <span class="muted">SL {{ r.sl|money:2 }} vs CNET {{ r.cnet|money:2 }}</span></span>{% endfor %}</div></div>
+</div>
+{% endif %}
+
+<div class="card" style="margin-bottom:12px" id="sold">
+  <h2>Orders sold <small>{{ label }} · SO1 orders by SL order date · quoted margin from CNET · click an order for its lines · click headers to sort</small></h2>
+  <div class="table-wrap pay-table" style="max-height:70vh"><table class="data dense" id="orders"><thead><tr>
+    <th class="snap-sort" data-c="0" title="SL order → CNET document. Click the CNET number for the order page.">Order</th>
+    <th class="snap-sort" data-c="1">Customer</th>
+    <th class="snap-sort" data-c="2" title="CNET salesperson (House = shared buckets).">Rep</th>
+    <th class="snap-sort" data-c="3" title="Who created the CNET order (operations attribution).">Entered by</th>
+    <th class="snap-sort" data-c="4" title="Largest-dollar manufacturer on the order.">Top mfr</th>
+    <th class="num snap-sort" data-c="5" title="CNET line count.">Lines</th>
+    <th class="num snap-sort" data-c="6" title="SL order total (merchandise + freight + tax).">Total</th>
+    <th class="num snap-sort" data-c="7" title="CNET quoted cost.">Quoted cost</th>
+    <th class="num snap-sort" data-c="8" title="Quoted gross profit in dollars = CNET price − CNET quoted cost, on orders with a sane cost. Click to sort.">Quoted GP</th>
+    <th class="num snap-sort" data-c="9" title="Quoted GM = (CNET price − CNET cost) ÷ price. 'cost?' = hand-typed cost over 1.5× price, excluded.">Quoted GM</th>
+    <th class="snap-sort" data-c="10" title="The quote this order came from (link method: note_ref = the SO's notes cite the quote; heuristic = same customer, same total ±2%, within 60 days) and how many days the quote took to become an order.">From quote</th>
+    <th class="snap-sort" data-c="11" title="SL status: O open, C closed.">Status</th>
+    <th title="Tags: cancelled · customer-built (quote authored outside pace-systems.com) · not in CNET · CNET ≠ SL total · pass-through (< 3% GM).">Flags</th>
+  </tr></thead><tbody>
+  {% for o in orders %}
+  <tr class="pay-group {% if o.big %}snap-big{% endif %}" data-g="o{{ forloop.counter }}" {% if o.lines %}onclick="snapToggleRows('o{{ forloop.counter }}')" title="Click for the order lines."{% endif %}>
+    <td data-v="{{ o.ord_nbr }}" style="white-space:nowrap">{% if o.lines %}<span class="pay-caret" id="caret-o{{ forloop.counter }}">▸</span>{% endif %}<span class="mono">{{ o.ord_nbr }}</span>{% if o.document_number %} <a href="{% url 'dashboard:sales010_order_detail' o.document_number %}" onclick="event.stopPropagation()" title="CNET order {{ o.document_number }} — full quoted → SL → realized bridge.">#{{ o.document_number }}</a>{% endif %}</td>
+    <td class="trunc fluid" style="width:22%;min-width:150px" data-v="{{ o.customer|default:o.cust_id }}" title="{{ o.customer|default:o.cust_id }}{% if o.ship_city %} · ships to {{ o.ship_city }}, {{ o.ship_state }}{% endif %}{% if o.cust_ord_nbr %} · PO {{ o.cust_ord_nbr }}{% endif %}">{% if o.customer %}<a href="{% url 'dashboard:customer_detail' o.cust_id %}" onclick="event.stopPropagation()">{{ o.customer }}</a>{% else %}{{ o.cust_id }}{% endif %}</td>
+    <td data-v="{{ o.rep }}" style="white-space:nowrap">{{ o.rep }}</td>
+    <td data-v="{{ o.created_by_name|default:'' }}" style="white-space:nowrap">{{ o.created_by_name|default:"—" }}</td>
+    <td class="trunc fluid" style="width:11%;min-width:100px" data-v="{{ o.top_mfr }}" title="{{ o.top_mfr }}">{{ o.top_mfr|default:"—" }}</td>
+    <td class="num" data-v="{{ o.n_lines }}">{{ o.n_lines }}</td>
+    <td class="num" data-v="{{ o.tot_ord }}"><b>{{ o.tot_ord|money }}</b></td>
+    <td class="num muted" data-v="{{ o.total_item_cost|default_if_none:'' }}">{{ o.total_item_cost|money }}</td>
+    <td class="num" data-v="{{ o.quoted_gp|default_if_none:'' }}">{% if o.quoted_gp != None %}<b class="{% if o.quoted_gp < 0 %}neg{% endif %}">{{ o.quoted_gp|money }}</b>{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num" data-v="{{ o.gm|default_if_none:'' }}">{% if o.gm != None %}<b class="{% if o.gm < 0 %}neg{% elif o.gm < 0.03 %}warn-ink{% endif %}">{{ o.gm|pct }}</b>{% elif o.flag == 'cost?' %}<span class="tag moderate" title="CNET cost typed at more than 1.5× the price.">cost?</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td data-v="{{ o.quote_number|default:'' }}" style="white-space:nowrap">{% if o.quote_number %}<span class="mono">Q {{ o.quote_number }}</span> <span class="muted" title="Link method {{ o.conversion_method }}.">{{ o.quote_age|default_if_none:"?" }}d</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td data-v="{{ o.status }}"><span class="tag {% if o.status == 'O' %}in_progress{% endif %}">{{ o.status }}</span></td>
+    <td>{% if o.cancelled %}<span class="tag canceled">cancelled</span>{% endif %}{% if o.customer_built %} <span class="tag" title="The quote was authored outside pace-systems.com — the customer built it in ChannelOnline.">customer-built</span>{% endif %}{% if o.unlinked %} <span class="tag high">not in CNET</span>{% endif %}{% if o.mismatch %} <span class="tag moderate" title="SL {{ o.tot_ord|money:2 }} vs CNET {{ o.cnet_total|money:2 }}.">CNET ≠ SL</span>{% endif %}{% if o.pass_through %} <span class="tag moderate">pass-through</span>{% endif %}</td>
+  </tr>
+  {% for ln in o.lines %}<tr class="pay-inv pay-hidden" data-g="o{{ forloop.parentloop.counter }}">
+    <td class="pay-indent mono" colspan="2">{{ ln.invt_id|default:"—" }} <span class="muted" style="font-family:inherit">{{ ln.descr }}</span></td>
+    <td colspan="3" class="muted">{{ ln.manufacturer }}</td>
+    <td class="num muted">{{ ln.qty_ord|num:0 }}{% if ln.qty_bo %} <span class="warn-ink" title="{{ ln.qty_bo|num:0 }} on backorder.">BO</span>{% endif %}</td>
+    <td class="num">{{ ln.tot_ord|money }}</td><td class="num muted">{{ ln.tot_cost|money }}</td>
+    <td class="num muted">{{ ln.tot_ord|sub_money:ln.tot_cost }}</td>
+    <td class="num">{% if ln.gm != None %}<span class="{% if ln.gm < 0 %}neg{% endif %}">{{ ln.gm|pct }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td colspan="3" class="muted">{% if ln.unit_cost %}unit {{ ln.unit_cost|money:2 }} → {{ ln.sls_price|money:2 }}{% endif %}</td></tr>{% endfor %}
+  {% empty %}<tr><td colspan="13" class="empty">No SO1 orders entered in SL in this window{% if filtered %} for {{ rep_sel }}{% endif %}.</td></tr>{% endfor %}
+  </tbody>{% if orders %}<tfoot><tr><td colspan="5">Total · {{ sold.n }} order{{ sold.n|pluralize }}</td><td></td><td class="num">{{ sold.amt|money }}</td><td></td><td class="num">{{ sold.gm|pct }}</td><td colspan="3" class="muted" style="font-weight:400">margin over {{ sold.gm_price|money_k }} of orders with a sane cost</td></tr></tfoot>{% endif %}</table></div>
+</div>
+
+<div class="card" style="margin-bottom:12px">
+  <h2>Shipped &amp; invoiced <small>{{ label }} · SO1 shippers by ship date · SL cost = realized margin · click a shipper for its lines and serials</small></h2>
+  <div class="table-wrap pay-table" style="max-height:70vh"><table class="data dense" id="ships"><thead><tr>
+    <th class="snap-sort" data-c="0" title="SL shipper / invoice → CNET order.">Shipper · invoice</th>
+    <th class="snap-sort" data-c="1">Customer</th>
+    <th class="snap-sort" data-c="2">Rep</th>
+    <th class="num snap-sort" data-c="3" title="Invoiced (SL shipper TotInvc).">Invoiced</th>
+    <th class="num snap-sort" data-c="4" title="SL shipped cost (SOShipHeader TotCost).">Cost</th>
+    <th class="num snap-sort" data-c="5" title="Invoiced − cost.">GP</th>
+    <th class="num snap-sort" data-c="6" title="Realized margin. Red below 0, amber under 3% (pass-through).">GM</th>
+    <th class="num snap-sort" data-c="7" title="SL shipped cost − CNET quoted cost for the whole order, shown when the order finished shipping in this window. Positive = paid more than quoted.">Drift</th>
+    <th class="num snap-sort" data-c="8" title="Freight charged on the shipper.">Freight</th>
+    <th class="num snap-sort" data-c="9" title="Days from SL order date to ship date.">Days</th>
+    <th class="snap-sort" data-c="10" title="Shipped / invoiced dates.">Dates</th>
+  </tr></thead><tbody>
+  {% for s in ships %}
+  <tr class="pay-group {% if s.big %}snap-big{% endif %}" data-g="s{{ forloop.counter }}" {% if s.lines %}onclick="snapToggleRows('s{{ forloop.counter }}')" title="Click for the shipment lines."{% endif %}>
+    <td data-v="{{ s.shipper_id }}" style="white-space:nowrap">{% if s.lines %}<span class="pay-caret" id="caret-s{{ forloop.counter }}">▸</span>{% endif %}<span class="mono">{{ s.shipper_id }}</span> <span class="muted mono">{{ s.invc_nbr }}</span>{% if s.document_number %} <a href="{% url 'dashboard:sales010_order_detail' s.document_number %}" onclick="event.stopPropagation()">#{{ s.document_number }}</a>{% else %}<span class="muted mono">{{ s.ord_nbr }}</span>{% endif %}{% if s.fully_shipped and s.last_ship_date == s.ship_date %} <span class="tag closed_stabilized" title="This shipment completed the order.">complete</span>{% endif %}</td>
+    <td class="trunc fluid" style="width:28%;min-width:160px" data-v="{{ s.customer|default:s.cust_id }}" title="{{ s.customer|default:s.cust_id }}">{% if s.customer %}<a href="{% url 'dashboard:customer_detail' s.cust_id %}" onclick="event.stopPropagation()">{{ s.customer }}</a>{% else %}{{ s.cust_id }}{% endif %}</td>
+    <td data-v="{{ s.rep }}" style="white-space:nowrap">{{ s.rep }}</td>
+    <td class="num" data-v="{{ s.tot_invc }}"><b>{{ s.tot_invc|money }}</b></td>
+    <td class="num muted" data-v="{{ s.tot_cost }}">{{ s.tot_cost|money }}</td>
+    <td class="num {{ s.gp|posneg }}" data-v="{{ s.gp }}">{{ s.gp|signed_money }}</td>
+    <td class="num" data-v="{{ s.gm|default_if_none:'' }}">{% if s.gm != None %}<b class="{% if s.gm < 0 %}neg{% elif s.gm < 0.03 %}warn-ink{% endif %}">{{ s.gm|pct }}</b>{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num" data-v="{{ s.drift|default_if_none:'' }}">{% if s.drift != None %}<span class="{{ s.drift|posneg_inv }}">{{ s.drift|signed_money }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num muted" data-v="{{ s.tot_frt }}">{{ s.tot_frt|numdash:0 }}</td>
+    <td class="num muted" data-v="{{ s.days_to_ship|default_if_none:'' }}">{{ s.days_to_ship|default_if_none:"—" }}</td>
+    <td class="muted" data-v="{{ s.ship_date|date:'Y-m-d' }}" style="white-space:nowrap">{{ s.ship_date|date:"M j" }}{% if s.invc_date and s.invc_date != s.ship_date %} · inv {{ s.invc_date|date:"M j" }}{% endif %}</td>
+  </tr>
+  {% for ln in s.lines %}<tr class="pay-inv pay-hidden" data-g="s{{ forloop.parentloop.counter }}">
+    <td class="pay-indent mono" colspan="3">{{ ln.invt_id|default:"—" }} <span class="muted" style="font-family:inherit">{{ ln.descr }}</span>{% if ln.serials %} <div class="muted" style="font-family:inherit" title="{{ ln.serials|join:', ' }}"><div class="clamp2">· {{ ln.serials|length }} serial{{ ln.serials|length|pluralize }}: {{ ln.serials|join:", " }}</div></div>{% endif %}</td>
+    <td class="num">{{ ln.tot_invc|money }}</td><td class="num muted">{{ ln.tot_cost|money }}</td>
+    <td class="num"></td>
+    <td class="num">{% if ln.gm != None %}<span class="{% if ln.gm < 0 %}neg{% endif %}">{{ ln.gm|pct }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td colspan="4" class="muted">{{ ln.qty_ship|num:0 }} × {{ ln.unit_cost|money:2 }} → {{ ln.sls_price|money:2 }}</td></tr>{% endfor %}
+  {% empty %}<tr><td colspan="11" class="empty">Nothing shipped on SO1 orders in this window{% if filtered %} for {{ rep_sel }}{% endif %}.</td></tr>{% endfor %}
+  </tbody>{% if ships %}<tfoot><tr><td colspan="3">Total · {{ shipped.n }} shipper{{ shipped.n|pluralize }} on {{ shipped.orders }} order{{ shipped.orders|pluralize }}</td><td class="num">{{ shipped.invc|money }}</td><td class="num">{{ shipped.cost|money }}</td><td class="num {{ shipped.gp|posneg }}">{{ shipped.gp|signed_money }}</td><td class="num">{{ shipped.gm|pct }}</td><td class="num {{ shipped.drift|posneg_inv }}">{% if shipped.drift_n %}{{ shipped.drift|signed_money }}{% endif %}</td><td class="num">{{ shipped.frt|numdash:0 }}</td><td colspan="2"></td></tr></tfoot>{% endif %}</table></div>
+</div>
+
+<div class="card" style="margin-bottom:12px" id="quotes">
+  <h2>Quotes created <small>{{ label }} · CNET quotes by created date (Central) · placeholders ≥ $1M out of the totals · click a quote for its lines · click headers to sort</small></h2>
+  <div class="table-wrap pay-table" style="max-height:70vh"><table class="data dense" id="quotes-table"><thead><tr>
+    <th class="snap-sort" data-c="0" title="CNET quote number. Click it to open the quote on the pipeline page (header, notes, by-manufacturer rollup, lines).">Quote</th>
+    <th class="snap-sort" data-c="1">Customer</th>
+    <th class="snap-sort" data-c="2" title="CNET salesperson (House = shared buckets).">Rep</th>
+    <th class="snap-sort" data-c="3" title="Who authored the quote in ChannelOnline (operations attribution).">Entered by</th>
+    <th class="snap-sort" data-c="4" title="Largest-dollar manufacturer on the quote.">Top mfr</th>
+    <th class="num snap-sort" data-c="5" title="CNET line count.">Lines</th>
+    <th class="num snap-sort" data-c="6" title="CNET quote total (price including tax and S&amp;H).">Total</th>
+    <th class="num snap-sort" data-c="7" title="CNET quoted cost (hand-typed).">Quoted cost</th>
+    <th class="num snap-sort" data-c="8" title="Quoted gross profit in dollars = price − hand-typed cost, on quotes with a sane cost. Click to sort.">Quoted GP</th>
+    <th class="num snap-sort" data-c="9" title="Quoted GM = (price − cost) ÷ price on quotes with a sane cost. 'cost?' = hand-typed cost over 1.5× price, excluded.">Quoted GM</th>
+    <th class="snap-sort" data-c="10" title="What became of the quote as of today (not as of the window). won = linked to a CNET order → the order page, with days from quote to order (note_ref = the order's notes cite the quote, exact; heuristic = same customer, same total ±2%, within 60 days). open = still open, with its age (stale = no CNET activity for {{ stale_days }}+ days). aged out = still 'Open' in CNET but older than {{ pipe_days }} days — outside the pipeline window, CNET statuses rot. lost / hold as marked.">Outcome today</th>
+    <th title="Tags: placeholder (≥ $1M, out of the totals) · customer-built (authored outside pace-systems.com) · no lines (a lump-sum total with no line detail).">Flags</th>
+  </tr></thead><tbody>
+  {% for q in quotes %}
+  <tr class="pay-group {% if q.jumbo %}rowleft{% elif q.big %}snap-big{% endif %}" data-g="q{{ forloop.counter }}" {% if q.lines %}onclick="snapToggleRows('q{{ forloop.counter }}')" title="Click for the quote lines."{% endif %}>
+    <td data-v="{{ q.document_number }}" style="white-space:nowrap">{% if q.lines %}<span class="pay-caret" id="caret-q{{ forloop.counter }}">▸</span>{% endif %}<a class="mono" href="{% url 'dashboard:sales010_pipeline' %}?q={{ q.document_number }}" onclick="event.stopPropagation()" title="Open quote {{ q.document_number }} on the pipeline page.">Q {{ q.document_number }}</a>{% if view == 'week' %} <span class="muted" title="Created {{ q.created_at|date:'D M j, g:i a' }}.">{{ q.created_at|date:"D" }}</span>{% endif %}</td>
+    <td class="trunc fluid" style="width:22%;min-width:150px" data-v="{{ q.customer_company }}" title="{{ q.customer_company }}{% if q.ship_city %} · ships to {{ q.ship_city }}, {{ q.ship_state }}{% endif %}{% if q.customer_po %} · PO {{ q.customer_po }}{% endif %}">{% if q.cust_link %}<a href="{% url 'dashboard:customer_detail' q.cust_link %}" onclick="event.stopPropagation()">{{ q.customer_company }}</a>{% else %}{{ q.customer_company|default:"—" }}{% endif %}</td>
+    <td data-v="{{ q.rep }}" style="white-space:nowrap">{{ q.rep }}</td>
+    <td data-v="{{ q.created_by_name|default:'' }}" style="white-space:nowrap">{{ q.created_by_name|default:"—" }}</td>
+    <td class="trunc fluid" style="width:11%;min-width:100px" data-v="{{ q.top_mfr }}" title="{{ q.top_mfr }}">{{ q.top_mfr|default:"—" }}</td>
+    <td class="num" data-v="{{ q.n_lines }}">{{ q.n_lines }}</td>
+    <td class="num" data-v="{{ q.total|default_if_none:'' }}"><b>{{ q.total|money }}</b></td>
+    <td class="num muted" data-v="{{ q.total_item_cost|default_if_none:'' }}">{{ q.total_item_cost|money }}</td>
+    <td class="num" data-v="{{ q.quoted_gp|default_if_none:'' }}">{% if q.quoted_gp != None %}<b class="{% if q.quoted_gp < 0 %}neg{% endif %}">{{ q.quoted_gp|money }}</b>{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num" data-v="{{ q.gm|default_if_none:'' }}">{% if q.gm != None %}<b class="{% if q.gm < 0 %}neg{% elif q.gm < 0.03 %}warn-ink{% endif %}">{{ q.gm|pct }}</b>{% elif q.flag == 'cost?' %}<span class="tag moderate" title="CNET cost typed at more than 1.5× the price.">cost?</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td data-v="{{ q.outcome }}" style="white-space:nowrap">{% if q.outcome == 'won' %}<span class="tag closed_stabilized">won</span>{% if q.won_number %} → <a href="{% url 'dashboard:sales010_order_detail' q.won_number %}" onclick="event.stopPropagation()" title="CNET order {{ q.won_number }}{% if q.won_sl %} · SL {{ q.won_sl }}{% endif %} · {{ q.won_total|money }} — full quoted → SL → realized bridge.">#{{ q.won_number }}</a> <span class="muted" title="Quote to order · link method {{ q.conversion_method }}{% if q.won_sl %} · SL {{ q.won_sl }}{% endif %}.">{{ q.days_to_win|default_if_none:"?" }}d</span>{% else %} <span class="muted" title="CNET status Ordered, no linked order found.">status only</span>{% endif %}{% elif q.outcome == 'open' %}<span class="tag in_progress">open</span> <span class="muted">{{ q.age }}d</span>{% if q.stale %} <span class="warn-ink" title="No CNET activity for {{ stale_days }}+ days.">stale</span>{% endif %}{% elif q.outcome == 'aged out' %}<span class="muted" title="Still 'Open' in CNET but older than {{ pipe_days }} days — outside the pipeline window.">aged out · {{ q.age }}d</span>{% elif q.outcome == 'hold' %}<span class="tag moderate">hold</span>{% else %}<span class="tag canceled">{{ q.outcome }}</span>{% endif %}</td>
+    <td>{% if q.jumbo %}<span class="tag" title="≥ $1M placeholder — out of the totals.">placeholder</span>{% endif %}{% if q.customer_built %} <span class="tag" title="The quote was authored outside pace-systems.com — the customer built it in ChannelOnline.">customer-built</span>{% endif %}{% if not q.lines %} <span class="tag" title="A total with no line detail — a lump sum.">no lines</span>{% endif %}</td>
+  </tr>
+  {% for ln in q.lines %}<tr class="pay-inv pay-hidden" data-g="q{{ forloop.parentloop.counter }}">
+    <td class="pay-indent mono" colspan="3">{{ ln.part_number|default:"—" }} <span class="muted" style="font-family:inherit">{{ ln.description }}</span></td>
+    <td colspan="2" class="muted">{{ ln.manufacturer }}</td>
+    <td class="num muted">{{ ln.qty|num:0 }}</td>
+    <td class="num">{{ ln.ext_price|money }}</td><td class="num muted">{{ ln.ext_cost|money }}</td>
+    <td class="num muted">{% if ln.gm != None %}{{ ln.ext_price|sub_money:ln.ext_cost }}{% else %}—{% endif %}</td>
+    <td class="num">{% if ln.gm != None %}<span class="{% if ln.gm < 0 %}neg{% endif %}">{{ ln.gm|pct }}</span>{% elif ln.flag == 'cost?' %}<span class="tag moderate">cost?</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td colspan="2" class="muted">{% if ln.unit_cost %}unit {{ ln.unit_cost|money:2 }} → {{ ln.unit_price|money:2 }}{% endif %}</td></tr>{% endfor %}
+  {% empty %}<tr><td colspan="12" class="empty">No quotes created in this window{% if filtered %} for {{ rep_sel }}{% endif %}.</td></tr>{% endfor %}
+  </tbody>{% if quotes %}<tfoot><tr><td colspan="5">Total · {{ qtot.n }} quote{{ qtot.n|pluralize }}{% if qtot.jumbo %} <span class="muted" style="font-weight:400">· {{ qtot.jumbo }} placeholder{{ qtot.jumbo|pluralize }} excluded</span>{% endif %}</td><td></td><td class="num">{{ qtot.amt|money }}</td><td></td><td class="num">{{ qtot.gm|pct }}</td><td colspan="2" class="muted" style="font-weight:400">margin over {{ qtot.gm_price|money_k }} of quotes with a sane cost · {{ qtot.won }} won so far ({{ qtot.won_amt|money_k }}){% if qtot.open %} · {{ qtot.open }} still open{% if qtot.stale %}, {{ qtot.stale }} stale{% endif %}{% endif %}</td></tr></tfoot>{% endif %}</table></div>
+  <div class="note" style="margin-top:6px">Pipeline at the end of the window: <b>{{ pipe.amt|money }}</b> across {{ pipe.n }} open quotes ≤ {{ pipe_days }} days old{% if pipe.stale %} · <span class="warn-ink">{{ pipe.stale }} untouched for {{ stale_days }}+ days</span>{% endif %} · {{ pipe.delta|signed_money }} vs the start ({{ pipe_start.amt|money_k }}) → <a href="{% url 'dashboard:sales010_pipeline' %}">pipeline page</a>. Quote → order pairs live in the <a href="#sold">Orders sold</a> "From quote" column.</div>
+</div>
+
+<div class="card" style="margin-bottom:12px" id="purch">
+  <h2>Purchasing for SO1 orders <small>POs placed {{ purch.po_amt|money_k }} · received {{ purch.rc_amt|money_k }} · click a PO for its items</small></h2>
+  <div class="grid two">
+  <div>
+    <h3 title="Project-less purchase-order lines the material-tie logic matched to an SO1 order (Pace cuts distributor POs against order demand without SL's SO→PO link). ≈ marks a deduced tie.">Ordered <small>{{ pos|length }} PO{{ pos|length|pluralize }} · {{ purch.po_amt|money }}</small></h3>
+    <div class="table-wrap" style="max-height:340px"><table class="data dense pay-table"><thead><tr><th>PO</th><th>Vendor</th><th>For</th><th class="num">Lines</th><th class="num">$</th></tr></thead><tbody>
+    {% for g in pos %}<tr class="pay-group {% if g.big %}snap-big{% endif %}" data-g="p{{ forloop.counter }}" onclick="snapToggleRows('p{{ forloop.counter }}')">
+      <td class="mono"><span class="pay-caret" id="caret-p{{ forloop.counter }}">▸</span>{{ g.po_nbr }} <span class="muted" style="font-family:inherit">{{ g.d|date:"M j" }}</span></td>
+      <td class="trunc fluid" style="width:25%;min-width:130px" title="{{ g.vendor_name|default:g.vendor_id }}">{% if acc.finance %}<a href="{% url 'dashboard:finance_vendor' g.vendor_id %}" onclick="event.stopPropagation()">{{ g.vendor_name|default:g.vendor_id }}</a>{% else %}{{ g.vendor_name|default:g.vendor_id }}{% endif %}</td>
+      <td class="trunc fluid snap-ded" style="width:35%;min-width:160px" title="Deduced from sales-order demand: {% for so, dn, cu in g.sos %}{{ so }}{% if dn %} (#{{ dn }}){% endif %} {{ cu }}; {% endfor %}">≈ {% for so, dn, cu in g.sos %}{% if dn %}<a href="{% url 'dashboard:sales010_order_detail' dn %}" onclick="event.stopPropagation()">#{{ dn }}</a>{% else %}{{ so }}{% endif %} {{ cu }}{% if not forloop.last %} · {% endif %}{% endfor %}</td>
+      <td class="num muted">{{ g.lines|length }}</td><td class="num"><b>{{ g.total|money }}</b></td></tr>
+      {% for ln in g.lines %}<tr class="pay-inv pay-hidden" data-g="p{{ forloop.parentloop.counter }}"><td class="pay-indent mono" colspan="3">{{ ln.item_id|default:"—" }} <span class="muted" style="font-family:inherit">{{ ln.descr }}</span></td><td class="num muted">{{ ln.qty|num:0 }}</td><td class="num">{{ ln.ext_cost|money }}</td></tr>{% endfor %}
+    {% empty %}<tr><td colspan="5" class="empty">No POs placed for SO1 orders in this window.</td></tr>{% endfor %}
+    </tbody></table></div>
+    {% if pos_untied.n %}<div class="note" style="margin-top:4px">Also placed, not tied to any order (stock): {{ pos_untied.amt|money }} on {{ pos_untied.n }} line{{ pos_untied.n|pluralize }} — {{ pos_untied.vendors }}.</div>{% endif %}
+  </div>
+  <div>
+    <h3 title="Receipts against those POs (POTran type R), same tie logic.">Received <small>{{ rcpts|length }} receipt{{ rcpts|length|pluralize }} · {{ purch.rc_amt|money }}</small></h3>
+    <div class="table-wrap" style="max-height:340px"><table class="data dense pay-table"><thead><tr><th>Receipt</th><th>Vendor</th><th>For</th><th class="num">Lines</th><th class="num">$</th></tr></thead><tbody>
+    {% for g in rcpts %}<tr class="pay-group {% if g.big %}snap-big{% endif %}" data-g="r{{ forloop.counter }}" onclick="snapToggleRows('r{{ forloop.counter }}')">
+      <td class="mono"><span class="pay-caret" id="caret-r{{ forloop.counter }}">▸</span>{{ g.key }} <span class="muted" style="font-family:inherit">{{ g.d|date:"M j" }} · PO {{ g.po_nbr }}</span></td>
+      <td class="trunc fluid" style="width:25%;min-width:130px" title="{{ g.vendor_name|default:g.vendor_id }}">{% if acc.finance %}<a href="{% url 'dashboard:finance_vendor' g.vendor_id %}" onclick="event.stopPropagation()">{{ g.vendor_name|default:g.vendor_id }}</a>{% else %}{{ g.vendor_name|default:g.vendor_id }}{% endif %}</td>
+      <td class="trunc fluid snap-ded" style="width:35%;min-width:160px" title="Deduced from sales-order demand: {% for so, dn, cu in g.sos %}{{ so }}{% if dn %} (#{{ dn }}){% endif %} {{ cu }}; {% endfor %}">≈ {% for so, dn, cu in g.sos %}{% if dn %}<a href="{% url 'dashboard:sales010_order_detail' dn %}" onclick="event.stopPropagation()">#{{ dn }}</a>{% else %}{{ so }}{% endif %} {{ cu }}{% if not forloop.last %} · {% endif %}{% endfor %}</td>
+      <td class="num muted">{{ g.lines|length }}</td><td class="num"><b>{{ g.total|money }}</b></td></tr>
+      {% for ln in g.lines %}<tr class="pay-inv pay-hidden" data-g="r{{ forloop.parentloop.counter }}"><td class="pay-indent mono" colspan="3">{{ ln.item_id|default:"—" }} <span class="muted" style="font-family:inherit">{{ ln.descr }}</span></td><td class="num muted">{{ ln.qty|num:0 }}</td><td class="num">{{ ln.ext_cost|money }}</td></tr>{% endfor %}
+    {% empty %}<tr><td colspan="5" class="empty">Nothing received for SO1 orders in this window.</td></tr>{% endfor %}
+    </tbody></table></div>
+    {% if rcpts_untied.n %}<div class="note" style="margin-top:4px">Also received, not tied to any order (stock): {{ rcpts_untied.amt|money }} on {{ rcpts_untied.n }} line{{ rcpts_untied.n|pluralize }} — {{ rcpts_untied.vendors }}.</div>{% endif %}
+  </div>
+  </div>
+  {% if backorder.lines %}<div class="note" style="margin-top:6px">Backorders today: <b>{{ backorder.lines }}</b> open SO1 lines on {{ backorder.orders }} orders, {{ backorder.cost|money }} at cost → <a href="{% url 'dashboard:sales010_orders' %}?chip=backlog">orders page</a>.</div>{% endif %}
+</div>
+
+<div class="grid two" style="margin-bottom:12px">
+  <div class="card" id="returns">
+    <h2>Returns &amp; credits <small>RMA orders and "SO1 Return" credit memos · {{ ret.n }} · {{ ret.credit|money }}</small></h2>
+    <div class="table-wrap" style="max-height:360px"><table class="data dense"><thead><tr><th>RMA</th><th>Customer</th><th title="The original CNET order and its realized margin — what the return gives back.">Original order</th><th class="num">Credit</th><th>Credit memo</th></tr></thead><tbody>
+    {% for r in returns %}<tr {% if r.big %}class="snap-big"{% endif %}>
+      <td class="mono">{{ r.ord_nbr }} <span class="muted" style="font-family:inherit">{{ r.ord_date|date:"M j" }}</span></td>
+      <td class="trunc fluid" style="width:38%;min-width:150px" title="{{ r.customer|default:r.cust_id }}">{% if r.customer %}<a href="{% url 'dashboard:customer_detail' r.cust_id %}">{{ r.customer }}</a>{% else %}{{ r.cust_id }}{% endif %}</td>
+      <td style="white-space:nowrap">{% if r.orig_number %}<a href="{% url 'dashboard:sales010_order_detail' r.orig_number %}">#{{ r.orig_number }}</a> <span class="muted">{{ r.orig_total|money_k }}{% if r.orig_gm != None %} · {{ r.orig_gm|pct:0 }} GM{% endif %} · {{ r.rep }}</span>{% else %}<span class="muted">{{ r.cnet_number|default:"—" }}</span>{% endif %}</td>
+      <td class="num neg">−{{ r.credit|money }}</td>
+      <td class="muted">{% if r.cm_ref %}<span class="mono">{{ r.cm_ref }}</span> {{ r.cm_date|date:"M j" }}{% else %}not yet issued{% endif %}</td></tr>
+    {% empty %}<tr><td colspan="5" class="empty">No RMAs or return credits in this window.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </div>
+  <div class="card">
+    <h2>Cash in <small>payments applied to SO1 invoices · {{ cash.amt|money }} · <a href="{% url 'dashboard:finance_payments' %}?day={{ start|date:'Y-m-d' }}">full payments page</a></small></h2>
+    <div class="table-wrap" style="max-height:360px"><table class="data dense"><thead><tr><th>Customer</th><th>Invoice</th><th>Order</th><th class="num" title="Days from invoice date to payment application.">Days</th><th class="num">Applied</th></tr></thead><tbody>
+    {% for p in pays %}<tr {% if p.big %}class="snap-big"{% endif %}>
+      <td class="trunc fluid" style="width:38%;min-width:150px" title="{{ p.customer_name }}">{% if p.cust_link %}<a href="{% url 'dashboard:customer_detail' p.cust_link %}">{{ p.customer_name }}</a>{% else %}{{ p.customer_name }}{% endif %}</td>
+      <td class="mono">{{ p.invoice_ref }} <span class="muted" style="font-family:inherit">{{ p.invoice_date|date:"M j" }}</span></td>
+      <td class="mono">{% if p.document_number %}<a href="{% url 'dashboard:sales010_order_detail' p.document_number %}">#{{ p.document_number }}</a>{% else %}{{ p.order_nbr }}{% endif %}</td>
+      <td class="num {% if p.days != None and p.days > 60 %}neg{% endif %}">{{ p.days|default_if_none:"—" }}</td>
+      <td class="num">{{ p.applied|money:2 }}</td></tr>
+    {% empty %}<tr><td colspan="5" class="empty">No payments applied to SO1 invoices in this window{% if filtered %} for {{ rep_sel }}{% endif %}.</td></tr>{% endfor %}
+    </tbody>{% if pays %}<tfoot><tr><td colspan="4">Total · {{ cash.n }}</td><td class="num">{{ cash.amt|money:2 }}</td></tr></tfoot>{% endif %}</table></div>
+    <div class="note" style="margin-top:6px" title="Open SO1-book AR today (not as of the window): current / 1–30 / 31–60 / 61–90 / over 90.">SO1 AR today: <b>{{ ar_total|money }}</b> · current {{ ar_buckets.current.bal|money_k }} · 1–30 {{ ar_buckets.d30.bal|money_k }} · 31–60 {{ ar_buckets.d60.bal|money_k }} · 61–90 {{ ar_buckets.d90.bal|money_k }} · <span class="{% if ar_buckets.over90 %}neg{% endif %}">over 90 {{ ar_buckets.over90.bal|money_k }}</span>{% if ar_over90 %} — {% for r in ar_over90 %}{% if r.link_id %}<a href="{% url 'dashboard:customer_detail' r.link_id %}">{{ r.name }}</a>{% else %}{{ r.name }}{% endif %} {{ r.amt|money_k }}{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}</div>
+    {% if acc.finance %}<div class="note" style="margin-top:4px" title="AP payments to the hardware distributors in the window (company-wide, not rep-attributable). 'card' = settled with a company credit card through the holding account — no cash out until the card is paid.">Paid to distributors: <b>{{ ap_out|money }}</b> from the bank{% if ap_card %} · <b>{{ ap_card|money }}</b> by card{% endif %}{% for c in ap_checks %} · {{ c.vendor_name }} {{ c.amount|money_k }} ({{ c.doc_date|date:"M j" }}{% if c.card %}, card{% endif %}){% endfor %}</div>{% endif %}
+  </div>
+</div>
+
+<div class="grid two" style="margin-bottom:12px">
+  <div class="card" id="ledger">
+    <h2>Ledger <small>subaccounts 0100 · 0101 · postings created in the window{% if not gl_ok %} — outside the 93-day posting window; month totals only{% endif %}</small></h2>
+    {% if gl_ok %}<table class="data dense"><thead><tr><th></th><th class="num">0100</th><th class="num">0101</th><th class="num">Total</th></tr></thead><tbody>
+      <tr><td title="3I income accounts except 40100 interest.">Sales</td><td class="num">{{ gl.0100.revenue|money }}</td><td class="num">{{ gl.0101.revenue|money }}</td><td class="num"><b>{{ gl.all.revenue|money }}</b></td></tr>
+      <tr><td title="5xxxx cost of goods except freight accounts.">COGS</td><td class="num">{{ gl.0100.cogs|money }}</td><td class="num">{{ gl.0101.cogs|money }}</td><td class="num">{{ gl.all.cogs|money }}</td></tr>
+      <tr style="font-weight:600"><td>GP</td><td class="num {{ gl.0100.gp|posneg }}">{{ gl.0100.gp|money }}</td><td class="num {{ gl.0101.gp|posneg }}">{{ gl.0101.gp|money }}</td><td class="num {{ gl.all.gp|posneg }}">{{ gl.all.gp|money }}</td></tr>
+      <tr><td title="50730 rebates — vendor rebates that lift margin after the fact; the shipment margin never sees them.">Rebates (50730)</td><td class="num">{{ gl.0100.rebates|signed_money }}</td><td class="num">{{ gl.0101.rebates|signed_money }}</td><td class="num">{{ gl.all.rebates|signed_money }}</td></tr>
+      <tr><td title="Freight cost 50750/50760 vs freight billed 40300.">Freight cost / billed</td><td class="num">{{ gl.0100.freight|money }} / {{ gl.0100.freight_billed|money }}</td><td class="num">{{ gl.0101.freight|money }} / {{ gl.0101.freight_billed|money }}</td><td class="num">{{ gl.all.freight|money }} / {{ gl.all.freight_billed|money }}</td></tr>
+      <tr><td title="6xxxx/7xxxx overhead posted to the division.">Overhead</td><td class="num muted">{{ gl.0100.overhead|money }}</td><td class="num muted">{{ gl.0101.overhead|money }}</td><td class="num muted">{{ gl.all.overhead|money }}</td></tr>
+    </tbody></table>{% endif %}
+    <div class="note" style="margin-top:8px" title="Month-to-date tie-out: the ledger's sales/COGS for {{ end|date:'F' }} ({{ gl_mtd.basis }}) next to SO1 shippers invoiced {{ mtd_start|date:'M j' }}–{{ end|date:'M j' }}. The GL is division truth; the gap is freight, rebates, inventory entries, non-CNET postings and timing.">
+      {{ end|date:"F" }} to {{ end|date:"M j" }}: GL sales <b>{{ gl_mtd.rev|money }}</b> · COGS {{ gl_mtd.cogs|money }} · GP <b class="{{ gl_mtd.gp|posneg }}">{{ gl_mtd.gp|money }}</b> ({{ gl_mtd.basis }}) — shippers invoiced {{ sh_mtd.rev|money }} · cost {{ sh_mtd.cost|money }} · GP {{ sh_mtd.gp|money }} · gap <b>{{ gl_mtd.gp|sub_money:sh_mtd.gp }}</b>.
+    </div>
+  </div>
+  <div class="card" id="dead">
+    <h2>Dead backlog <small>open SL orders older than {{ dead_days }} days with unshipped value · hygiene, not demand · {{ dead|length }}</small></h2>
+    <div class="table-wrap" style="max-height:360px"><table class="data dense"><thead><tr><th>Order</th><th>Customer</th><th>Rep</th><th class="num">Age</th><th class="num">Order</th><th class="num" title="Merchandise total minus everything shipped.">Unshipped</th></tr></thead><tbody>
+    {% for r in dead %}<tr>
+      <td class="mono">{{ r.ord_nbr }}{% if r.document_number %} <a href="{% url 'dashboard:sales010_order_detail' r.document_number %}">#{{ r.document_number }}</a>{% endif %}</td>
+      <td class="trunc fluid" style="width:38%;min-width:150px" title="{{ r.customer|default:r.cust_id }}">{% if r.customer %}<a href="{% url 'dashboard:customer_detail' r.cust_id %}">{{ r.customer }}</a>{% else %}{{ r.cust_id }}{% endif %}</td>
+      <td class="muted" style="white-space:nowrap">{{ r.rep }}</td><td class="num neg">{{ r.age }}d</td><td class="num muted">{{ r.tot_ord|money }}</td><td class="num"><b>{{ r.unshipped|money }}</b></td></tr>
+    {% empty %}<tr><td colspan="6" class="empty">No open SO1 orders older than {{ dead_days }} days.</td></tr>{% endfor %}
+    </tbody></table></div>
+    <div class="note" style="margin-top:6px">Probably orders that were never closed in SL after partial shipment or cancellation — for Jackie / Liz (<a href="{% url 'dashboard:sales010_hygiene' %}">010 Hygiene</a>). Excluded from the Backlog tile; today's state, not the window's.</div>
+  </div>
+</div>
+
+{% if view == 'week' %}
+<div class="card" style="margin-bottom:12px">
+  <h2>Reps this week <small>sold · quoted margin · shipped · realized margin · drift · quotes · wins</small></h2>
+  <table class="data dense"><thead><tr><th>Rep</th><th class="num">Orders</th><th class="num">Sold</th><th class="num">Quoted GM</th><th class="num">Shipped</th><th class="num">Real GM</th><th class="num" title="SL cost − quoted cost on orders that finished shipping this week.">Drift</th><th class="num">Quotes</th><th class="num">Quoted $</th><th class="num" title="Orders sold this week that trace back to a CNET quote (the Orders-sold From-quote column).">Won</th></tr></thead><tbody>
+  {% for r in reps_board %}<tr><td>{{ r.name }}</td><td class="num">{{ r.sold_n }}</td><td class="num">{{ r.sold|money }}</td><td class="num">{{ r.gm|pct }}</td><td class="num">{{ r.ship|money }}</td><td class="num">{{ r.real_gm|pct }}</td><td class="num {{ r.drift|posneg_inv }}">{{ r.drift|signed_money }}</td><td class="num muted">{{ r.q_n }}</td><td class="num muted">{{ r.q_amt|money }}</td><td class="num">{{ r.won }}</td></tr>{% endfor %}
+  </tbody></table>
+  <h3 style="margin-top:10px" title="The same numbers by who entered the order or quote in ChannelOnline — the operations side of the desk.">Entered by</h3>
+  <table class="data dense"><thead><tr><th>Entered by</th><th class="num">Orders</th><th class="num">Sold</th><th class="num">Quoted GM</th><th class="num">Quotes</th><th class="num">Quoted $</th></tr></thead><tbody>
+  {% for r in entered_board %}<tr><td>{{ r.name }}</td><td class="num">{{ r.sold_n }}</td><td class="num">{{ r.sold|money }}</td><td class="num">{{ r.gm|pct }}</td><td class="num muted">{{ r.q_n }}</td><td class="num muted">{{ r.q_amt|money }}</td></tr>{% endfor %}
+  </tbody></table>
+</div>
+<div class="grid two" style="margin-bottom:12px">
+  <div class="card"><h2>Top customers <small>sold and shipped this week</small></h2>
+    <table class="data dense"><thead><tr><th>Customer</th><th class="num">Orders</th><th class="num">Sold</th><th class="num">Shipped</th><th class="num" title="Share of the week's sold dollars.">Share</th></tr></thead><tbody>
+    {% for c in customers %}<tr><td class="trunc fluid" style="width:55%;min-width:160px" title="{{ c.name }}">{% if c.link %}<a href="{% url 'dashboard:customer_detail' c.link %}">{{ c.name }}</a>{% else %}{{ c.name }}{% endif %}</td><td class="num">{{ c.n }}</td><td class="num">{{ c.sold|money }}</td><td class="num">{{ c.ship|money }}</td><td class="num muted">{% if sold.amt %}{% widthratio c.sold sold.amt 100 %}%{% endif %}</td></tr>{% endfor %}
+    </tbody></table></div>
+  <div class="card"><h2>Top manufacturers <small>CNET lines on this week's orders</small></h2>
+    <table class="data dense"><thead><tr><th>Manufacturer</th><th class="num">Lines</th><th class="num">Price</th><th class="num">Cost</th><th class="num">GM</th></tr></thead><tbody>
+    {% for m in manufacturers %}<tr><td>{{ m.name }}</td><td class="num">{{ m.n }}</td><td class="num">{{ m.price|money }}</td><td class="num muted">{{ m.cost|money }}</td><td class="num">{{ m.gm|pct }}</td></tr>{% endfor %}
+    </tbody></table></div>
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+{{ charts|json_script:"snapcharts" }}
+<script>
+function snapToggleRows(g) {
+  document.querySelectorAll('.pay-inv[data-g="' + g + '"]').forEach(tr => tr.classList.toggle('pay-hidden'));
+  const c = document.getElementById('caret-' + g);
+  if (c) c.textContent = c.textContent === '▾' ? '▸' : '▾';
+}
+function snapToggle(id, save) {   // a flag chip's list; open/closed remembered per flag across days (PCA.pref, base.html)
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+  if (save !== false) PCA.setPref('panel.' + id, el.style.display !== 'none');
+}
+document.querySelectorAll('[id^="flag-"]').forEach(el => { if (PCA.pref('panel.' + el.id)) snapToggle(el.id, false); });
+function snapSortTable(th) {
+  const table = th.closest('table'), col = +th.dataset.c;
+  const dir = table.dataset.sort === col + ':desc' ? 'asc' : 'desc';
+  table.dataset.sort = col + ':' + dir;
+  const tbody = table.tBodies[0];
+  const blocks = []; let cur = null;
+  [...tbody.rows].forEach(tr => {
+    if (tr.classList.contains('pay-group')) { cur = { g: tr, kids: [] }; blocks.push(cur); }
+    else if (cur) cur.kids.push(tr);
+  });
+  const val = tr => {
+    const td = tr.cells[col];
+    if (!td) return null;
+    const v = td.dataset.v !== undefined ? td.dataset.v : td.textContent.trim();
+    if (v === '' || v === '—') return null;
+    const n = parseFloat(v);
+    return isNaN(n) ? v.toLowerCase() : n;
+  };
+  blocks.sort((a, b) => {
+    const va = val(a.g), vb = val(b.g);
+    if (va === null && vb === null) return 0;
+    if (va === null) return 1;
+    if (vb === null) return -1;
+    if (typeof va === 'number' && typeof vb === 'number') return dir === 'desc' ? vb - va : va - vb;
+    return dir === 'desc' ? String(vb).localeCompare(String(va)) : String(va).localeCompare(String(vb));
+  });
+  blocks.forEach(b => { tbody.appendChild(b.g); b.kids.forEach(k => tbody.appendChild(k)); });
+}
+document.querySelectorAll('th.snap-sort').forEach(th => th.addEventListener('click', () => snapSortTable(th)));
+const SC = JSON.parse(document.getElementById('snapcharts').textContent);
+new Chart(document.getElementById('c_strip'), { type: 'bar',
+  data: { labels: SC.strip.map(r => r.d.slice(5)), datasets: [{ data: SC.strip.map(r => r.v), backgroundColor: 'rgba(31,94,255,.6)', borderRadius: 2 }] },
+  options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false },
+      tooltip: { callbacks: { title: c => SC.strip[c[0].dataIndex].d, label: c => PCA.money(c.raw) + ' sold' } } },
+    scales: { x: { display: false }, y: { display: false } } } });
+// click-to-show tooltips for definition terms (hover titles also remain)
+(function () {
+  let tipEl = null;
+  const hide = () => { if (tipEl) { tipEl.remove(); tipEl = null; } };
+  document.addEventListener('click', e => {
+    const t = e.target.closest('th[title], h3[title], div[title], span[title], small[title], b[title], label[title]');
+    if (!t || e.target.closest('a, button, input, select, tr.pay-group')) { hide(); return; }
+    const text = t.getAttribute('title');
+    if (!text) { hide(); return; }
+    e.preventDefault();
+    hide();
+    tipEl = document.createElement('div');
+    tipEl.className = 'click-tip';
+    tipEl.textContent = text;
+    document.body.appendChild(tipEl);
+    const r = t.getBoundingClientRect();
+    tipEl.style.left = Math.min(r.left, window.innerWidth - 380) + 'px';
+    tipEl.style.top = (r.bottom + window.scrollY + 6) + 'px';
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') hide(); });
+})();
+</script>
+{% endblock %}

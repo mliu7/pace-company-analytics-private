@@ -1,0 +1,6 @@
+{% extends "dashboard/base.html" %}
+{% block title %}{{ title }} · Pace Company Analytics{% endblock %}
+{% block content %}
+<div class="topbar"><div class="title"><h1>{{ title }}</h1><small>{{ subtitle }}</small></div></div>
+<div class="card"><div class="empty" style="padding:30px 10px;text-align:center">This page arrives in build phase <b>{{ phase }}</b> of the SharePoint integration (see <code>docs/sharepoint_integration_build_log.md</code>). The data behind it may already be loading.</div></div>
+{% endblock %}

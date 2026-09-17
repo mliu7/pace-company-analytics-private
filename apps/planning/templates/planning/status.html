@@ -1,0 +1,56 @@
+{% extends "dashboard/base.html" %}
+{% load humanize pca static %}
+{% block title %}Production · Status board · Pace Company Analytics{% endblock %}
+{% block main_class %} dense{% endblock %}
+{% block extra_css %}@import url("{% static 'planning/planning.css' %}?v={{ PL_VERSION }}");{% endblock %}
+{% block content %}
+<div class="topbar"><div class="title"><h1>Status board</h1><small>The Master Schedule as a live grid — two status pills per task, PM, dates, hours left, notes. Edits save as you type and are stamped with who and when.</small></div>
+  <div class="actions row no-print">
+    {% if can_write %}<button class="btn primary" id="st-new" title="Add a task at the top (defaults: this division, NEED TO SCHEDULE, 8 h)">+ New task</button>
+    <a class="btn" href="{% url 'planning:planning_status_import' %}" title="Admin transition tool: import a Master Schedule export or the dashboards' JSON (dry run first)">Import</a>{% endif %}
+  </div></div>
+{% include "planning/_tabs.html" %}
+<div class="pl-toolbar">
+  <div class="seg" id="st-view" title="Active rows, or the per-division Completed list">
+    <button data-v="active">Active <span class="n" id="st-n-active"></span></button>
+    <button data-v="completed">Completed <span class="n" id="st-n-completed"></span></button>
+  </div>
+  <div class="seg" id="st-div" title="Division tabs (All only in the Active view)"></div>
+  <input type="search" id="st-q" placeholder="Search task, project #, PM, engineer, status, notes…" title="Searches the visible columns and notes — not hidden ids">
+  <span class="spacer"></span>
+  {% if can_write %}<button class="btn small" id="st-edit" disabled title="Open the selected row in the drawer">Edit</button>
+  <button class="btn small" id="st-dup" disabled title="Copy the selected row (name + ' copy')">Duplicate</button>
+  <button class="btn small" id="st-del" disabled title="Delete the selected row (asks first)">Delete</button>
+  <button class="btn small" id="st-send" disabled title="Hand the selected row to the Resource Scheduler as a project: name, division, PM, hours as union, 8 h/day, Mon–Fri, statuses, start / end, engineer, notes">Send to Scheduler</button>{% endif %}
+  <span class="pl-status" id="st-msg"></span>
+</div>
+<div class="pl-grid-tools no-print">
+  <span id="st-foot"></span>
+  <span class="spacer" style="flex:1"></span>
+  <details id="st-cols" style="position:relative"><summary class="btn small" style="list-style:none;cursor:pointer" title="Choose which columns to show — the SL / PTT columns are live enrichment the dashboard never had">Columns</summary>
+    <div class="card tight" id="st-cols-body" style="position:absolute;right:0;top:30px;z-index:20;min-width:260px;max-height:60vh;overflow:auto"></div></details>
+  <span title="Zoom the grid (45–140 %)">Zoom <button class="btn small" id="st-zoom-minus">−</button> <input type="range" id="st-zoom" min="45" max="140" value="100"> <button class="btn small" id="st-zoom-plus">+</button></span>
+  <button class="btn small" id="st-fit" title="Zoom so every visible column fits the window width">Fit all columns</button>
+  <span title="Grid height in pixels (Auto follows the window)">Height <input type="range" id="st-height" min="260" max="1600" value="600"> <button class="btn small" id="st-height-auto">Auto</button></span>
+  <button class="btn small" id="st-reset" title="Default widths, zoom 100 %, auto height, default columns">Reset</button>
+  <span class="muted" title="Drag a header border to resize · double-click it to auto-fit · click a header to sort">drag borders to resize · double-click to auto-fit · click headers to sort</span>
+</div>
+<div class="pl-grid-wrap" id="st-wrap"><table class="pl-grid" id="st-table"></table></div>
+<div class="note" style="margin-top:8px">Rows come from the Master Schedule import (source "import"), from people ("manual") or follow a Planner label ("Planner"). Completion is manual only and reversible: click the circle. Status pills use the Planner label colours; misspellings are folded into the vocabulary. SL / PTT columns are read-only enrichment from the nightly refresh.</div>
+
+<div class="pl-drawer-bg" id="st-drawer-bg"></div>
+<aside class="pl-drawer" id="st-drawer" role="dialog" aria-label="Task actions">
+  <div class="head"><h2 id="st-drawer-title">Task</h2><button class="pl-close" id="st-drawer-close" title="Close (Esc)">✕</button></div>
+  <div class="body" id="st-drawer-body"></div>
+  <div class="foot" id="st-drawer-foot"></div>
+</aside>
+{{ dataset|json_script:"st-data" }}
+{% endblock %}
+{% block scripts %}
+<script src="{% static 'planning/planning.js' %}?v={{ PL_VERSION }}"></script>
+<script>
+window.ST_CONF = {editUrl: "{% url 'planning:planning_status_edit' %}", sendUrl: "{% url 'planning:planning_status_send' %}", dataUrl: "{% url 'planning:planning_status_json' %}",
+                  canWrite: {{ can_write|yesno:"true,false" }}, who: "{{ who|escapejs }}", div: "{{ request.GET.div|default:''|escapejs }}", status: "{{ request.GET.status|default:''|escapejs }}", hl: "{{ request.GET.hl|default:''|escapejs }}"};
+</script>
+<script src="{% static 'planning/status.js' %}?v={{ PL_VERSION }}"></script>
+{% endblock %}

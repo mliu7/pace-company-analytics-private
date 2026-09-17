@@ -1,0 +1,42 @@
+{% load humanize pca %}
+{# Receivables tab of the assets breakdown — the AR subledger behind GL 11000 (context: ar, buckets, ar_books) #}
+    <div class="liab-tiles">
+      <div class="liab-tile" title="Released invoices and debit memos with a balance, net of credit memos and unapplied payments — the AR aging on the snapshot page."><div class="label">Open AR (subledger)</div><div class="val">{{ ar.total|money }}</div><div class="sub">{{ ar.n }} document{{ ar.n|pluralize }} · {{ ar.customers }} customers</div></div>
+      <div class="liab-tile" title="Open balance past its due date."><div class="label">Past due</div><div class="val {% if ar.past_due %}neg{% endif %}">{{ ar.past_due|money }}</div><div class="sub">{{ ar.past_due_pct|pct:0 }} of AR · {{ ar.past_due_n }} doc{{ ar.past_due_n|pluralize }}</div></div>
+      <div class="liab-tile" title="More than 90 days past due — the email's 'AR over 90' line."><div class="label">Over 90 days</div><div class="val {% if ar.over90 %}neg{% endif %}">{{ ar.over90|money }}</div><div class="sub">{{ ar.over90_pct|pct:0 }} of AR</div></div>
+      <div class="liab-tile" title="Credit memos and customer payments not yet applied to an invoice — they reduce AR and sit in Current unaged."><div class="label">Credits / unapplied</div><div class="val">{{ ar.credits|money }}</div><div class="sub">netted in the total</div></div>
+      <div class="liab-tile" title="Invoices entered in SL but not released — not in AR or the ledger until released."><div class="label">Pending (unreleased)</div><div class="val">{{ ar.pending|money }}</div><div class="sub">{{ ar.pending_n }} invoice{{ ar.pending_n|pluralize }} · <a href="#" class="drill" data-kind="ar_pending" data-title="Pending (unreleased) AR invoices">list</a></div></div>
+      <div class="liab-tile" title="How concentrated the receivable is: share of open AR owed by the three largest customers."><div class="label">Top 3 customers</div><div class="val">{{ ar.top_share|pct:0 }}</div><div class="sub">of open AR</div></div>
+      <div class="liab-tile" title="AR subledger total minus ledger account 11000. Non-zero = timing between the AR module and the ledger (released documents whose GL batch has not posted yet, or journals straight to 11000)."><div class="label">Subledger − GL 11000</div><div class="val {% if ar.bridge|absolute > 1 %}warn-ink{% endif %}">{{ ar.bridge|signed_money }}</div><div class="sub">GL 11000 = {{ ar.gl_balance|money }}</div></div>
+    </div>
+    <div class="liab-detail-grid" style="grid-template-columns:1.35fr 1fr">
+      <div>
+        <h4 style="margin-top:0">By customer <span class="muted" style="text-transform:none;letter-spacing:0">· largest first · click a balance for the invoices</span></h4>
+        <table class="data dense"><thead><tr><th>Customer</th><th class="num">Docs</th><th class="num">Balance</th><th class="num">Share</th><th class="num" title="Open balance past due.">Past due</th><th class="num" title="More than 90 days past due.">Over 90</th><th class="num" title="Earliest due date among the customer's open documents.">Oldest due</th></tr></thead><tbody>
+        {% for v in ar.top_customers %}<tr>
+          <td class="trunc fluid" style="width:40%;min-width:140px" title="{{ v.name }} ({{ v.customer_id_raw }})">{% if v.link_id %}<a href="{% url 'dashboard:customer_detail' v.link_id %}">{{ v.name|default:v.customer_id_raw }}</a>{% else %}{{ v.name|default:v.customer_id_raw }}{% endif %}</td>
+          <td class="num muted">{{ v.n }}</td>
+          <td class="num"><a href="#" class="drill" data-kind="ar" data-cust="{{ v.customer_id_raw }}" data-title="{{ v.name }} — open AR">{{ v.amt|money }}</a></td>
+          <td class="num muted">{{ v.share|pct:0 }}</td>
+          <td class="num {% if v.past_due %}neg{% else %}muted{% endif %}">{% if v.past_due %}{{ v.past_due|money }}{% else %}–{% endif %}</td>
+          <td class="num {% if v.over90 %}neg{% else %}muted{% endif %}">{% if v.over90 %}<a href="#" class="drill" data-kind="ar" data-cust="{{ v.customer_id_raw }}" data-bucket="over90" data-title="{{ v.name }} · over 90 days">{{ v.over90|money }}</a>{% else %}–{% endif %}</td>
+          <td class="num muted">{{ v.oldest|date:"M j y" }}</td></tr>{% endfor %}
+        {% if ar.others %}<tr class="muted"><td>{{ ar.others.customers }} other customers</td><td class="num">{{ ar.others.n }}</td><td class="num">{{ ar.others.amt|money }}</td><td class="num"></td><td class="num">{% if ar.others.past_due %}{{ ar.others.past_due|money }}{% else %}–{% endif %}</td><td></td><td></td></tr>{% endif %}
+        </tbody><tfoot><tr><td>All customers</td><td class="num">{{ ar.n }}</td><td class="num"><a href="#" class="drill" data-kind="ar" data-title="All open AR">{{ ar.total|money }}</a></td><td class="num">100%</td><td class="num">{{ ar.past_due|money }}</td><td class="num">{{ ar.over90|money }}</td><td></td></tr></tfoot></table>
+      </div>
+      <div>
+        <h4 style="margin-top:0">By age <span class="muted" style="text-transform:none;letter-spacing:0">· days past due · credits net in Current</span></h4>
+        <table class="data dense"><tbody>
+          {% for key, lbl in buckets %}{% with b=ar.buckets|getitem:key %}<tr><td>{{ lbl }}</td><td class="num muted">{{ b.n|default:0 }}</td><td class="num {% if key != 'current' %}hb-{{ key }}{% endif %}"><a href="#" class="drill" data-kind="ar" data-bucket="{{ key }}" data-title="All AR · {{ lbl }}">{{ b.amt|default:0|money }}</a></td></tr>{% endwith %}{% endfor %}
+        </tbody></table>
+        <h4>By book <span class="muted" style="text-transform:none;letter-spacing:0">· where the invoice came from</span></h4>
+        <table class="data dense"><tbody>
+          {% for b in ar.books %}<tr><td>{{ ar_books|getitem:b.book|default:b.book }}</td><td class="num muted">{{ b.n }}</td><td class="num"><a href="#" class="drill" data-kind="ar" data-book="{{ b.book }}" data-title="{{ ar_books|getitem:b.book|default:b.book }} — all open">{{ b.amt|money }}</a></td></tr>{% endfor %}
+        </tbody></table>
+        <h4>Largest open invoices</h4>
+        <table class="data dense"><thead><tr><th>Ref</th><th>Customer</th><th class="num">Due</th><th class="num">Balance</th></tr></thead><tbody>
+          {% for d in ar.largest %}<tr><td class="mono" title="{{ d.doc_desc }}{% if d.project_id_raw %} · project {{ d.project_id_raw }}{% endif %} · {{ d.book }}">{% if d.cpn %}<a href="/projects/{{ d.cpn }}/">{{ d.ref_nbr }}</a>{% else %}{{ d.ref_nbr }}{% endif %}</td><td class="trunc fluid" style="width:50%" title="{{ d.customer_name }}">{% if d.link_id %}<a href="{% url 'dashboard:customer_detail' d.link_id %}">{{ d.customer_name }}</a>{% else %}{{ d.customer_name }}{% endif %}</td><td class="num muted {% if d.days_past_due > 0 %}neg{% endif %}">{{ d.due_date|date:"M j" }}</td><td class="num">{{ d.amt|money }}</td></tr>{% endfor %}
+        </tbody></table>
+      </div>
+    </div>
+    <div class="note" style="margin-top:8px">Same population as the AR aging on the snapshot page: released documents with a balance (IN/DM/FC/NS/SB positive, CM/PA negative), aged by days past the due date; credits are not aged. Customer balances net their credits.</div>

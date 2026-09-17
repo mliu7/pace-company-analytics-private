@@ -1,0 +1,80 @@
+{% extends "dashboard/base.html" %}{% load humanize pca bids static %}
+{% block title %}{{ bid.project_name|default:bid.job_number_raw }} · Bid · Pace Company Analytics{% endblock %}
+{% block extra_css %}{% include "bids/_css.html" %}{% endblock %}
+{% block content %}{% load extension_hooks %}{% extension_cards "bid" bid %}
+<div class="bids">
+<div class="topbar">
+  <div class="title"><div class="muted" style="font-size:12px"><a href="{% url 'bids:bids_overview' %}">Bids</a> › {{ bid.source|title }} #{{ bid.sp_item_id }}{% if bid.portal_project_id %} · Portal ID {{ bid.portal_project_id }}{% endif %}</div>
+    <h1>{{ bid.project_name|default:"(untitled bid)" }} <span class="pill {{ bid.stage|stage_class }}" title="Portal status: {{ bid.status_raw }}">{{ r.stage_label }}</span>{% if bid.won_by_sl and bid.stage != 'awarded' %} <span class="pill good" title="The portal never says Awarded, but the SL job has billings — SL is the truth for won.">won per SL</span>{% endif %}{% if bid.stage_flag %} <span class="tag">{{ bid.stage_flag }}</span>{% endif %}</h1>
+    <small>{% if bid.client %}<a href="{% url 'dashboard:customer_detail' bid.client.sl_customer_id %}">{{ bid.client.canonical_name }}</a>{% else %}{{ bid.client_name|default:"no client" }}{% endif %}{% if bid.client and bid.client_name and bid.client_name != bid.client.canonical_name %} <span class="muted">(portal: {{ bid.client_name }})</span>{% endif %}
+      · {% if bid.project %}SL job <a href="{% url 'dashboard:project_detail' bid.project.canonical_project_number %}">{{ bid.project.display_number }}</a> {{ bid.project.title|truncatechars:50 }}{% elif bid.job_number_raw %}job # "{{ bid.job_number_raw }}" <span class="tag warn" title="No SL project with this number.">not in SL</span>{% else %}no SL job{% endif %}</small></div>
+  <div class="row" style="gap:8px">{% if bid.web_url %}<a class="btn" href="{{ bid.web_url }}" target="_blank" title="The row in the SharePoint Project Portal (opens in a new tab).">Open in Portal ↗</a>{% endif %}</div>
+</div>
+
+<div class="grid two" style="margin-bottom:14px">
+  <div class="card"><h2>The bid</h2>
+    <div class="facts">
+      <div><div class="k" title="Portal Project Value.">Value</div><div class="v">{% if bid.value != None %}{{ bid.value|money }}{% else %}—{% endif %}</div></div>
+      <div><div class="k" title="Portal Budget (estimated cost).">Budget</div><div class="v">{% if bid.budget != None %}{{ bid.budget|money }}{% else %}—{% endif %}</div></div>
+      <div><div class="k" title="(Value − Budget) ÷ Value.">Bid margin</div><div class="v">{% if r.margin != None %}{{ r.margin|pct:1 }}{% else %}—{% endif %}</div></div>
+      <div><div class="k" title="Probability of Close as scored by the estimator.">Probability</div><div class="v">{% if bid.probability != None %}{{ bid.probability }}%{% else %}<span class="muted">unscored</span>{% endif %}</div></div>
+      <div><div class="k">Estimator</div><div class="v">{% if bid.estimator %}<a href="{% url 'bids:estimator_detail' bid.estimator.employee_key %}">{{ bid.estimator.canonical_name }}</a>{% if bid.estimator_inferred %} <span class="tag" title="Bidder was blank; credited by rule {{ bid.estimator_rule }}.">inferred</span>{% endif %}{% else %}<span class="muted">{{ bid.bidder_raw|default:"—" }}</span>{% endif %}</div></div>
+      <div><div class="k">Sales rep</div><div class="v">{% if bid.house_account %}House{% elif bid.salesperson %}{{ bid.salesperson.canonical_name }}{% else %}<span class="muted">{{ bid.sales_rep_raw|default:"—" }}</span>{% endif %}</div></div>
+      <div><div class="k" title="The SL job's division when linked, else the estimator's.">Division</div><div class="v">{{ bid.division|default:"—" }}</div></div>
+      <div><div class="k">Bid due</div><div class="v">{{ bid.bid_due|date:'M j, Y'|default:"—" }}</div></div>
+      <div><div class="k">Submitted</div><div class="v">{{ bid.submitted_on|date:'M j, Y'|default:"—" }}{% if r.late_days and r.late_days > 0 %} <span class="tag warn">{{ r.late_days }}d late</span>{% endif %}</div></div>
+      <div><div class="k">Awarded</div><div class="v">{{ bid.awarded_on|date:'M j, Y'|default:"—" }}{% if r.cycle_days != None %} <span class="muted" style="font-size:11px">{{ r.cycle_days }}d cycle</span>{% endif %}</div></div>
+      <div><div class="k">Project start · end</div><div class="v" style="font-size:13px">{{ bid.start|date:'M j, Y'|default:"—" }} · {{ bid.end|date:'M j, Y'|default:"—" }}</div></div>
+      <div><div class="k">Walkthrough</div><div class="v" style="font-size:13px">{{ bid.walkthrough_date|date:'M j, Y'|default:bid.walkthrough_raw|default:"—" }}</div></div>
+      <div><div class="k">Ball in court</div><div class="v" style="font-size:13px">{{ bid.ball_in_court|default:"—" }}</div></div>
+      <div><div class="k">BOM</div><div class="v" style="font-size:13px">{{ bid.bom_status|default:"—" }}</div></div>
+      <div><div class="k">PO · SO</div><div class="v" style="font-size:13px">{{ bid.po_number|default:"—" }} · {{ bid.sales_order|default:"—" }}</div></div>
+      <div><div class="k" title="Portal row created / last modified.">Portal</div><div class="v" style="font-size:13px">{{ bid.portal_created|date:'M j, Y' }} → {{ bid.portal_modified|date:'M j, Y' }}<div class="muted" style="font-weight:400;font-size:11px">by {{ bid.created_by_raw|default:"?" }}</div></div></div>
+    </div>
+    {% if bid.comments %}<div class="note" style="white-space:pre-wrap;margin-top:12px"><b>Portal comments:</b> {{ bid.comments }}</div>{% endif %}
+  </div>
+  <div class="card"><h2>Outcome <small>what SL says happened</small></h2>
+    {% if bid.project %}
+    <div class="facts">
+      <div><div class="k">SL state</div><div class="v" style="font-size:13px">{{ bid.project.lifecycle_state|state_label }}</div></div>
+      <div><div class="k" title="Current SL contract value (current-budget basis).">Contract value</div><div class="v">{{ r.cv|money }}</div></div>
+      <div><div class="k" title="SL contract value − bid value: change orders, scope growth, or a bid typed before the final number.">Δ vs bid</div><div class="v">{% if cv_delta != None %}{{ cv_delta|signed_money }}{% else %}—{% endif %}</div></div>
+      <div><div class="k">Billed</div><div class="v">{{ r.billed|money }}</div></div>
+      <div><div class="k" title="SL final GP % (closed &amp; stabilised jobs only).">Final GP</div><div class="v">{% if r.realised_gp != None %}{{ r.realised_gp|pct:1 }}{% else %}—{% endif %}</div></div>
+      <div><div class="k" title="Final GP − bid margin, in margin points. Positive = beat the estimate.">Accuracy</div><div class="v">{% if r.accuracy != None %}<span class="{% if r.accuracy >= 0 %}pos{% else %}neg{% endif %}">{{ r.accuracy|pts }}</span>{% else %}<span class="muted" style="font-size:12px">closes when SL stabilises</span>{% endif %}</div></div>
+      <div><div class="k" title="SL direct cost ÷ bid budget.">Cost ÷ budget</div><div class="v">{% if r.cost_vs_budget != None %}{{ r.cost_vs_budget|floatformat:2 }}×{% else %}—{% endif %}</div></div>
+      <div><div class="k">Closed</div><div class="v" style="font-size:13px">{{ r.close_date|date:'M j, Y'|default:"—" }}</div></div>
+    </div>
+    {% else %}<div class="empty">Not linked to an SL job{% if bid.stage == 'awarded' %} — awarded in the portal but no SL project matches the job number. This is the leak the Overview counts{% endif %}.</div>{% endif %}
+    {% if others %}<h3 class="sub-h">Other portal rows on this job</h3><table class="data dense"><tbody>{% for o in others %}<tr><td><a href="{% url 'bids:bid_detail' o.id %}">{{ o.project_name|truncatechars:50 }}</a></td><td><span class="pill {{ o.stage|stage_class }}">{{ o.stage }}</span></td><td class="num">{{ o.value|money_k }}</td><td class="muted">{{ o.source }} · {{ o.portal_modified|date:'M j, Y' }}</td></tr>{% endfor %}</tbody></table>{% endif %}
+    {% if estimates %}<h3 class="sub-h">Estimates in PCA</h3><table class="data dense"><tbody>{% for e in estimates %}<tr><td><a href="{{ e.url }}">{{ e.title }}</a></td><td>{{ e.status }}</td><td class="num">{{ e.price|money_k }}</td><td class="num">{% if e.margin != None %}{{ e.margin|pct:1 }}{% endif %}</td></tr>{% endfor %}</tbody></table>{% endif %}
+  </div>
+</div>
+
+<div class="grid two" style="margin-bottom:14px">
+  <div class="card"><h2>Status trail <small>from the portal's version history</small></h2>
+    {% if trail %}<div class="trail">{% for t in trail %}<div class="s"><b>{{ t.when|date:'M j, Y' }}</b> <span class="muted">{{ t.by }}</span><br>{% for k, v in t.changes %}<span class="tag">{{ k }}</span> {% if k == 'value' or k == 'budget' %}{{ v|money }}{% else %}{{ v|default:"(blank)" }}{% endif %} {% endfor %}</div>{% endfor %}</div>
+    {% else %}<div class="empty">No version history pulled yet (versions arrive on the scheduled refresh).</div>{% endif %}
+    {% if stage_entries %}<div class="note">Time in stage: {% for s, d in stage_entries %}{{ s }} from {{ d|date:'M j' }}{% if not forloop.last %} → {% endif %}{% endfor %}</div>{% endif %}
+  </div>
+  <div class="card"><h2>Follow-ups &amp; risks <small>PCA-only, never written to the portal</small></h2>
+    <h3 class="sub-h">Follow-ups</h3>
+    {% for x in followups %}<div class="noteitem {% if x.done_at %}muted{% endif %}"><span class="nowrap {% if not x.done_at and x.due and x.due < today %}neg{% endif %}">{{ x.due|date:'M j'|default:'no date' }}</span> · {{ x.text }}{% if x.owner %} <span class="muted">— {{ x.owner.canonical_name }}</span>{% endif %}
+      {% if acc.bids_notes %}<form method="post" action="{% url 'bids:bid_followup' bid.id %}" style="display:inline">{% csrf_token %}<input type="hidden" name="id" value="{{ x.id }}"><input type="hidden" name="action" value="{% if x.done_at %}reopen{% else %}done{% endif %}"><button class="btn sm">{% if x.done_at %}reopen{% else %}done{% endif %}</button></form>{% endif %}</div>{% empty %}<div class="muted">None.</div>{% endfor %}
+    {% if acc.bids_notes %}<form method="post" action="{% url 'bids:bid_followup' bid.id %}" class="inline">{% csrf_token %}<input type="text" name="text" placeholder="follow-up…" style="flex:1;min-width:180px" required><input type="date" name="due"><select name="owner"><option value="">owner</option>{% for e in employees %}<option value="{{ e.id }}">{{ e.canonical_name }}</option>{% endfor %}</select><button class="btn">Add</button></form>{% endif %}
+    <h3 class="sub-h">Risks</h3>
+    {% for x in risks %}<div class="noteitem {% if x.closed_at %}muted{% endif %}"><span class="pill {% if x.severity == 'high' %}bad{% elif x.severity == 'medium' %}warn{% endif %}">{{ x.severity }}</span> {{ x.text }}{% if x.mitigation %} <span class="muted">· {{ x.mitigation }}</span>{% endif %}{% if x.owner %} <span class="muted">— {{ x.owner.canonical_name }}</span>{% endif %}
+      {% if acc.bids_notes and not x.closed_at %}<form method="post" action="{% url 'bids:bid_risk' bid.id %}" style="display:inline">{% csrf_token %}<input type="hidden" name="id" value="{{ x.id }}"><input type="hidden" name="action" value="close"><button class="btn sm">close</button></form>{% endif %}</div>{% empty %}<div class="muted">None.</div>{% endfor %}
+    {% if acc.bids_notes %}<form method="post" action="{% url 'bids:bid_risk' bid.id %}" class="inline">{% csrf_token %}<input type="text" name="text" placeholder="risk…" style="flex:1;min-width:160px" required><select name="severity">{% for k, l in sev %}<option value="{{ k }}" {% if k == 'medium' %}selected{% endif %}>{{ l }}</option>{% endfor %}</select><input type="text" name="mitigation" placeholder="mitigation" style="min-width:140px"><button class="btn">Add</button></form>{% endif %}
+  </div>
+</div>
+
+<div class="grid two">
+  <div class="card"><h2>Notes <small>{{ notes|length }} · kept in PCA</small></h2>
+    {% for n in notes %}<div class="noteitem"><div class="who"><span class="tag">{{ n.get_kind_display }}</span> {{ n.author_name|default:"?" }} · {{ n.created_at|date:'M j, Y g:i A' }}</div><div style="white-space:pre-wrap">{{ n.body }}</div></div>{% empty %}<div class="muted">No notes yet.</div>{% endfor %}
+    {% if acc.bids_notes %}<form method="post" action="{% url 'bids:bid_note_add' bid.id %}" style="margin-top:10px">{% csrf_token %}<textarea name="body" placeholder="Add a note — go/no-go reasoning, what the customer said, why we lost…" required></textarea><div class="row" style="gap:6px;margin-top:6px"><select name="kind">{% for k, l in note_kinds %}<option value="{{ k }}">{{ l }}</option>{% endfor %}</select><button class="btn primary">Add note</button></div></form>{% endif %}
+  </div>
+  <div class="card"><h2>Documents <small>proposal, estimate and drawings for this bid</small></h2>{% include "documents/_bid_documents.html" %}</div>
+</div>
+</div>
+{% endblock %}

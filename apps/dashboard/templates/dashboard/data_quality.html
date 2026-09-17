@@ -1,0 +1,62 @@
+{% extends "dashboard/base.html" %}{% load humanize pca %}
+{% block title %}Data Quality & Refresh · Pace Company Analytics{% endblock %}
+{% block content %}
+<div class="topbar"><div class="title"><h1>Data quality, reconciliation &amp; refresh</h1><small>Every refresh re-proves the read-only permissions, re-reads the sources, and checks Σ transactions = SL's own rollup for every project × account.</small></div>
+  <form method="post" action="{% url 'dashboard:refresh' %}" class="row">{% csrf_token %}
+    <label class="note"><input type="checkbox" name="with_ratings" value="1"> recalc ratings</label>
+    <button class="btn primary" {% if freshness.running %}disabled{% endif %}>{% if freshness.running %}Refresh running…{% else %}Refresh from PTT + SL now{% endif %}</button></form></div>
+
+<div class="grid kpi" style="margin-bottom:14px">
+  <div class="card kpi"><div class="label">Σ PJTran vs SL rollup</div><div class="value sm {% if checksum %}neg{% else %}pos{% endif %}">{% if checksum %}{{ checksum }} variances{% else %}Exact{% endif %}</div><div class="sub">44,447 project×account rows checked each run</div></div>
+  <div class="card kpi"><div class="label">Identity PTT ↔ SL</div><div class="value sm">{{ identity.matched|intcomma }} / {{ identity.total|intcomma }}</div><div class="sub">{{ identity.sl_only }} SL-only · {{ identity.templates }} templates/voids · {{ identity.internal }} internal buckets</div></div>
+  <div class="card kpi"><div class="label">PTT vs SL hours (closed since 2021)</div><div class="value sm">{{ hours_check.exact }} / {{ hours_check.n }} exact</div><div class="sub">{{ hours_check.ptt|hours }} PTT vs {{ hours_check.sl|hours }} SL · {{ hours_check.off5 }} projects differ &gt;5%</div></div>
+  <div class="card kpi"><div class="label">Local rows</div><div class="value sm">{{ counts.transactions|intcomma }}</div><div class="sub">transactions · {{ counts.entries|intcomma }} time entries ({{ counts.removed_entries }} removed) · {{ counts.summary_rows|intcomma }} budget rows · {{ counts.revisions|intcomma }} rem-hours revisions</div></div>
+  <div class="card kpi"><div class="label">Sources</div><div class="value sm">{{ freshness.ptt_max|date:"M j" }} / {{ freshness.sl_max|date:"M j" }}</div><div class="sub">latest PTT work date / latest SL transaction date · SL rows created through {{ freshness.sl_created_max|date:"M j H:i" }}</div></div>
+</div>
+
+<div class="grid two" style="margin-bottom:14px">
+  <div class="card"><h2>Open issues by code</h2>
+    <table class="data"><thead><tr><th title="Machine code of the data-quality rule that fired. Click to list the affected projects.">Code</th><th title="blocking aborts trust in affected numbers · warning is surfaced but numbers still shown · info is hygiene.">Severity</th><th class="num">Count</th></tr></thead><tbody>
+    {% for i in issue_summary %}<tr><td><a href="?code={{ i.code }}">{{ i.code|nice }}</a></td><td><span class="tag {{ i.severity }}">{{ i.severity }}</span></td><td class="num">{{ i.n }}</td></tr>{% empty %}<tr><td colspan="3" class="empty">No open issues.</td></tr>{% endfor %}
+    </tbody></table>
+    {% if code %}<h3 style="margin-top:12px">{{ code|nice }} <span class="muted">({{ issues|length }} shown)</span></h3>
+    <div class="table-wrap" style="max-height:360px"><table class="data"><thead><tr><th>Project</th><th>Field</th><th>Details</th><th class="num">Updated</th></tr></thead><tbody>
+    {% for i in issues %}<tr><td class="trunc fluid" style="width:30%;min-width:160px"{% if i.project %} title="{{ i.project.title }}"{% endif %}>{% if i.project %}<a href="{% url 'dashboard:project_detail' i.project.canonical_project_number %}">{{ i.project.display_number }}</a> <span class="muted">{{ i.project.title }}</span>{% else %}{{ i.source_key }}{% endif %}</td><td class="muted">{{ i.field_name }}</td><td class="mono" style="white-space:normal">{{ i.details }}</td><td class="num muted">{{ i.updated_at|date:"M j" }}</td></tr>{% endfor %}
+    </tbody></table></div>{% endif %}
+  </div>
+  {% load bids %}{% bids_dq_section %}
+  <div class="card"><h2>Contract values corrected from SL <small>{{ cv_tot.n }} projects · net {{ cv_tot.delta|signed_money }} vs SL · {{ cv_tot.open }} open</small></h2>
+    <p class="muted" style="font-size:12px;margin:0 0 8px">SL's task-level contract values are sometimes double-counted, mis-keyed or left stale on finished jobs. Rules in <span class="mono">apps/analytics/contract_value.py</span> decide nightly what the app uses; every change is logged (<span class="mono">finance_contractvalueadjustment</span>) and shown as a ⓘ hover next to the value. A finance user can override or confirm on the project page.
+      {% for b in cv_tot.by_basis %}<span class="mono">{{ b.basis }}</span> {{ b.n }} ({{ b.delta|signed_money }}){% if not forloop.last %} · {% endif %}{% endfor %}</p>
+    <h3 style="margin:8px 0 4px">{% if cv_tot.all %}All corrections{% else %}Open jobs{% endif %} <span class="muted">({{ cv_tot.shown }} shown · {% if cv_tot.all %}<a href="?">open jobs only</a>{% else %}<a href="?cv=all">show all {{ cv_tot.n }}</a>{% endif %})</span></h3>
+    <table class="data"><thead><tr><th>Project</th><th class="num">SL</th><th class="num">Used</th><th>Rule</th><th class="num">Since</th><th>Why</th></tr></thead><tbody>
+    {% for r in cv_adj %}<tr><td class="trunc" style="max-width:220px" title="{{ r.title }}"><a href="{% url 'dashboard:project_detail' r.cpn %}">{{ r.display_number }}</a> <span class="muted">{{ r.title }}</span></td>
+      <td class="num muted">{{ r.sl_value|money }}</td><td class="num">{{ r.effective_value|money }}</td><td class="mono">{{ r.basis }}</td><td class="num muted">{{ r.effective_from|date:"M j" }}</td>
+      <td class="muted clamp2" style="white-space:normal;font-size:12px" title="{{ r.explanation }}">{{ r.explanation }}</td></tr>{% empty %}<tr><td colspan="6" class="empty">{% if cv_tot.all %}Every project uses SL's contract value as entered.{% else %}No open job has a corrected contract value.{% endif %}</td></tr>{% endfor %}
+    </tbody></table>
+  </div>
+  <div class="card"><h2>Refresh runs <small id="run-status"></small></h2>
+    <table class="data"><thead><tr><th>#</th><th title="nightly = scheduled launchd run (07:00, 12:00, 16:30 Central), manual = UI button/CLI, backfill = first load.">Trigger</th><th>Status</th><th class="num">Started</th><th class="num">Duration</th><th title="Every pipeline step with its stats — hover a step for its result; ✗ marks a failure.">Steps</th></tr></thead><tbody>
+    {% for r in runs %}<tr><td class="muted">{{ r.id }}</td><td>{{ r.trigger }}</td><td><span class="tag {% if r.status == 'succeeded' %}closed_stabilized{% elif r.status == 'failed' %}critical{% else %}in_progress{% endif %}">{{ r.status }}</span></td><td class="num muted">{{ r.started_at|date:"M j g:i A" }}</td><td class="num muted">{% if r.finished_at and r.started_at %}{{ r.started_at|timesince:r.finished_at }}{% endif %}</td>
+      <td style="white-space:normal;font-size:12px" class="muted">{% for s in r.steps %}<span title="{{ s.result }}">{{ s.step }}{% if s.error %} <b class="neg">✗</b>{% endif %}</span>{% if not forloop.last %} · {% endif %}{% endfor %}{% if r.error_summary %}<div class="neg clamp2" title="{{ r.error_summary }}">{{ r.error_summary }}</div>{% endif %}</td></tr>{% endfor %}
+    </tbody></table>
+    <h3 style="margin-top:12px">Watermarks</h3>
+    <table class="data"><thead><tr><th>Source</th><th title="Registered extraction query (sql/source/…).">Query</th><th title="Incremental position: the next refresh re-reads from this point minus an overlap window (PTT 45 days, SL 30 days).">Watermark</th></tr></thead><tbody>{% for w in watermarks %}<tr><td>{{ w.source_system }}</td><td class="mono">{{ w.query_name }}</td><td class="mono" style="white-space:normal">{{ w.watermark }}</td></tr>{% endfor %}</tbody></table>
+  </div>
+</div>
+<div class="card"><h2>What is verified on every run</h2>
+  <ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.7">
+    <li><b>Permissions audit</b> — SL login must be exactly <code>db_datareader</code> with explicit DENY on INSERT/UPDATE/DELETE; PTT role must be non-superuser with no write grants and <code>default_transaction_read_only=on</code>. The run aborts otherwise. Last result: {% with runs.0 as r %}{% if r.permissions_audit.sl.ok and r.permissions_audit.ptt.ok %}<span class="pos">both OK</span>{% else %}see run {{ r.id }}{% endif %}{% endwith %}.</li>
+    <li><b>Checksum</b> — Σ local <code>PJTran</code> copies by project × account = SL <code>PJPTDROL</code> actual amounts and units, to the cent.</li>
+    <li><b>Identity</b> — every SL project matched to a PTT project by the exact key (no suffix stripping); unmatched keys become issues.</li>
+    <li><b>Hours</b> — PTT onsite+OT+offsite hours vs SL labor-charge hours per project; &gt;5 % differences are flagged, never silently reconciled.</li>
+    <li><b>Idempotence</b> — transactions insert-once by natural key, time entries upsert by PTT id and keep soft-deletes, budgets are hash-diffed into a change log.</li>
+  </ul>
+</div>
+{% endblock %}
+{% block scripts %}<script>
+async function poll(){ try{ const r = await fetch("{% url 'dashboard:refresh_status' %}"); const j = await r.json(); const el = document.getElementById('run-status');
+  if (j.running){ const done = j.running.steps.map(s=>s.step).join(' → '); el.textContent = 'running: ' + done; setTimeout(poll, 4000); }
+  else if (el.textContent.startsWith('running')) { location.reload(); } } catch(e){} }
+{% if freshness.running %}poll();{% endif %}
+</script>{% endblock %}

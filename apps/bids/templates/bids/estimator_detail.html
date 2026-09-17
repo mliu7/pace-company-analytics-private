@@ -1,0 +1,84 @@
+{% extends "dashboard/base.html" %}{% load humanize pca bids static %}
+{% block title %}{{ e.canonical_name }} · Estimator · Pace Company Analytics{% endblock %}
+{% block extra_css %}
+  .estd .fz { position: sticky; left: 0; background: var(--panel); z-index: 2; box-shadow: 2px 0 0 var(--line); } .estd thead .fz { z-index: 3; background: #fafbfd; }
+  .estd .table-wrap { overflow: auto; max-height: 420px; scrollbar-width: auto; }
+  .estd table.data th.sorted { color: var(--ink); }
+{% endblock %}
+{% block content %}
+<div class="estd">
+<div class="crumbs"><a href="{% url 'bids:estimators' %}">Estimators</a> › {{ e.canonical_name }}</div>
+<div class="topbar">
+  <div class="title"><h1>{{ e.canonical_name }} <span class="muted" style="font-size:14px;font-weight:400">{{ e.employee_key }}{% if not e.active %} · inactive{% endif %}</span></h1>
+    <small>Estimator of record on {{ kp.bids|intcomma }} portal rows{% if kp.inferred %} ({{ kp.inferred }} by inference){% endif %} · divisions {% for d, n in divisions_mix %}{{ d }} ({{ n }}){% if not forloop.last %}, {% endif %}{% endfor %} · <a href="{% url 'dashboard:person_detail' e.employee_key %}">person page</a></small></div>
+</div>
+<div class="grid kpi" style="margin-bottom:14px">
+  <div class="card kpi"><div class="label" title="Quoting + submitted right now.">Open bids</div><div class="value">{{ kp.open }}</div><div class="sub">{{ kp.open_value|money_k }}</div></div>
+  <div class="card kpi"><div class="label" title="Σ value of submitted / awarded / lost bids of record.">Submitted value</div><div class="value">{{ kp.submitted_value|money_k }}</div></div>
+  <div class="card kpi"><div class="label" title="Won ÷ (won + lost) by count; $-weighted beneath.">Hit rate</div><div class="value {% if kp.hit != None and kp.hit >= 0.5 %}pos{% endif %}">{% if kp.hit != None %}{{ kp.hit|pct:0 }}{% else %}—{% endif %}</div><div class="sub">{{ kp.won }} won · {{ kp.lost }} lost{% if kp.hit_w != None %} · {{ kp.hit_w|pct:0 }} by value{% endif %}</div></div>
+  <div class="card kpi"><div class="label" title="Median (Value − Budget) ÷ Value at bid time.">Bid margin</div><div class="value">{% if kp.margin != None %}{{ kp.margin|pct:1 }}{% else %}—{% endif %}</div><div class="sub">{% if kp.gp != None %}realised GP {{ kp.gp|pct:1 }} (closed)</span>{% else %}no closed jobs yet{% endif %}</div></div>
+  <div class="card kpi"><div class="label" title="Median of realised GP − bid margin on closed jobs, in margin points.">Estimate accuracy</div><div class="value {% if kp.accuracy != None %}{% if kp.accuracy >= 0 %}pos{% else %}neg{% endif %}{% endif %}">{% if kp.accuracy != None %}{{ kp.accuracy|pts }}{% else %}—{% endif %}</div><div class="sub">{{ kp.accuracy_n }} closed jobs{% if kp.cost_vs_budget != None %} · cost {{ kp.cost_vs_budget|floatformat:2 }}× budget{% endif %}</div></div>
+  <div class="card kpi"><div class="label" title="Median days from submission to award; late = submitted after the due date.">Cycle</div><div class="value sm">{% if kp.cycle != None %}{{ kp.cycle|floatformat:0 }}d{% else %}—{% endif %}</div><div class="sub">{% if kp.late_n %}{{ kp.late }}/{{ kp.late_n }} submitted late{% else %}—{% endif %}</div></div>
+</div>
+
+{% if acc.ratings and ratings %}
+<div class="card" style="margin-bottom:14px;border-color:#c9d8ff"><h2>Context-adjusted rating <small>concealed — superadmin tier only · ridge residual + empirical-Bayes shrinkage, same engine as the PM ratings · <a href="{% url 'dashboard:ratings' %}?entity=estimator">Ratings page</a> · model card <span class="mono">docs/model_cards/estimator_v1.md</span></small></h2>
+  <table class="data dense"><thead><tr><th>Metric</th><th class="num" title="Points of gross margin vs what the model expected for the same jobs (controls: customer, sector, solution, mode, size, sold margin, year, PM). Positive = better than expected.">Adjusted</th><th class="num">95 % interval</th><th class="num">Raw</th><th class="num">Jobs</th><th class="num">Customers</th><th class="num">Shrink</th><th class="num">Percentile</th><th>Status</th><th>Limitations</th></tr></thead><tbody>
+  {% for r in ratings %}<tr><td>{% if r.metric_name == 'final_gp_pct' %}Final GP % vs expected{% elif r.metric_name == 'margin_preservation' %}Margin preservation (final − sold) vs expected{% else %}Bid accuracy (final GP − bid margin) vs expected{% endif %}</td>
+    <td class="num"><b class="{% if r.adjusted_effect >= 0 %}pos{% else %}neg{% endif %}">{{ r.adjusted_effect|pts }}</b></td><td class="num muted">{{ r.interval_low|pts }} … {{ r.interval_high|pts }}</td><td class="num muted">{{ r.raw_effect|pts }}</td>
+    <td class="num">{{ r.project_count }}</td><td class="num">{{ r.customer_count }}</td><td class="num">{{ r.shrinkage_factor|floatformat:2 }}</td><td class="num">{% if r.percentile != None %}{{ r.percentile|pct:0 }}{% else %}—{% endif %}</td>
+    <td><span class="pill {% if r.publication_status == 'publishable' %}good{% elif r.publication_status == 'provisional' %}warn{% endif %}">{{ r.publication_status }}</span></td><td class="muted" style="white-space:normal;font-size:11.5px">{{ r.limitations|join:"; " }}</td></tr>{% endfor %}
+  </tbody></table>
+  <div class="note">Provisional and insufficient rows are directional at best. This block never renders for anyone without <span class="mono">ratings.view</span>; the sentinel-leakage tests cover it.</div>
+</div>
+{% endif %}
+<div class="grid two" style="margin-bottom:14px">
+  <div class="card"><h2>By quarter <small>hit rate · bid margin · realised GP (closed jobs)</small></h2><div class="chart" style="height:260px"><canvas id="c_trend"></canvas></div></div>
+  <div class="card"><h2>Probability calibration <small>stated probability vs how often those bids were actually won</small></h2>
+    {% if d.calibration %}<table class="data dense"><thead><tr><th>Stated</th><th class="num">Decided bids</th><th class="num">Actually won</th><th class="num" title="Actual − stated, in points. Positive = they win more often than they say.">Gap</th></tr></thead><tbody>
+    {% for c in d.calibration %}<tr><td>{{ c.bucket }}%</td><td class="num">{{ c.n }}</td><td class="num">{{ c.actual|pct:0 }}</td><td class="num {% if c.gap >= 0 %}pos{% else %}neg{% endif %}">{{ c.gap|pts:0 }}</td></tr>{% endfor %}
+    </tbody></table>{% else %}<div class="empty">No decided bids with a stated probability.</div>{% endif %}</div>
+</div>
+
+<div class="grid three" style="margin-bottom:14px">
+  <div class="card"><h2>By client <small>top by bids</small></h2><div class="table-wrap"><table class="data dense"><thead><tr><th>Client</th><th class="num">Bids</th><th class="num">Hit</th><th class="num">Value</th><th class="num">Margin</th></tr></thead><tbody>
+    {% for g in d.by_client|slice:":15" %}<tr><td class="trunc" style="max-width:180px" title="{{ g.key }}">{{ g.key }}</td><td class="num">{{ g.bids }}</td><td class="num">{% if g.hit != None %}{{ g.hit|pct:0 }}{% else %}—{% endif %}</td><td class="num">{{ g.value|money_k }}</td><td class="num">{% if g.margin != None %}{{ g.margin|pct:0 }}{% else %}—{% endif %}</td></tr>{% endfor %}
+  </tbody></table></div></div>
+  <div class="card"><h2>By sector</h2><div class="table-wrap"><table class="data dense"><thead><tr><th>Sector</th><th class="num">Bids</th><th class="num">Hit</th><th class="num">Value</th><th class="num">Accuracy</th></tr></thead><tbody>
+    {% for g in d.by_sector|slice:":12" %}<tr><td>{{ g.key }}</td><td class="num">{{ g.bids }}</td><td class="num">{% if g.hit != None %}{{ g.hit|pct:0 }}{% else %}—{% endif %}</td><td class="num">{{ g.value|money_k }}</td><td class="num">{% if g.accuracy != None %}{{ g.accuracy|pts }}{% else %}—{% endif %}</td></tr>{% endfor %}
+  </tbody></table></div></div>
+  <div class="card"><h2>By size band</h2><div class="table-wrap"><table class="data dense"><thead><tr><th>Size</th><th class="num">Bids</th><th class="num">Hit</th><th class="num">Value</th><th class="num">Margin</th></tr></thead><tbody>
+    {% for g in d.by_size %}<tr><td>{{ g.key }}</td><td class="num">{{ g.bids }}</td><td class="num">{% if g.hit != None %}{{ g.hit|pct:0 }}{% else %}—{% endif %}</td><td class="num">{{ g.value|money_k }}</td><td class="num">{% if g.margin != None %}{{ g.margin|pct:0 }}{% else %}—{% endif %}</td></tr>{% endfor %}
+  </tbody></table></div></div>
+</div>
+
+<div class="card" style="margin-bottom:14px">
+  <h2>Open bids <small>{{ d.open|length }} quoting or submitted</small></h2>
+  {% if d.open %}<div class="table-wrap"><table class="data dense" id="openbids" data-sortable><thead><tr><th class="fz">Bid</th><th>Client</th><th>Stage</th><th class="num" data-numeric>Due</th><th class="num" data-numeric>Value</th><th class="num" data-numeric>Budget</th><th class="num" data-numeric>Margin</th><th class="num" data-numeric>Prob.</th><th>Ball in court</th><th>BOM</th></tr></thead><tbody>
+    {% for r in d.open %}<tr><td class="fz"><a href="{% url 'bids:bid_detail' r.id %}">{{ r.project_name|default:"(unnamed)" }}</a>{% if r.job_number_raw %} <span class="muted mono">{{ r.job_number_raw }}</span>{% endif %}</td><td>{{ r.client_label|default:"—" }}</td><td><span class="pill {{ r.stage|stage_class }}">{{ r.stage_label }}</span></td><td class="num" data-v="{{ r.bid_due|date:'Y-m-d' }}">{{ r.bid_due|date:"M j"|default:"—" }}</td><td class="num" data-v="{{ r.value|default:0 }}">{{ r.value|money_k }}</td><td class="num" data-v="{{ r.budget|default:0 }}">{{ r.budget|money_k }}</td><td class="num" data-v="{{ r.margin|default_if_none:'' }}">{% if r.margin != None %}{{ r.margin|pct:0 }}{% else %}—{% endif %}</td><td class="num" data-v="{{ r.probability|default_if_none:'' }}">{% if r.probability != None %}{{ r.probability }}%{% else %}<span class="muted">unscored</span>{% endif %}</td><td>{{ r.ball_in_court|default:"—" }}</td><td>{{ r.bom_status|default:"—" }}</td></tr>{% endfor %}
+  </tbody></table></div>{% else %}<div class="empty">Nothing open.</div>{% endif %}
+</div>
+
+<div class="card">
+  <h2>Decided bids <small>{{ d.decided|length }} won or lost · with the SL outcome when the job closed</small></h2>
+  <div class="table-wrap"><table class="data dense" id="decided" data-sortable><thead><tr><th class="fz">Bid</th><th>Client</th><th>Result</th><th class="num" data-numeric>Due</th><th class="num" data-numeric>Value</th><th class="num" data-numeric>Bid margin</th><th>SL job</th><th class="num" data-numeric title="SL contract value today.">CV</th><th class="num" data-numeric title="SL final GP % (closed jobs).">Final GP</th><th class="num" data-numeric title="Final GP − bid margin, points.">Accuracy</th></tr></thead><tbody>
+    {% for r in d.decided %}<tr><td class="fz"><a href="{% url 'bids:bid_detail' r.id %}">{{ r.project_name|default:"(unnamed)" }}</a></td><td class="trunc" style="max-width:170px" title="{{ r.client_label }}">{{ r.client_label|default:"—" }}</td><td>{% if r.won %}<span class="pill good">Won{% if r.won_by_sl and r.stage != 'awarded' %} (SL){% endif %}</span>{% else %}<span class="pill bad">Lost</span>{% endif %}</td><td class="num" data-v="{{ r.bid_due|date:'Y-m-d' }}">{{ r.bid_due|date:"M j, y"|default:"—" }}</td><td class="num" data-v="{{ r.value|default:0 }}">{{ r.value|money_k }}</td><td class="num" data-v="{{ r.margin|default_if_none:'' }}">{% if r.margin != None %}{{ r.margin|pct:0 }}{% else %}—{% endif %}</td><td>{% if r.cpn %}<a href="{% url 'dashboard:project_detail' r.cpn %}">{{ r.pdisp }}</a> <span class="tag {{ r.pstate }}">{{ r.pstate|nice }}</span>{% else %}—{% endif %}</td><td class="num" data-v="{{ r.cv|default:0 }}">{% if r.cv %}{{ r.cv|money_k }}{% else %}—{% endif %}</td><td class="num" data-v="{{ r.realised_gp|default_if_none:'' }}">{% if r.realised_gp != None and r.pstate == 'closed_stabilized' %}{{ r.realised_gp|pct:0 }}{% else %}—{% endif %}</td><td class="num" data-v="{{ r.accuracy|default_if_none:'' }}">{% if r.accuracy != None %}<span class="{% if r.accuracy >= 0 %}pos{% else %}neg{% endif %}">{{ r.accuracy|pts }}</span>{% else %}—{% endif %}</td></tr>{% endfor %}
+  </tbody></table></div>
+</div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{% static 'bids/tables.js' %}?v={{ ASSET_VERSION }}"></script>
+<script>
+(function () {
+  const t = {{ trend_json|safe }};
+  new Chart(document.getElementById('c_trend'), {data: {labels: t.map(x => x.q), datasets: [
+      {type: 'line', label: 'hit rate %', data: t.map(x => x.hit == null ? null : x.hit * 100), borderColor: '#1f5eff', backgroundColor: '#1f5eff', yAxisID: 'y', tension: .25, spanGaps: true},
+      {type: 'line', label: 'bid margin %', data: t.map(x => x.margin == null ? null : x.margin * 100), borderColor: '#b7791f', backgroundColor: '#b7791f', yAxisID: 'y', tension: .25, spanGaps: true},
+      {type: 'line', label: 'realised GP % (closed)', data: t.map(x => x.gp == null ? null : x.gp * 100), borderColor: '#178a52', backgroundColor: '#178a52', yAxisID: 'y', tension: .25, spanGaps: true},
+      {type: 'bar', label: 'bids', data: t.map(x => x.bids), backgroundColor: 'rgba(93,107,124,.18)', yAxisID: 'y2'}]},
+    options: {responsive: true, maintainAspectRatio: false, interaction: {mode: 'index', intersect: false},
+      scales: {y: {min: 0, max: 100, title: {display: true, text: '%'}}, y2: {position: 'right', grid: {display: false}, title: {display: true, text: 'bids'}}}}});
+})();
+</script>
+{% endblock %}

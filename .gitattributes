@@ -1,0 +1,8 @@
+# Preserve binary assets and synthetic document fixtures byte-for-byte.
+# PDF cross-reference records deliberately contain trailing spaces; treating
+# them as source text produces misleading whitespace errors in an initial diff.
+*.pdf binary
+*.docx binary
+*.xlsx binary
+*.png binary
+*.jpg binary

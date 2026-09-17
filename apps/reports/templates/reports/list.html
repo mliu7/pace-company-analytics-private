@@ -1,0 +1,7 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Ad-hoc Reports · Pace Company Analytics{% endblock %}
+{% block content %}<div class="topbar"><div class="title"><h1>Ad-hoc reports</h1><small>Reports shared with you. Each report shows its complete audience.</small></div>
+{% if can_create %}<a class="btn" href="{% url 'reports:report_create' %}">Create report</a>{% endif %}</div>
+{% if acc.real_is_superadmin and not PRIVATE_MODE %}<p><a href="{% url 'reports:report_groups' %}">Manage report groups</a> · Grant <b>reports.create</b> to a named person in People &amp; Access.</p>{% endif %}
+{% for report in reports %}<article class="card" style="margin-bottom:16px"><h2><a href="{% url 'reports:report_detail' report.pk %}">{{ report.title }}</a></h2><p>{{ report.summary }}</p><p class="muted">{{ report.owner.display_name }} · Updated {{ report.updated_at|date:"M j, Y" }} · {{ report.audience.count }} people have access</p>
+<p>{% for person in report.audience %}<span class="tag">{{ person.display_name }}</span> {% endfor %}</p></article>{% empty %}<div class="card">No reports have been shared with you yet.</div>{% endfor %}{% endblock %}

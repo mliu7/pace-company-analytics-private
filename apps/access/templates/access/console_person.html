@@ -1,0 +1,47 @@
+{% extends "dashboard/base.html" %}{% load pca %}
+{% block title %}{{ a.display_name }} · Access · Pace Company Analytics{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="{% url 'access:console_people' %}">People &amp; access</a> › {{ a.display_name }}</div>
+<div class="topbar"><div class="title"><h1>{{ a.display_name }} <span class="muted" style="font-size:14px;font-weight:400">{{ a.email }}</span></h1>
+  <small>{% if a.status == 'active' %}Active{% else %}Disabled{% endif %} · created {{ a.created_at|date:"M j, Y" }} · last sign-in {{ a.last_login_at|date:"M j, Y"|default:"never" }}{% if acc.is_superadmin and a.is_superadmin %} · <b>superadmin</b>{% endif %}</small></div>
+  <div class="row"><form method="post">{% csrf_token %}<input type="hidden" name="action" value="{% if a.status == 'active' %}disable{% else %}enable{% endif %}">
+    <button class="btn {% if a.status == 'active' %}danger{% endif %}">{% if a.status == 'active' %}Disable account{% else %}Re-enable{% endif %}</button></form></div></div>
+
+<div class="grid two">
+<div class="card"><h2>Roles</h2>
+<table class="data"><thead><tr><th>Role</th><th>What it grants</th><th>Divisions</th><th></th></tr></thead><tbody>
+{% for slug, meta in assignable_roles.items %}<tr>
+  <td><b>{{ meta.label }}</b>{% if slug in superadmin_assigned %} <span class="pill warn" title="An ordinary role, but only a superadmin may grant or revoke it — a permission admin cannot mint peers.">superadmin-assigned</span>{% endif %}</td>
+  <td class="muted" style="width:50%">{% for c in meta.caps %}{{ c }} {% endfor %}</td>
+  <td>{% if slug in assigned %}{{ assigned|getitem:slug|attr_or_blank:"division_codes" }}{% endif %}</td>
+  <td class="num">
+    <form method="post" style="display:inline">{% csrf_token %}
+    {% if slug in assigned %}<input type="hidden" name="action" value="revoke_role"><input type="hidden" name="role" value="{{ slug }}"><button class="btn small">Revoke</button>
+    {% else %}<input type="hidden" name="action" value="grant_role"><input type="hidden" name="role" value="{{ slug }}">{% if meta.scoped %}<input name="divisions" placeholder="070,080" style="width:80px">{% endif %}<button class="btn small primary">Grant</button>{% endif %}
+    </form></td></tr>{% endfor %}
+</tbody></table>
+<div class="note" style="margin-top:8px">Roles and what they grant are defined in the system itself; this console only assigns people to them.</div>
+</div>
+<div class="card"><h2>Employee link</h2>
+<form method="post">{% csrf_token %}<input type="hidden" name="action" value="link_employee">
+<select name="employee_id" style="width:100%"><option value="">— none —</option>
+{% for e in employees %}<option value="{{ e.pk }}" {% if a.employee_id == e.pk %}selected{% endif %}>{{ e.canonical_name }} ({{ e.employee_key }})</option>{% endfor %}</select>
+<button class="btn small" style="margin-top:8px">Save link</button></form>
+<div class="note" style="margin-top:8px">Linking to the employee record powers future "own data" views (their hours, their projects).</div>
+
+{% if acc.is_superadmin %}
+<h2 style="margin-top:16px">Superadmin controls <span class="pill bad">visible only to you</span></h2>
+<form method="post" style="margin-bottom:8px">{% csrf_token %}<input type="hidden" name="action" value="toggle_superadmin">
+<button class="btn {% if a.is_superadmin %}danger{% endif %}">{% if a.is_superadmin %}Remove superadmin{% else %}Make superadmin{% endif %}</button></form>
+<h3>Extra grants (person-by-person)</h3>
+<table class="data"><tbody>
+{% for g in extras %}<tr><td class="mono">{{ g.capability }}</td><td class="num"><form method="post">{% csrf_token %}<input type="hidden" name="action" value="revoke_extra"><input type="hidden" name="capability" value="{{ g.capability }}"><button class="btn small">Revoke</button></form></td></tr>
+{% empty %}<tr><td class="muted">none</td><td></td></tr>{% endfor %}
+</tbody></table>
+<form method="post" style="margin-top:8px">{% csrf_token %}<input type="hidden" name="action" value="grant_extra">
+<select name="capability">{% for c, m in all_caps.items %}<option value="{{ c }}">{{ c }}{% if m.tier == 'superadmin' %} (superadmin tier){% endif %}</option>{% endfor %}</select>
+<button class="btn small primary">Grant capability</button></form>
+{% endif %}
+</div>
+</div>
+{% endblock %}

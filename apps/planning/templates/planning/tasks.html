@@ -1,0 +1,39 @@
+{% extends "dashboard/base.html" %}
+{% load humanize pca static %}
+{% block title %}Production · Active tasks · Pace Company Analytics{% endblock %}
+{% block extra_css %}@import url("{% static 'planning/planning.css' %}?v={{ PL_VERSION }}");{% endblock %}
+{% block content %}
+<div class="topbar"><div class="title"><h1>Active tasks</h1><small>Every open status-board task scored by its critical stop — past due, due within 14 days, on track, no date — with union hours remaining. Today is the live clock.</small></div>
+  <div class="actions row no-print"><a class="btn" id="at-print" href="{% url 'planning:planning_tasks_report' %}" title="Print view of the PM report (all schedules)">Print PM report</a><a class="btn" id="at-xlsx" href="{% url 'planning:planning_tasks_export' %}" title="4-sheet styled Excel: PM Report, Summary, Attention Required, All Active Tasks — live totals">Export PM report</a></div></div>
+{% include "planning/_tabs.html" %}
+<div class="seg" id="at-div" style="margin-bottom:12px" title="Division tabs with the active-task count of each"></div>
+<div class="at-layout">
+  <aside class="at-side no-print">
+    <div class="card tight"><input type="search" id="at-q" placeholder="Search name, PM, status…" style="width:100%;font:inherit;padding:6px 8px;border:1px solid var(--line-strong);border-radius:8px"></div>
+    <div class="card tight"><h3 title="PM1 or PM2 — global across divisions; the meter is union hours">Project manager</h3><div class="at-list" id="at-pms"></div></div>
+    <div class="card tight"><h3 title="By critical stop date, relative to the live clock">Priority</h3><div class="at-list" id="at-pri"></div></div>
+    <div class="card tight"><h3 title="Distinct projects whose Phase status or Equipment status V2 equals the value; None = both blank">Status ∪ Status V2</h3><div class="at-list" id="at-st"></div></div>
+    <button class="btn small" id="at-reset" title="Clear PM (all divisions), priority, status, month and search">Reset filters</button>
+  </aside>
+  <div>
+    <div class="pm-focus" id="at-focus" hidden></div>
+    <div class="grid kpi" id="at-kpi" style="margin-bottom:12px"></div>
+    <div class="charts2">
+      <div class="card"><h3 title="Σ union hours remaining per PM1, top 12 — computed from every filter except the PM filter, so a PM filter still shows the whole field">Union hours by PM</h3><div class="chart"><canvas id="ch-pm"></canvas></div><div class="hint">Click a bar to filter. Click again to clear.</div></div>
+      <div class="card"><h3 title="Σ union hours by the month of the critical stop; No date = tasks without a stop">Union hours by critical stop month</h3><div class="chart"><canvas id="ch-month"></canvas></div><div class="hint">Click a point to filter that month.</div></div>
+      <div class="card"><h3 title="Task counts by priority bucket (excluding the priority filter)">Tasks by priority</h3><div class="chart"><canvas id="ch-pri"></canvas></div><div class="hint">Click a bar to filter.</div></div>
+      <div class="card"><h3 title="Distinct projects per status across both pills (a task counts in both its S1 and S2 slices); top 12, None first">Active projects by status / status V2</h3><div class="chart"><canvas id="ch-st"></canvas></div><div class="hint">Click a slice to filter.</div></div>
+    </div>
+    <div class="card tight"><h2>Active tasks — <span id="at-divlabel"></span> <small id="at-count"></small></h2>
+      <div class="table-wrap tall"><table class="data dense" id="at-table"></table></div></div>
+  </div>
+</div>
+<div class="fin-modal" id="at-modal" onclick="if(event.target===this)this.style.display='none'"><div class="fin-modal-box" style="max-width:1100px"><div class="fin-modal-head"><h2 id="at-mtitle">Project</h2><span class="muted" id="at-msub"></span><a href="#" class="fin-modal-close" onclick="document.getElementById('at-modal').style.display='none';return false">✕</a></div><div id="at-mbody"></div></div></div>
+{{ dataset|json_script:"at-data" }}
+{% endblock %}
+{% block scripts %}
+<script src="{% static 'planning/planning.js' %}?v={{ PL_VERSION }}"></script>
+<script>window.AT_CONF = {editUrl: "{% url 'planning:planning_status_edit' %}", statusUrl: "{% url 'planning:planning_status' %}", reportUrl: "{% url 'planning:planning_tasks_report' %}", exportUrl: "{% url 'planning:planning_tasks_export' %}", canWrite: {{ can_write|yesno:"true,false" }},
+  init: {div: "{{ request.GET.div|default:''|escapejs }}", priority: "{{ request.GET.priority|default:''|escapejs }}", pm: "{{ request.GET.pm|default:''|escapejs }}"}};</script>
+<script src="{% static 'planning/tasks.js' %}?v={{ PL_VERSION }}"></script>
+{% endblock %}

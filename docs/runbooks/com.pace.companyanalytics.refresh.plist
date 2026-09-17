@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <!-- Scheduled data refresh: 07:00, 12:00 and 16:30 local time (the Mac is on America/Chicago).
+       Install: see docs/runbooks/operations.md → "Scheduled refresh (launchd)". -->
+  <key>Label</key><string>com.pace.companyanalytics.refresh</string>
+  <key>ProgramArguments</key><array>
+    <string>/bin/zsh</string>
+    <string>/Users/LOCAL_USER/Programming/pace-performance-lab/pace-performance-lab/scripts/scheduled_refresh.sh</string>
+  </array>
+  <key>StartCalendarInterval</key><array>
+    <dict><key>Hour</key><integer>7</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>12</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>16</integer><key>Minute</key><integer>30</integer></dict>
+  </array>
+  <key>StandardOutPath</key><string>/Users/LOCAL_USER/Library/Application Support/PaceCompanyAnalytics/logs/scheduled_refresh.launchd.log</string>
+  <key>StandardErrorPath</key><string>/Users/LOCAL_USER/Library/Application Support/PaceCompanyAnalytics/logs/scheduled_refresh.launchd.log</string>
+</dict></plist>

@@ -1,0 +1,31 @@
+{% load humanize pca bids %}{% if bid %}
+<div class="card" id="bidcard" style="margin-bottom:14px">
+  <h2>Bid <small>the Project Portal row this job came from — estimator, what was bid, how it turned out{% if others %} · {{ others|length }} more portal row{{ others|length|pluralize }} link{{ others|length|pluralize:"s," }} here{% endif %}</small></h2>
+  <div class="grid" style="grid-template-columns:1.2fr 1fr 1fr;gap:14px">
+    <dl class="kv dense">
+      <dt title="The Bidder on the portal row = the estimator of record (SharePoint spec §4.1).">Estimator</dt>
+      <dd>{% if bid.estimator %}<a href="{% url 'bids:estimator_detail' bid.estimator.employee_key %}">{{ bid.estimator.canonical_name }}</a>{% if bid.estimator_inferred %} <span class="tag" title="The portal row had no Bidder; inferred by rule {{ bid.estimator_rule }} — not used for ratings.">inferred</span>{% endif %}{% else %}<span class="muted">unknown{% if bid.bidder_raw %} ({{ bid.bidder_raw }}){% endif %}</span>{% endif %}</dd>
+      <dt>Sales rep</dt><dd>{% if bid.house_account %}House (OT){% elif bid.salesperson %}{{ bid.salesperson.canonical_name }}{% else %}{{ bid.sales_rep_raw|default:"—" }}{% endif %}</dd>
+      <dt>Portal status</dt><dd><span class="pill {{ bid.stage|stage_class }}">{{ stage_label }}</span>{% if bid.won_by_sl and bid.stage != 'awarded' %} <span class="tag" title="SL has billings on this job, so it is won whatever the portal says (D4).">won per SL</span>{% endif %}</dd>
+      <dt>Bid due · submitted · awarded</dt><dd>{{ bid.bid_due|date:"M j, Y"|default:"—" }} · {{ bid.submitted_on|date:"M j, Y"|default:"—" }} · {{ bid.awarded_on|date:"M j, Y"|default:"—" }}</dd>
+      <dt>Portal row</dt><dd><a href="{% url 'bids:bid_detail' bid.pk %}">bid detail</a>{% if bid.web_url %} · <a href="{{ bid.web_url }}" target="_blank" rel="noopener">open in the Project Portal ↗</a>{% endif %}</dd>
+    </dl>
+    <dl class="kv dense">
+      <dt title="Project Value on the portal row: the price bid.">Bid value</dt><dd>{{ bid.value|money }}{% if cv_delta != None %} <span class="muted" title="SL contract value minus the bid value: change orders and corrections since award.">CV {{ cv_delta|signed_money }}</span>{% endif %}</dd>
+      <dt title="Budget on the portal row: the estimator's cost budget — a figure SL never had.">Bid budget (cost)</dt><dd>{{ bid.budget|money }}</dd>
+      <dt title="(Value − Budget) ÷ Value at bid time.">Bid margin</dt><dd>{% if margin != None %}{{ margin|pct:1 }}{% else %}—{% endif %}</dd>
+      <dt title="Stated probability of close on the portal row.">Probability</dt><dd>{% if bid.probability != None %}{{ bid.probability }}%{% else %}<span class="muted">unscored</span>{% endif %}</dd>
+    </dl>
+    <dl class="kv dense">
+      <dt title="SL actual GP % on the job (closed jobs only) beside the margin that was bid.">Realised GP</dt><dd>{% if realised_gp != None %}{{ realised_gp|pct:1 }}{% if accuracy != None %} <span class="{% if accuracy >= 0 %}pos{% else %}neg{% endif %}" title="Estimate accuracy = realised GP − bid margin, in margin points.">{{ accuracy|pts }}</span>{% endif %}{% else %}<span class="muted">not closed yet</span>{% endif %}</dd>
+      <dt title="SL direct cost ÷ the bid budget (closed jobs).">Cost vs budget</dt><dd>{% if cost_vs_budget != None %}{{ cost_vs_budget|floatformat:2 }}×{% else %}—{% endif %}</dd>
+      <dt>Ball in court · BOM</dt><dd>{{ bid.ball_in_court|default:"—" }} · {{ bid.bom_status|default:"—" }}</dd>
+      <dt>Walkthrough</dt><dd>{{ bid.walkthrough_raw|default:"—" }}{% if bid.walkthrough_date %} · {{ bid.walkthrough_date|date:"M j" }}{% endif %}</dd>
+    </dl>
+  </div>
+  {% if trail %}<div class="row" style="gap:6px;flex-wrap:wrap;margin-top:10px" title="Status trail from the portal row's version history: when it entered each stage and who moved it.">
+    {% for t in trail %}<span class="pill {{ t.stage|stage_class }}">{{ t.label }} <span class="muted">{{ t.when|date:"M j, Y" }}{% if t.by %} · {{ t.by }}{% endif %}{% if t.value %} · {{ t.value|money_k }}{% endif %}</span></span>{% if not forloop.last %}<span class="muted">→</span>{% endif %}{% endfor %}
+  </div>{% endif %}
+  {% if bid.comments %}<div class="note" style="margin-top:8px">{{ bid.comments }}</div>{% endif %}
+</div>
+{% endif %}

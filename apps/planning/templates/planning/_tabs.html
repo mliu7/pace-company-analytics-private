@@ -1,0 +1,11 @@
+{# Production tab bar (spec §10): Today · Status board · Active tasks · Punch lists · Approvals · Planner boards #}
+<div class="pl-tabs no-print">
+  <a href="{% url 'planning:planning_today' %}" class="{% if sub == 'today' %}active{% endif %}" title="Per-division counts that matter now">Today</a>
+  <a href="{% url 'planning:planning_status' %}" class="{% if sub == 'status' %}active{% endif %}" title="The Master Schedule rows: two status pills, PM, dates, hours, notes"><span>Status board</span><span class="n" title="active rows on the status board">{{ tab_counts.status }}</span></a>
+  <a href="{% url 'planning:planning_tasks' %}" class="{% if sub == 'tasks' %}active{% endif %}" title="Open tasks scored by critical stop, PM report"><span>Active tasks</span><span class="n" title="active tasks (not completed, under 100 %)">{{ tab_counts.tasks }}</span></a>
+  <a href="{% url 'planning:planning_punch' %}" class="{% if sub == 'punch' %}active{% endif %}" title="Punch lists per project, PM and division"><span>Punch lists</span><span class="n" title="overdue punch items, all divisions">{{ tab_counts.punch }}</span></a>
+  <a href="{% url 'planning:planning_approvals' %}" class="{% if sub == 'approvals' %}active{% endif %}" title="BOM and labor documentation requests"><span>Approvals</span><span class="n" title="requests awaiting a decision">{{ tab_counts.approvals }}</span></a>
+  <a href="{% url 'planner:planning_planner' %}" class="{% if sub == 'planner' %}active{% endif %}" title="Tom's Planner boards (Phase I)">Planner boards</a>
+  <span class="right"><span class="pl-clock" id="pl-clock" title="The live clock: every 'today', 'overdue' and 'due soon' on these pages moves with it (US Central)"></span></span>
+</div>
+<form id="pl-csrf" hidden>{% csrf_token %}</form>

@@ -1,0 +1,5 @@
+{# a note-only cell for reference rows (capabilities, in-page gates): key, dec (note), anchor #}
+<details class="perm-note"{% if dec.note %} open{% endif %}><summary>{% if dec.note %}<span class="has">{{ dec.note|truncatechars:70 }}</span>{% else %}+ note{% endif %}</summary>
+  <form method="post" action="{% url 'access:permissions_update' %}">{% csrf_token %}<input type="hidden" name="action" value="note"><input type="hidden" name="key" value="{{ key }}"><input type="hidden" name="anchor" value="{{ anchor }}">
+    <textarea name="note" placeholder="Context — why, who asked, what to revisit…">{{ dec.note }}</textarea>
+    <button class="btn small">Save note</button></form></details>

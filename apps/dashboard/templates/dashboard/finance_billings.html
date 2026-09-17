@@ -1,0 +1,290 @@
+{% extends "dashboard/base.html" %}{% load humanize pca %}
+{% block title %}Billings · {{ per.label }} · Pace Company Analytics{% endblock %}
+{% block main_class %} dense{% endblock %}
+{% block content %}
+<div class="topbar">
+  <div class="title"><h1>Billings <small style="display:inline;font-size:14px">{{ per.label }}</small></h1>
+    <small>Every invoice, credit memo and debit memo issued — and every journal posted to a job's revenue — with who keyed it, when, the date on the document, the fiscal period, and the job behind it read exactly as the <a href="{% url 'dashboard:finance_wip' %}">WIP by Job</a> page shows it today. Documents as of the last SL pull ({{ as_of|date:"D M j, g:i A" }}). Hover or click any header for its definition.</small></div>
+  <div class="row">
+    {% if per.prev %}<a class="btn small" href="?{{ per.prev }}&{% qs_without request 'day' 'from' 'to' 'period' %}" title="The previous {% if per.kind == 'day' %}day with a billing{% elif per.kind == 'month' or per.kind == 'mtd' %}month{% elif per.kind == 'ytd' or per.kind == 'year' %}year{% else %}window of the same length{% endif %}.">‹</a>{% endif %}
+    <select onchange="location.href='?'+this.value+'&{% qs_without request 'day' 'from' 'to' 'period' %}'" title="Which billings to show: a live window, or any month / year the invoice lines cover (~14 months).">
+      <option value="{{ per.qs }}">{{ per.label }}</option>
+      {% for grp, opts in period_groups %}<optgroup label="{{ grp }}">{% for v, l in opts %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</optgroup>{% endfor %}
+    </select>
+    <input type="date" value="{% if per.kind == 'day' %}{{ per.start|date:'Y-m-d' }}{% endif %}" max="{{ today|date:'Y-m-d' }}" onchange="location.href='?day='+this.value+'&{% qs_without request 'day' 'from' 'to' 'period' %}'" style="font:inherit;padding:5px 8px;border:1px solid var(--line-strong);border-radius:8px" title="Jump to one day.">
+    {% if per.next %}<a class="btn small" href="?{{ per.next }}&{% qs_without request 'day' 'from' 'to' 'period' %}" title="The next {% if per.kind == 'day' %}day with a billing{% elif per.kind == 'month' or per.kind == 'mtd' %}month{% elif per.kind == 'ytd' or per.kind == 'year' %}year{% else %}window{% endif %}.">›</a>{% endif %}
+    <span class="muted" style="margin-left:6px">day =</span>
+    {% for b, lbl in bases %}<a class="btn small {% if basis == b %}primary{% endif %}{% if b == 'posted' and not posted_ok %} disabled{% endif %}" href="?{% qs_without request 'basis' %}&basis={{ b }}" title="{% if b == 'entered' %}The day the document was keyed into SL — when the billing occurred (Central time). Groups are by this day.{% elif b == 'dated' %}The date printed on the invoice. Groups are by invoice date.{% else %}The fiscal period the document posted into — the basis of the Daily Snapshot's revenue and the Divisional P&L. Needs a month or year window; groups stay by the day keyed, so late entries into a closed month stand out.{% endif %}">{{ lbl }}</a>{% endfor %}
+  </div>
+</div>
+{% if per_filter %}<div class="note" style="margin-bottom:10px"><span class="warn-ink">Filtered to documents posted into fiscal period {{ per_filter }}</span> (the Daily Snapshot's "posted on" split) · <a href="?{% qs_without request 'per' %}">show every period</a>.</div>{% endif %}
+
+<div class="grid kpi" style="margin-bottom:12px">
+  <div class="card kpi"><div class="label" title="Revenue on every document in the window: invoices and debit memos less credit memos (their lines on income accounts), plus journals posted to jobs' revenue. This is the number that reaches GL revenue.">Billed · {{ per.label|lower }}</div>
+    <div class="value sm {{ kp.billed|posneg }}">{{ kp.billed|money }}</div><div class="sub">{{ kp.n }} document{{ kp.n|pluralize }}{% if kp.credits_n %} · <span class="neg">{{ kp.credits_n }} credit{{ kp.credits_n|pluralize }} {{ kp.credits|money }}</span>{% endif %}{% if kp.n_jrnl %} · {{ kp.n_jrnl }} journal{{ kp.n_jrnl|pluralize }} {{ kp.jrnl|money }}{% endif %}</div></div>
+  <div class="card kpi"><div class="label" title="What the customers were billed in total: revenue + sales tax + customer deposits / deferred billings (money billed ahead of the service — 24000 / 21000 — not revenue).">Invoice totals</div>
+    <div class="value sm">{{ kp.total|money }}</div><div class="sub">tax {{ kp.tax|money_k }}{% if kp.deposits %} · deposits / deferred {{ kp.deposits|money_k }}{% endif %}</div></div>
+  <div class="card kpi"><div class="label" title="Revenue on documents that name a job (progress billings, SO2 material orders, journals on jobs).">Project billings</div>
+    <div class="value sm">{{ kp.project|money }}</div><div class="sub">{{ kp.jobs }} job{{ kp.jobs|pluralize }} · {{ kp.customers }} customer{{ kp.customers|pluralize }} in all · <a href="?{% qs_without request 'show' %}&show=project">only these</a></div></div>
+  <div class="card kpi"><div class="label" title="SO1 sales-order invoices without a job — the 010 hardware sales stream (CNET orders). Folded into one row per group in the table.">010 hardware</div>
+    <div class="value sm">{{ kp.hw|money }}</div><div class="sub">{{ kp.hw_n }} invoice{{ kp.hw_n|pluralize }} · <a href="?{% qs_without request 'show' %}&show=hardware">list them</a></div></div>
+  <div class="card kpi"><div class="label" title="Invoices keyed after the date printed on them (a progress billing dated the last day of the month and entered days later). Their revenue lands in the period of the invoice date, not the day they were keyed.">Back-dated</div>
+    <div class="value sm {% if kp.backdated_n %}warn-ink{% endif %}">{{ kp.backdated_n }}</div><div class="sub">{% if kp.backdated_n %}{{ kp.backdated|money }} · up to {{ kp.backdated_max }} day{{ kp.backdated_max|pluralize }} late · <a href="?{% qs_without request 'show' %}&show=backdated">show</a>{% else %}every document keyed on its date{% endif %}{% if kp.per_mismatch_n %} · <span class="warn-ink">{{ kp.per_mismatch_n }} posted into another period</span>{% endif %}</div></div>
+  <div class="card kpi"><div class="label" title="GL income postings (3I accounts except 40100 interest — the Daily Snapshot's revenue definition) for the same window and basis, by module: AR = these invoices, GL = journals (the page lists the ones posted to jobs). Available inside the 95-day posting window.">GL revenue tie</div>
+    {% if tie %}<div class="value sm">{{ tie.total|money }}</div>
+    <div class="sub">{% if tie.by_doc %}{% if tie.ok %}<span class="pos" title="Every invoice on this page has posted to the GL (AR module), whatever day its batch was released.">this page's invoices all posted ✓</span>{% else %}<span class="warn-ink" title="Revenue on this page whose AR batch has not been released to the GL yet — it will post on a later day.">{{ tie.unposted|money_k }} of this page not posted yet</span>{% endif %}{% if tie.earlier_docs %} · <span title="AR revenue that posted to the GL in this window for documents keyed on an earlier day (their batch was released now).">+ {{ tie.earlier_docs|money_k }} released now for earlier documents</span>{% endif %}{% else %}invoices {{ tie.ar|money_k }} {% if tie.ok %}<span class="pos" title="Σ invoice revenue on this page equals the AR-module GL revenue to the penny.">= this page ✓</span>{% else %}<span class="neg" title="GL AR-module revenue minus Σ invoice revenue on this page.">({{ tie.diff|signed_money }} vs this page)</span>{% endif %}{% endif %} · journals {{ tie.gl|money_k }}{% if tie.offjob %} <span title="Journal revenue not posted to any job (company-level deferred-revenue releases and the like) — not listed on this page.">({{ tie.offjob|money_k }} off-job)</span>{% endif %}{% if tie.other %} · other {{ tie.other|money_k }}{% endif %}{% if snap %} · {% if snap.revenue_mtd == tie.total %}<span class="pos">= Daily Snapshot revenue MTD ✓</span>{% else %}<span class="muted" title="The snapshot was stored at {{ snap.as_of|date:'M j g:i A' }}; postings since then move this figure.">snapshot {{ snap.revenue_mtd|money_k }} at {{ snap.as_of|date:'g:i A' }}</span>{% endif %}{% endif %}</div>
+    {% else %}<div class="value sm muted">—</div><div class="sub">outside the 95-day posting window{% if basis != 'posted' and posted_ok %} · <a href="?{% qs_without request 'basis' %}&basis=posted">by fiscal period</a>{% endif %}</div>{% endif %}</div>
+</div>
+
+<form method="get" class="card tight" style="margin-bottom:12px" id="blfilters">
+  {% if per.kind == 'day' %}<input type="hidden" name="day" value="{{ per.start|date:'Y-m-d' }}">{% elif per.kind == 'range' %}<input type="hidden" name="from" value="{{ per.start|date:'Y-m-d' }}"><input type="hidden" name="to" value="{{ per.end|date:'Y-m-d' }}">{% else %}<input type="hidden" name="period" value="{% if per.kind == 'ytd' %}ytd{% else %}{{ per.key }}{% endif %}">{% endif %}
+  <input type="hidden" name="basis" value="{{ basis }}"><input type="hidden" name="by" value="{{ by }}"><input type="hidden" name="show" value="{{ show }}"><input type="hidden" name="sort" value="{{ sort }}">{% if per_filter %}<input type="hidden" name="per" value="{{ per_filter }}">{% endif %}{% if g.project %}<input type="hidden" name="project" value="{{ g.project }}">{% endif %}{% if g.cust %}<input type="hidden" name="cust" value="{{ g.cust }}">{% endif %}
+  <div class="row" style="gap:6px 10px;flex-wrap:wrap;align-items:center">
+    <b title="How the documents are grouped; every group carries its own total and expands to its documents.">Group by</b>
+    {% for k in groups_labels %}<a class="btn small {% if by == k %}primary{% endif %}" href="?{% qs_without request 'by' %}&by={{ k }}" title="{% if k == 'day' %}One group per day, newest first — the billing log.{% elif k == 'project' %}One group per job with its WIP-by-Job context; the group total is the job's billing for the window.{% elif k == 'person' %}By who keyed the document.{% elif k == 'customer' %}By customer.{% else %}By division (the job's; 010 for hardware orders).{% endif %}">{{ k|capfirst }}</a>{% endfor %}
+    <span class="muted" style="margin:0 4px">·</span>
+    <b title="Which documents are in the table (the cards above always count the whole window).">Show</b>
+    {% for k, lbl in shows %}<a class="btn small {% if show == k %}primary{% endif %}" href="?{% qs_without request 'show' %}&show={{ k }}" title="{% if k == 'all' %}Everything.{% elif k == 'project' %}Documents that name a job (and journals on jobs).{% elif k == 'hardware' %}SO1 hardware orders without a job — shown individually.{% elif k == 'other' %}Invoices with neither a job nor a hardware order (help-desk contracts, staffing, sundry).{% elif k == 'credits' %}Credit memos and negative journals.{% elif k == 'backdated' %}Keyed after the invoice date, or posted into another period.{% else %}Journals posted to jobs' revenue.{% endif %}">{{ lbl }}</a>{% endfor %}
+    <span class="muted" style="margin:0 4px">·</span>
+    <select name="division" onchange="this.form.submit()" title="Division (the job's; 010 for hardware orders)."><option value="">any division</option>{% for d in divisions %}<option value="{{ d }}" {% if g.division == d %}selected{% endif %}>{{ d }}</option>{% endfor %}</select>
+    <select name="pm" onchange="this.form.submit()" title="The job's project manager."><option value="">any PM</option>{% for k, n in pms %}<option value="{{ k }}" {% if g.pm == k %}selected{% endif %}>{{ n }}</option>{% endfor %}</select>
+    <select name="user" onchange="this.form.submit()" title="Who keyed the document."><option value="">anyone</option>{% for k, n in users %}<option value="{{ k }}" {% if g.user == k %}selected{% endif %}>{{ n }}</option>{% endfor %}</select>
+    <input type="search" name="q" value="{{ q }}" placeholder="invoice #, customer, job, description, PO, order…" style="font:inherit;padding:5px 9px;border:1px solid var(--line-strong);border-radius:8px;min-width:260px" title="Matches the document number, customer, job number or title, description, customer PO, order number, who keyed it. Enter to apply.">
+    <input type="number" name="min" value="{% if min_abs %}{{ min_abs|floatformat:0 }}{% endif %}" placeholder="min $" style="font:inherit;padding:5px 9px;border:1px solid var(--line-strong);border-radius:8px;width:90px" title="Only documents whose revenue is at least this size either way.">
+    <button class="btn small" type="submit">Apply</button>
+    {% if filtered %}<a class="btn small" href="?{{ per.qs }}&basis={{ basis }}&by={{ by }}" title="Clear every filter, keep the window and grouping.">Reset</a>{% endif %}
+    <span style="margin-left:auto" class="row">
+      <a class="btn small" href="#" id="bl-expand" title="Open every group (remembered).">Expand all</a>
+      <a class="btn small" href="#" id="bl-collapse" title="Close every group (remembered).">Collapse all</a>
+      <a class="btn small" href="?{{ request.GET.urlencode }}&export=csv" title="Download the documents on screen with their group and job columns.">CSV</a>
+    </span>
+  </div>
+</form>
+
+<div class="card">
+  <div class="ledger-chips" id="blcols" style="margin:0 0 8px"><span class="dim">Columns:</span>
+    <span class="lchip" data-g="job" title="Division, PM and state of the job.">Job</span>
+    <span class="lchip" data-g="prog" title="Progress (PTT): % complete with its age, hours-based %.">Progress</span>
+    <span class="lchip" data-g="wip" title="WIP = earned − billed: contract, billed to date, earned, WIP.">WIP</span>
+    <span class="lchip" data-g="prof" title="Profitability: cost to date, GP% sold → EAC, EAC GP.">Profitability</span>
+    <span class="muted" style="margin-left:8px">job columns are today's figures, whichever window is shown · click a band heading to collapse it · your choice is remembered</span>
+    <span style="margin-left:auto" class="muted">{{ tot.n }} document{{ tot.n|pluralize }} · <b>{{ tot.revenue|money }}</b>{% if filtered %} <span class="warn-ink">· filtered — {{ kp.billed|money }} in the window</span>{% endif %}{% if kp.no_rollup %} · <span title="Documents older than the invoice-lines window: their total stands in for revenue.">{{ kp.no_rollup }} without lines</span>{% endif %}</span></div>
+  <div class="table-wrap freeze" id="blwrap">
+  <table class="data dense freeze" id="bltable"><thead>
+  <tr class="bands">{% for bc in band_cells %}<th class="band {{ bc.cls }} cb-{{ bc.key }}" colspan="{{ bc.span }}"{% if bc.key in 'job,prog,wip,prof' %} data-g="{{ bc.key }}" title="Click to collapse the {{ bc.label }} columns — bring them back with the Columns chips above the table."{% endif %}>{{ bc.label }}</th>{% endfor %}</tr>
+  <tr class="cols">{% for key, label, help, num, cls, band, bkey in cols %}<th class="{% if num %}num{% endif %} {{ cls }} cb-{{ bkey }} {% if key == sort_key %}sorted{% endif %}">{% sort_link request key label help num %}</th>{% endfor %}</tr></thead>
+  <tbody>
+  {% for grp in groups %}
+  <tr class="bl-g pay-group" data-g="{{ grp.id }}" title="Click to show or hide this group's documents.">
+    <td class="fz fz1"><span class="pay-caret" id="caret-{{ grp.id }}">▾</span>{% if grp.link %}<a href="{{ grp.link }}" onclick="event.stopPropagation()">{{ grp.label }}</a>{% else %}{{ grp.label }}{% endif %} <span class="muted" style="font-weight:400">· {{ grp.n }} doc{{ grp.n|pluralize }}{% if by != 'project' and grp.jobs_n %} · {{ grp.jobs_n }} job{{ grp.jobs_n|pluralize }}{% endif %}{% if by != 'customer' and grp.customers_n > 1 %} · {{ grp.customers_n }} customers{% endif %}</span></td>
+    <td class="fz fz2 trunc muted" style="font-weight:400" title="{% if by == 'person' %}{% else %}Who keyed this group's documents: {{ grp.by_label }}{% endif %}">{% if by == 'project' and grp.job %}<span class="tag {{ grp.job.lifecycle_state }}">{{ grp.job.lifecycle_state|state_label }}</span> {{ grp.job.division }}{% if grp.job.pm_name %} · {{ grp.job.pm_name }}{% endif %}{% elif by != 'person' %}{{ grp.by_label }}{% endif %}</td>
+    <td class="gs cb-entry" colspan="4" style="font-weight:400">{% if grp.backdated %}<span class="ar-chip neg" title="Documents keyed after their invoice date.">{{ grp.backdated }} back-dated</span>{% endif %}{% if grp.credits %} <span class="ar-chip" title="Credit memos in the group.">{{ grp.credits }} credit{{ grp.credits|pluralize }}</span>{% endif %}{% if grp.jrnl %} <span class="ar-chip" title="Journals posted to jobs' revenue.">{{ grp.jrnl }} journal{{ grp.jrnl|pluralize }}</span>{% endif %}{% if by == 'project' and grp.job and grp.job.cv %} <span class="ar-chip" title="Billed to date on the job against its contract value, and the PTT % complete.">job billed {{ grp.job.billed_pct|pct:0 }} of {{ grp.job.cv|money_k }}{% if grp.job.pm_pct != None %} · {{ grp.job.pm_pct|pct:0 }} done{% endif %}</span>{% endif %}</td>
+    <td class="num cb-entry"><b class="{% if grp.revenue < 0 %}neg{% endif %}">{{ grp.revenue|money }}</b></td>
+    <td class="num cb-entry muted">{{ grp.total|money }}</td>
+    <td colspan="{{ rest_span }}" class="bl-rest"></td>
+  </tr>
+  {% for r in grp.rows %}{% include "dashboard/_billing_row.html" with r=r g=grp hw=False %}{% endfor %}
+  {% if grp.hw %}
+  <tr class="bl-hw pay-group" data-g="{{ grp.id }}" data-hwg="{{ grp.id }}" title="Click to list the hardware invoices (fetched when you open the fold).">
+    <td class="fz fz1 pay-indent" style="font-weight:600"><span class="pay-caret bl-hwcaret">▸</span>010 hardware orders <span class="muted" style="font-weight:400">· {{ grp.hw_n }} invoice{{ grp.hw_n|pluralize }}</span></td>
+    <td class="fz fz2 trunc muted" style="font-weight:400" title="Who keyed them: {{ grp.hw_by_label }}">{{ grp.hw_by_label }}</td>
+    <td class="gs cb-entry muted" colspan="4" style="font-weight:400">SO1 sales-order invoices without a job — the CNET hardware stream</td>
+    <td class="num cb-entry"><b>{{ grp.hw_revenue|money }}</b></td>
+    <td class="num cb-entry muted">{{ grp.hw_total|money }}</td>
+    <td colspan="{{ rest_span }}" class="bl-rest"></td>
+  </tr>
+  {% endif %}
+  {% empty %}<tr><td colspan="{{ cols|length }}" class="empty">No billings in {{ per.label|lower }}{% if filtered %} match these filters — <a href="?{{ per.qs }}&basis={{ basis }}&by={{ by }}">reset them</a>{% else %} on this basis{% endif %}.</td></tr>{% endfor %}
+  </tbody>{% if groups %}<tfoot><tr>
+    <td class="fz fz1">Total · {{ tot.n }} document{{ tot.n|pluralize }}{% if tot.hw_n %} <span class="muted" style="font-weight:400">· {{ tot.hw_n }} hardware</span>{% endif %}</td>
+    <td class="fz fz2 muted" style="font-weight:400">{{ tot.groups }} group{{ tot.groups|pluralize }}{% if tot.jobs %} · {{ tot.jobs }} job{{ tot.jobs|pluralize }}{% endif %}</td>
+    <td class="gs cb-entry" colspan="4"></td>
+    <td class="num cb-entry {% if tot.revenue < 0 %}neg{% endif %}">{{ tot.revenue|money }}</td>
+    <td class="num cb-entry">{{ tot.total|money }}</td>
+    <td colspan="{{ rest_span }}" class="bl-rest"></td>
+  </tr></tfoot>{% endif %}</table>
+  </div>
+  <div class="note" style="margin-top:8px"><b>Billed</b> = the revenue a document posted (its lines on income accounts; a credit memo is negative); <b>Total</b> adds sales tax and customer deposits. <b>Entered</b> is the SL entry time (screen 40690 = sales-order invoicing, 08010 = AR Invoice &amp; Memo entry); a red <b>+Nd</b> tag = keyed N days after the invoice date; an amber period tag = posted into a period other than the invoice date's month. Journals are general-journal entries to a job's revenue account — part of the job's billed-to-date, not invoices; journal revenue not posted to any job is in the GL tie only. Job columns are the live WIP by Job figures (today), and <b>not on job yet</b> marks an invoice whose AR batch has not reached the project ledger.</div>
+</div>
+<style>
+  #bltable thead tr.bands th { top: 0; height: 22px; padding: 3px 7px; text-align: center; font-size: 10.5px; letter-spacing: .09em; color: var(--muted); background: #eef2f7; border-bottom: 1px solid var(--line-strong); }
+  #bltable thead tr.bands th.fz { text-align: left; z-index: 4; }
+  #bltable thead tr.cols th { top: 22px; }
+  #bltable th.gs, #bltable td.gs { border-left: 2px solid #d5dbe6; }
+  #bltable tfoot td { position: sticky; bottom: 0; z-index: 2; border-top: 2px solid var(--line-strong); }
+  #bltable tfoot td.fz { z-index: 3; }
+  #bltable td .muted { font-weight: 400; }
+  #bltable .fz1 { width: clamp(220px, 17vw, 360px); min-width: clamp(220px, 17vw, 360px); max-width: clamp(220px, 17vw, 360px); }
+  #bltable .fz2 { width: clamp(150px, 12vw, 260px); min-width: clamp(150px, 12vw, 260px); max-width: clamp(150px, 12vw, 260px); }
+  #bltable td .tag { padding: 1px 6px; font-size: 10.5px; }
+  #bltable td.pmcol { width: 62px; }
+  #bltable td.pmcol div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 62px; }
+  #bltable .bl-sub { font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #bltable span.age { font-weight: 400; font-size: 11px; }
+  #bltable span.age.slot { display: inline-block; width: 3.4em; text-align: right; margin-left: 4px; }
+  #bltable .pctslot { display: inline-block; width: 3.6em; text-align: right; margin-left: 4px; font-size: 11px; font-weight: 400; color: var(--muted); }
+  #bltable tr.bl-g td, #bltable tr.bl-hw td { background: #f2f5f9; font-weight: 600; border-top: 2px solid var(--line-strong); cursor: pointer; }
+  #bltable tr.bl-g td.fz, #bltable tr.bl-hw td.fz { background: #f2f5f9; }
+  #bltable tr.bl-hw td { background: #f7f9fc; border-top: 1px solid var(--line); }
+  #bltable tr.bl-hw td.fz { background: #f7f9fc; }
+  #bltable tr.bl-g:hover td, #bltable tr.bl-hw:hover td { background: #e9eef5; }
+  #bltable tr.bl-r { cursor: pointer; }
+  #bltable tr.bl-r td { vertical-align: top; }
+  #bltable tr.bl-jrnl td.fz { background: #fffaf0; }
+  #bltable tr.bl-x td { background: #fbfcfe; cursor: default; }
+  #bltable tr.pay-hidden { display: none; }
+  #bltable .pay-caret { display: inline-block; width: 14px; color: var(--muted); }
+  #bltable td.pay-indent { padding-left: 26px; }
+  #bltable.hide-job .cb-job, #bltable.hide-prog .cb-prog, #bltable.hide-wip .cb-wip, #bltable.hide-prof .cb-prof { display: none; }
+  #bltable thead tr.bands th[data-g] { cursor: pointer; }
+  #bltable thead tr.bands th[data-g]:hover { color: var(--ink); background: #e4e9f2; }
+  .btn.disabled { opacity: .45; pointer-events: none; }
+  .bl-panel { display: grid; grid-template-columns: 1.4fr 1fr 1.2fr; gap: 16px; align-items: start; white-space: normal; font-weight: 400; }
+  .bl-panel h4 { margin: 0 0 6px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .bl-panel table.data { font-size: 12px; }
+  .bl-panel table.data th, .bl-panel table.data td { position: static; }
+  @media (max-width: 1400px) { .bl-panel { grid-template-columns: 1fr 1fr; } }
+</style>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const wrap = document.getElementById('blwrap'), table = document.getElementById('bltable');
+  if (!wrap || !table) return;
+  // keep the table (and its horizontal scrollbar) inside the viewport; line the second frozen column up behind the first
+  function fit() {
+    const top = wrap.getBoundingClientRect().top + window.scrollY;
+    wrap.style.maxHeight = Math.max(320, window.innerHeight - top - 16) + 'px';
+    const fz1 = wrap.querySelector('tr.cols th.fz1');
+    if (fz1) wrap.querySelectorAll('.fz2').forEach(el => { el.style.left = fz1.offsetWidth + 'px'; });
+    const bands = wrap.querySelector('thead tr.bands');
+    if (bands) { const h = bands.getBoundingClientRect().height; wrap.querySelectorAll('thead tr.cols th').forEach(th => { th.style.top = h + 'px'; }); }
+  }
+  fit(); window.addEventListener('resize', fit);
+  // column bands (remembered per page: PCA.pref)
+  const GROUPS = ['job', 'prog', 'wip', 'prof'];
+  const state = Object.assign({job: true, prog: true, wip: true, prof: true}, PCA.pref('cols', {}) || {});
+  function applyCols() {
+    for (const g of GROUPS) table.classList.toggle('hide-' + g, !state[g]);
+    document.querySelectorAll('#blcols .lchip').forEach(c => c.classList.toggle('on', !!state[c.dataset.g]));
+    PCA.setPref('cols', state); fit();
+  }
+  document.querySelectorAll('#blcols .lchip').forEach(c => c.addEventListener('click', () => { state[c.dataset.g] = !state[c.dataset.g]; applyCols(); }));
+  table.querySelectorAll('thead tr.bands th[data-g]').forEach(th => th.addEventListener('click', () => { state[th.dataset.g] = false; applyCols(); }));
+  applyCols();
+  // groups: expand / collapse (the all-buttons are remembered); hardware folds: their rows are fetched on demand (~80% of
+  // all rows live in them) and their open state is remembered as one page-level choice
+  const hidePanels = tr => { const x = tr.nextElementSibling; if (x && x.classList.contains('bl-x')) x.hidden = true; };
+  let hwOpen = !!PCA.pref('hwopen', false);
+  const loaded = {};
+  function fetchHw(id) {   // id or 'all'; resolves once the rows sit under their fold rows
+    if (loaded[id]) return loaded[id];
+    const url = location.pathname + (location.search ? location.search + '&' : '?') + 'hwgroup=' + encodeURIComponent(id);
+    loaded[id] = fetch(url).then(r => r.text()).then(html => {
+      const tb = document.createElement('tbody'); tb.innerHTML = html;
+      const byG = {};
+      [...tb.querySelectorAll('tr.bl-hwrow')].forEach(tr => { (byG[tr.dataset.hw] = byG[tr.dataset.hw] || []).push(tr); });
+      for (const gid in byG) {
+        const fold = table.querySelector('tr.bl-hw[data-hwg="' + CSS.escape(gid) + '"]');
+        if (!fold || fold.dataset.loaded) continue;
+        let after = fold; byG[gid].forEach(tr => { after.after(tr); after = tr; bindRow(tr); });
+        fold.dataset.loaded = '1'; loaded[gid] = loaded[id];
+      }
+    });
+    return loaded[id];
+  }
+  function toggleGroup(id, open) {
+    const rows = table.querySelectorAll('tr.bl-r[data-g="' + CSS.escape(id) + '"], tr.bl-hw[data-hwg="' + CSS.escape(id) + '"]');
+    const show = open == null ? (rows[0] ? rows[0].classList.contains('pay-hidden') : true) : open;
+    rows.forEach(tr => {
+      if (tr.classList.contains('bl-hwrow')) { if (!show) { tr.classList.add('pay-hidden'); hidePanels(tr); } else if (hwOpen) tr.classList.remove('pay-hidden'); return; }
+      tr.classList.toggle('pay-hidden', !show); if (!show) hidePanels(tr);
+    });
+    const c = document.getElementById('caret-' + id); if (c) c.textContent = show ? '▾' : '▸';
+  }
+  function showHw(id, show) {
+    table.querySelectorAll('tr.bl-hwrow[data-hw="' + CSS.escape(id) + '"]').forEach(tr => { tr.classList.toggle('pay-hidden', !show); if (!show) hidePanels(tr); });
+    const h = table.querySelector('tr.bl-hw[data-hwg="' + CSS.escape(id) + '"] .bl-hwcaret'); if (h) h.textContent = show ? '▾' : '▸';
+  }
+  function toggleHw(id, open) {
+    const fold = table.querySelector('tr.bl-hw[data-hwg="' + CSS.escape(id) + '"]');
+    const isOpen = fold && fold.querySelector('.bl-hwcaret').textContent === '▾';
+    const show = open == null ? !isOpen : open;
+    if (show) fetchHw(id).then(() => showHw(id, true)); else showHw(id, false);
+    return show;
+  }
+  table.querySelectorAll('tr.bl-g').forEach(tr => tr.addEventListener('click', e => { if (e.target.closest('a')) return; toggleGroup(tr.dataset.g); }));
+  table.querySelectorAll('tr.bl-hw').forEach(tr => tr.addEventListener('click', e => { if (e.target.closest('a')) return; hwOpen = toggleHw(tr.dataset.hwg); PCA.setPref('hwopen', hwOpen); }));
+  const setAll = open => { table.querySelectorAll('tr.bl-g').forEach(tr => toggleGroup(tr.dataset.g, open)); PCA.setPref('expanded', open); };
+  document.getElementById('bl-expand').addEventListener('click', e => { e.preventDefault(); setAll(true); });
+  document.getElementById('bl-collapse').addEventListener('click', e => { e.preventDefault(); setAll(false); });
+  if (PCA.pref('expanded', true) === false) setAll(false);
+  else if (hwOpen && table.querySelector('tr.bl-hw')) fetchHw('all').then(() => table.querySelectorAll('tr.bl-hw').forEach(tr => showHw(tr.dataset.hwg, true)));
+  // detail panel under a document row (fetched once, cached)
+  const DOC_URL = '{% url "dashboard:finance_billings_doc" %}', PROJ = '/projects/', ORDER = '/sales/010/orders/';
+  const esc = t => String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  const money = (v, c) => v == null ? '—' : (v < 0 ? '-' : '') + '$' + Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: c ? 2 : 0, maximumFractionDigits: c ? 2 : 0 });
+  const ncols = table.querySelector('thead tr.cols').cells.length, cache = {};
+  function bindRow(tr) { tr.addEventListener('click', e => {
+    if (e.target.closest('a')) return;
+    let x = tr.nextElementSibling; const caret = tr.querySelector('.bl-caret');
+    if (x && x.classList.contains('bl-x')) { x.hidden = !x.hidden; caret.textContent = x.hidden ? '▸' : '▾'; return; }
+    x = document.createElement('tr'); x.className = 'bl-x'; x.innerHTML = '<td colspan="' + ncols + '"><div class="empty">loading…</div></td>';
+    tr.after(x); caret.textContent = '▾';
+    const q = tr.dataset.jrnl ? 'jrnl=' + encodeURIComponent(tr.dataset.jrnl)
+      : 'ref=' + encodeURIComponent(tr.dataset.ref) + '&type=' + encodeURIComponent(tr.dataset.type) + '&cust=' + encodeURIComponent(tr.dataset.cust);
+    const render = res => { x.firstElementChild.innerHTML = panel(res); };
+    if (cache[q]) return render(cache[q]);
+    fetch(DOC_URL + '?' + q).then(r => r.json()).then(res => { cache[q] = res; render(res); }).catch(() => x.firstElementChild.innerHTML = '<div class="empty">failed to load</div>');
+  }); }
+  table.querySelectorAll('tr.bl-r').forEach(bindRow);
+  function panel(r) {
+    if (r.kind === 'jrnl') {
+      return '<div class="bl-panel"><div><h4>Journal entry</h4><div><b>' + esc(r.ref) + '</b> line ' + esc(r.detail) + ' · ' + money(r.amt, true) + '</div>' +
+        '<div class="muted" style="font-size:12px;margin-top:4px">' + esc(r.desc || '(no description)') + '</div>' +
+        '<div class="muted" style="font-size:12px;margin-top:4px">GL ' + esc(r.acct) + (r.sub ? ' · ' + esc(r.sub) : '') + ' · period ' + esc(r.period) + ' · dated ' + esc(r.date) + (r.posted ? ' · posted ' + esc(r.posted) : '') + '</div>' +
+        '<div class="muted" style="font-size:12px;margin-top:4px">entered ' + esc(r.entered) + ' by ' + esc(r.by) + '</div></div>' +
+        '<div><h4>Job</h4><a href="' + PROJ + encodeURIComponent(r.project.cpn) + '/"><b>' + esc(r.project.disp) + '</b></a> ' + esc(r.project.title) + (r.task ? ' <span class="muted">· task ' + esc(r.task) + '</span>' : '') +
+        '<div class="muted" style="font-size:12px;margin-top:4px">A general-journal posting to the job\'s REVENUE account — it is inside the job\'s billed-to-date and the period\'s ledger revenue on the WIP by Job page, but it is not an invoice: nothing was sent to the customer.</div></div></div>';
+    }
+    const lines = r.lines.filter(l => l.kind !== 'tax'), tax = r.lines.filter(l => l.kind === 'tax');
+    let a = '<div class="bl-panel"><div><h4>What was billed</h4>';
+    if (lines.length) {
+      a += '<table class="data dense"><thead><tr><th>Line</th><th>Job · task</th><th>GL</th><th class="num">Qty × price</th><th class="num">Amount</th></tr></thead><tbody>';
+      lines.forEach(l => { a += '<tr><td>' + esc(l.desc || l.item || '—') + (l.item && l.desc ? ' <span class="muted mono">' + esc(l.item) + '</span>' : '') + (l.shipper ? ' <span class="muted" title="Shipper">· ship ' + esc(l.shipper) + '</span>' : '') + '</td><td class="muted">' + (l.project ? '<span class="mono">' + esc(l.project) + '</span>' + (l.task ? ' · ' + esc(l.task) : '') : '') + '</td><td class="muted mono" title="' + (l.kind === 'rev' ? 'Income account — revenue' : l.kind === 'dep' ? 'Customer deposit / deferred — not revenue' : 'Other account') + '">' + esc(l.acct) + (l.sub ? '·' + esc(l.sub) : '') + (l.kind === 'dep' ? ' <span class="tag moderate">deferred</span>' : l.kind === 'oth' ? ' <span class="tag">other</span>' : '') + '</td><td class="num muted">' + (l.qty ? l.qty.toLocaleString() + ' × ' + money(l.price, true) : '') + '</td><td class="num">' + money(l.amt, true) + '</td></tr>'; });
+      if (tax.length) a += '<tr><td class="muted" colspan="4">sales tax (20500)</td><td class="num muted">' + money(tax.reduce((s, l) => s + (l.amt || 0), 0), true) + '</td></tr>';
+      a += '</tbody><tfoot><tr><td colspan="4">Revenue ' + money(r.revenue, true) + (r.deposits ? ' · deposits ' + money(r.deposits, true) : '') + (r.other ? ' · other ' + money(r.other, true) : '') + ' · total</td><td class="num">' + money(r.total, true) + '</td></tr></tfoot></table>';
+    } else a += '<div class="empty">no invoice lines on record (older than the lines window)</div>';
+    a += '</div><div><h4>Payments on this document</h4>';
+    if (r.apps.length) {
+      let run = r.total || 0;
+      a += '<table class="data dense"><thead><tr><th>Applied</th><th>Payment</th><th class="num">Amount</th><th class="num">Left</th></tr></thead><tbody>';
+      r.apps.forEach(p => { run -= (p.amt || 0) + (p.disc || 0); a += '<tr><td>' + esc(p.d) + '</td><td class="mono">' + esc(p.ref) + (p.disc ? ' <span class="muted">disc ' + money(p.disc, true) + '</span>' : '') + '</td><td class="num">' + money(p.amt, true) + '</td><td class="num muted">' + money(run, true) + '</td></tr>'; });
+      a += '</tbody></table>';
+    } else a += '<div class="empty">no payment applied yet</div>';
+    a += '<div class="muted" style="margin-top:6px;font-size:12px">Balance <b>' + money(r.bal, true) + '</b>' + (r.bal ? ' · <a href="/finance/ar/?q=' + encodeURIComponent(r.ref) + '">open on the Receivables page</a>' : '') + ' · dated ' + esc(r.doc_date) + (r.due ? ' · due ' + esc(r.due) : '') + (r.terms ? ' · terms ' + esc(r.terms) : '') + (r.po ? ' · PO ' + esc(r.po) : '') + (r.sp ? ' · ' + esc(r.sp) : '') + '</div>';
+    a += '</div><div><h4>Entry &amp; job</h4>';
+    a += '<div class="muted" style="font-size:12px">Keyed <b>' + esc(r.entered) + '</b> by <b>' + esc(r.by) + '</b> <span class="mono">(' + esc(r.login) + ')</span> on screen ' + esc(r.screen) + (r.screen === '40690' ? ' (sales-order invoicing)' : r.screen === '08010' ? ' (AR Invoice &amp; Memo entry)' : '') + (r.batch ? ' · batch ' + esc(r.batch) : '') + ' · period ' + esc(r.period) + (r.edited ? ' · <span class="warn-ink">edited ' + esc(r.edited.at) + ' by ' + esc(r.edited.by) + '</span>' : '') + '</div>';
+    if (r.project) {
+      const p = r.project;
+      a += '<div style="margin-top:6px"><a href="' + PROJ + encodeURIComponent(p.cpn) + '/"><b>' + esc(p.disp) + '</b></a> ' + esc(p.title) + (p.task ? ' <span class="muted">· task ' + esc(p.task) + '</span>' : '') + '</div>';
+      if (p.ledger) a += '<div class="muted" style="font-size:12px;margin-top:4px">' + (p.ledger.missing ? '<span class="warn-ink">Not yet on the project ledger</span> — the AR batch has not been released to the job; the WIP page\'s billed-to-date does not include it.' : 'On the project ledger since ' + esc(p.ledger.at) + ' (' + esc(p.ledger.by) + ', period ' + esc(p.ledger.period) + ')' + (Math.abs((p.ledger.amt || 0) - (r.revenue || 0)) > 0.01 ? ' — ledger revenue ' + money(p.ledger.amt, true) : '')) + '</div>';
+      if (p.others.length) { a += '<div class="muted" style="font-size:12px;margin-top:6px">Other billings on this job (latest first):</div><table class="data dense"><tbody>'; p.others.forEach(o => { a += '<tr><td class="mono">' + esc(o.ref) + (o.type !== 'IN' ? ' ' + esc(o.type) : '') + '</td><td class="muted">' + esc(o.date) + (o.entered && o.entered !== o.date ? ' <span title="keyed">(' + esc(o.entered) + ')</span>' : '') + ' · ' + esc(o.by) + '</td><td class="num">' + money(o.rev, true) + '</td><td class="num muted">' + (o.bal ? money(o.bal, true) + ' open' : 'paid') + '</td></tr>'; }); a += '</tbody></table>'; }
+    }
+    if (r.order) a += '<div style="margin-top:6px">' + (r.order.cnet ? '<a href="' + ORDER + encodeURIComponent(r.order.cnet) + '/"><b>Order ' + esc(r.order.nbr) + '</b></a> · CNET #' + esc(r.order.cnet) : '<b>Order ' + esc(r.order.nbr) + '</b>') + (r.order.so_type ? ' <span class="ar-chip">' + esc(r.order.so_type) + '</span>' : '') + '</div>';
+    if (!r.project && !r.order) a += '<div class="muted" style="font-size:12px;margin-top:6px">No job or order on this document' + (r.desc ? ' — "' + esc(r.desc) + '"' : '') + '.</div>';
+    return a + '</div></div>';
+  }
+  // click-to-pin definitions (hover titles remain)
+  let tipEl = null; const hide = () => { if (tipEl) { tipEl.remove(); tipEl = null; } };
+  document.addEventListener('click', e => {
+    const t = e.target.closest('th[title], .ar-chip[title], .kpi .label[title], .tag[title], td[title].cb-entry, td[title].cb-prog, td[title].cb-wip, td[title].cb-prof');
+    if (!t || e.target.closest('a, button, input, select, tr.bl-r, tr.bl-g, tr.bl-hw') && !e.target.closest('th')) { hide(); return; }
+    const text = t.getAttribute('title'); if (!text) { hide(); return; }
+    hide(); tipEl = document.createElement('div'); tipEl.className = 'click-tip'; tipEl.textContent = text; document.body.appendChild(tipEl);
+    const r = t.getBoundingClientRect(); tipEl.style.left = Math.min(r.left, window.innerWidth - 380) + 'px'; tipEl.style.top = (r.bottom + window.scrollY + 6) + 'px';
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') hide(); });
+})();
+</script>
+{% endblock %}

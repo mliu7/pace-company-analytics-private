@@ -1,0 +1,416 @@
+{% extends "dashboard/base.html" %}{% load static humanize pca %}
+{% block title %}Daily Financial Snapshot · Pace Company Analytics{% endblock %}
+{% block content %}
+{% if not snap %}
+<div class="card empty">No finance snapshot yet. Run <code>python manage.py refresh_finance</code> (about 15 seconds) or use the refresh button after the first pipeline run.</div>
+{% else %}
+<div class="topbar">
+  <div class="title"><h1>Daily Financial Snapshot</h1>
+    <small>Company-wide finance from Dynamics SL, read-only — the always-on version of the end-of-day email. Every number is hover-defined; click any aging cell, month figure or list row for the documents behind it.</small></div>
+  <div class="row">
+    {% if is_latest %}<span class="pill info" title="When the open AR/AP documents and GL balances were last pulled from SL.">as of {{ snap.as_of|date:"M j, g:i A" }}</span>
+    {% else %}<span class="pill info" title="{% if snap.reconstructed %}This day was reconstructed from document history, not a live pull: AR/AP aging totals and WIP are stored; balance sheet, cash and P&L are rolled back from today's ledger where the posting window allows.{% else %}A live pull stored on that day — every headline figure as it was.{% endif %}">{{ snap.snapshot_date|date:"D M j, Y" }} · {% if snap.reconstructed %}reconstructed history{% else %}stored live snapshot{% endif %}</span>{% endif %}
+    {% if prev_bd %}<span class="pill" title="The report compares day-over-day movement against this previous business day (latest weekday with posting activity).">prev business day {{ prev_bd|date:"D M j" }}</span>{% endif %}
+    {% if is_latest %}<form method="post" action="{% url 'dashboard:finance_refresh' %}" style="display:inline">{% csrf_token %}<button class="btn small primary" title="Pull fresh GL / AR / AP from SL and rebuild today's snapshot (~15 s).">Refresh now</button></form>{% endif %}
+  </div>
+</div>
+<div class="card tight" style="margin-bottom:12px">
+  <form method="get" class="row" style="gap:8px;align-items:center">
+    {% if daynav.prev %}<a class="btn small" href="?date={{ daynav.prev|date:'Y-m-d' }}" title="Previous stored day ({{ daynav.prev|date:'D M j' }}).">‹ {{ daynav.prev|date:"M j" }}</a>{% else %}<span class="btn small" style="opacity:.4">‹</span>{% endif %}
+    <input type="date" name="date" value="{{ snap.snapshot_date|date:'Y-m-d' }}" min="{{ daynav.first|date:'Y-m-d' }}" max="{{ daynav.last|date:'Y-m-d' }}" onchange="this.form.submit()" style="font:inherit;padding:5px 8px;border:1px solid var(--line-strong);border-radius:8px" title="Jump to any stored day ({{ daynav.first|date:'M j, Y' }} → {{ daynav.last|date:'M j, Y' }}). Days without a stored snapshot fall back to the nearest earlier one.">
+    {% if daynav.next %}<a class="btn small" href="?date={{ daynav.next|date:'Y-m-d' }}" title="Next stored day ({{ daynav.next|date:'D M j' }}).">{{ daynav.next|date:"M j" }} ›</a>{% else %}<span class="btn small" style="opacity:.4">›</span>{% endif %}
+    {% if not is_latest %}<a class="btn small primary" href="{% url 'dashboard:finance_daily' %}">Today</a>{% endif %}
+    <span class="note" style="margin-left:6px">{% if daynav.notice %}<span class="warn-ink">{{ daynav.notice }}</span> · {% endif %}{% if is_latest %}Use the arrows or the date box to see the report as it stood on any stored day.{% elif snap.reconstructed %}What is shown for this day: AR/AP aging totals and WIP as stored{% if bs %}, balance sheet, cash and P&L rolled back from today's ledger{% endif %}{% if not ap_due %}; today's document lists (AP by type, cash due, largest customers and invoices) were not captured for it{% endif %}. Posting drill-downs stop at this day; document lists and balance-sheet breakdowns open today's and say so.{% else %}Every figure is as it was stored on this day. Posting drill-downs stop at this day; document lists and balance-sheet breakdowns open today's and say so.{% endif %}</span>
+  </form>
+</div>
+
+<div class="grid four" style="margin-bottom:12px">
+  <div class="card tight">
+    <h2>Cash &amp; credit <small>GL book basis{% if bs.source == 'rollback' %} · rolled back{% endif %}</small></h2>
+    {% if bs %}<dl class="kv dense">
+      <dt title="GL 10250 Business Checking — book balance (bank balance minus float; SL does not know the bank's own balance).">Checking (book)</dt><dd class="{{ bs.cash_checking|posneg }}">{{ bs.cash_checking|money }}</dd>
+      <dt title="GL 10400 BMO Harris payroll account.">Payroll acct</dt><dd>{{ bs.cash_payroll|money }}</dd>
+      <dt title="GL 10350 BMO money-market account. Matched the finance email to the penny on 7/6/26.">Money market</dt><dd>{{ bs.cash_mma|money }}</dd>
+      <dt title="Book cash across checking, payroll, money market and petty cash.">Total book cash</dt><dd><b>{{ cash_total|money }}</b></dd>
+      <dt title="GL 20005/20007 credit-line liability balance per the ledger. The bank portal's live 'line used' figure can differ — enter it below when needed.">Credit line (GL)</dt><dd>{{ bs.credit_line_gl|money }}</dd>
+      <dt title="GL 12000–12010 inventory accounts.">Inventory (GL)</dt><dd>{{ bs.inventory_gl|money }}</dd>
+    </dl>{% else %}<div class="empty" style="padding:10px 0">Not captured for this day: cash balances were not stored (reconstructed history) and the day is outside the GL posting window, so they cannot be rolled back.</div>{% endif %}
+    <div style="border-top:1px solid var(--line);margin:8px 0 6px"></div>
+    {% if bank %}
+    <dl class="kv dense">
+      <dt title="Typed in manually — the bank portal balance is not in SL.">Bank checking</dt><dd>{{ bank.checking_bank_balance|money }}</dd>
+      <dt title="Outstanding checks not yet cleared — manual entry from the bank portal.">Float</dt><dd>{{ bank.float_amount|money }}</dd>
+      <dt title="Borrowing-base availability from the bank portal — manual entry.">BBase available</dt><dd>{{ bank.borrowing_base_available|money }}</dd>
+      <dt title="Credit line drawn per the bank portal — manual entry.">Line used (bank)</dt><dd>{{ bank.credit_line_used|money }}</dd>
+    </dl>
+    <div class="note">bank figures entered {{ bank.entry_date|date:"M j" }}{% if bank_stale %} <span class="tag high">stale</span>{% endif %}
+      {% if is_latest %}· <a href="#" onclick="document.getElementById('bankmodal').style.display='flex';return false">update</a>{% endif %}</div>
+    {% if bank.payroll_note %}<div class="note" style="margin-top:4px" title="Payroll changes noted with the bank figures.">Payroll: {{ bank.payroll_note }}</div>{% endif %}
+    {% elif is_latest %}
+    <div class="note">Bank-portal figures (bank balance, float, borrowing base, line used) are not in SL.
+      <a href="#" onclick="document.getElementById('bankmodal').style.display='flex';return false">Enter today's manually</a> — 30 seconds, optional.</div>
+    {% else %}<div class="note">No bank-portal figures were entered for this day.</div>
+    {% endif %}
+  </div>
+  <div class="card tight">
+    <h2>Balance sheet <small>{% if bs.source == 'rollback' %}today's ledger rolled back to this day{% else %}live GL · to the penny{% endif %}</small></h2>
+    {% if bs %}<dl class="kv dense">
+      <dt title="All 1A asset accounts, current fiscal year through today. Click the figure for what makes it up.">Total assets</dt><dd><b><a href="#" class="liab-link" data-ledger-open="assets" title="Click for what makes up this number — cash, receivables, inventory and jobs in process, fixed assets — with AR by customer, ledger activity and a 20-month trend.">{{ bs.assets|money }}</a></b> {% if deltas.assets %}<span class="chip {{ deltas.assets|posneg }}">{{ deltas.assets|signed_money }}</span>{% endif %}</dd>
+      <dt title="2L accounts 2xxxx (payables, accruals, credit line, deposits, deferred revenue). Click the figure for what makes it up.">Total liabilities</dt><dd><a href="#" class="liab-link" data-ledger-open="liabilities" title="Click for what makes up this number — by group and account, with AP by vendor, ledger activity and a 20-month trend.">{{ bs.liabilities|money }}</a> {% if deltas.liabilities %}<span class="chip {{ deltas.liabilities|posneg_inv }}">{{ deltas.liabilities|signed_money }}</span>{% endif %}</dd>
+      <dt title="Equity accounts 3xxxx excluding 39999: common stock, paid-in capital, retained earnings, tax distributions. Matched the finance email exactly.">Total equity</dt><dd>{{ bs.equity|money }}</dd>
+      <dt title="Account 39999 — SL maintains year-to-date net income in real time with every posting. Billed-basis: revenue counts only when invoiced, so WIP swings are NOT in this number — see the adjusted line below.">Net income YTD</dt><dd class="{{ bs.net_income_ytd|posneg }}">{{ bs.net_income_ytd|money }} {% if deltas.net_income_ytd %}<span class="chip {{ deltas.net_income_ytd|posneg }}">{{ deltas.net_income_ytd|signed_money }}</span>{% endif %}</dd>
+      {% if ni_adjusted != None %}<dt title="Net income YTD plus PCA's WIP change since the last month the accountants closed{% if wip_close_date %} ({{ wip_close_date|date:'M j' }}){% endif %}: {{ wip_ytd_delta|signed_money }}{% if wip_open_parts|length > 1 %} = {% for p in wip_open_parts %}{{ p.label }} {{ p.delta|signed_money }}{% if not forloop.last %} + {% endif %}{% endfor %}{% endif %}. A closed month already carries its WIP inside COGS (the accountants book it at every month-end, GL 50701), so only the months not yet closed are added; adding the full year-to-date swing would double count. The monthly parts can see-saw — month-end invoices are dated into the old month while the PMs' month-end % updates are keyed in the new one — so read the total since the close, not one part. This is the percentage-of-completion view of the year.">NI + WIP change (adj.)</dt><dd class="{{ ni_adjusted|posneg }}"><b>{{ ni_adjusted|money }}</b> <span class="chip {{ wip_ytd_delta|posneg }}" title="PCA's WIP change since the last accountant close{% if wip_close_date %} on {{ wip_close_date|date:'M j' }}{% endif %} — every month not yet closed, added together.">ΔWIP since close{% if wip_close_date %} {{ wip_close_date|date:'M j' }}{% endif %} {{ wip_ytd_delta|signed_money }}</span>{% if wip_open_parts|length > 1 %} <span class="muted" style="font-size:11px;white-space:nowrap" title="The parts: each month not yet closed, month-end to month-end (the current month to the latest snapshot).">{% for p in wip_open_parts %}{{ p.label }} <span class="{{ p.delta|posneg }}">{{ p.delta|signed_money }}</span>{% if not forloop.last %} · {% endif %}{% endfor %}</span>{% endif %}</dd>{% endif %}
+      <dt title="The daily email's 'Net working Capital' line is Assets − Liabilities — which is really equity + YTD net income. Shown for continuity with that report.">Assets − liabilities</dt><dd>{{ bs.assets|sub_money:bs.liabilities }}</dd>
+      <dt title="True net working capital: current assets (cash, receivables, inventory, prepaids — 1A accounts below 15000) minus all liabilities (Pace carries no long-term debt besides small capital leases).">Working capital (true)</dt><dd><b>{{ bs.working_capital|money }}</b></dd>
+    </dl>
+    <div class="note" title="Assets − liabilities − equity − net income. Zero means the ledger copy is internally consistent.{% if bs.source == 'rollback' %} Rolled-back days hold equity at today's figure (equity postings are outside the posting window), so a non-zero gap here is the equity movement since this day.{% endif %}">identity check A − L − E − NI = {{ bs.identity_gap|floatformat:2 }}</div>
+    {% else %}<div class="empty" style="padding:10px 0">Not captured for this day: balance-sheet figures were not stored (reconstructed history) and the day is outside the GL posting window ({{ daynav.last|date:"M j" }} minus ~93 days), so they cannot be rolled back.</div>{% endif %}
+  </div>
+  <div class="card tight">
+    <h2>Ratios <small>balance-sheet health</small></h2>
+    <dl class="kv dense">
+      {% if bs %}<dt title="Total liabilities ÷ total assets. Bands: under 0.40 good (green) · 0.40–0.55 normal (blue) · 0.55–0.70 elevated (amber) · above 0.70 high (red).">Debt-to-assets</dt>
+      <dd><b>{{ ratios.debt_to_assets|floatformat:2 }}</b> <span class="tag {{ ratio_status.debt_to_assets.css }}">{{ ratio_status.debt_to_assets.label }}</span></dd>
+      <dt title="(Assets − liabilities) ÷ assets. Bands: under 30% weak (red) · 30–45% adequate (amber) · 45–55% solid (blue) · above 55% strong (green).">Equity ratio</dt>
+      <dd><b>{{ ratios.equity_ratio|pct:0 }}</b> <span class="tag {{ ratio_status.equity_ratio.css }}">{{ ratio_status.equity_ratio.label }}</span></dd>
+      <dt title="Assets ÷ equity (excluding current-year income). Bands: under 2.0 low risk (green) · 2.0–2.5 manageable (blue) · 2.5–3.0 moderate (amber) · above 3.0 high (red).">Leverage</dt>
+      <dd><b>{{ ratios.leverage|floatformat:2 }}</b> <span class="tag {{ ratio_status.leverage.css }}">{{ ratio_status.leverage.label }}</span></dd>{% else %}<dt class="muted">Balance-sheet ratios</dt><dd class="muted">not available for this day</dd>{% endif %}
+      <dt title="Over-90-day AR ÷ total AR. Bands: under 10% good (green) · 10–20% monitor (amber) · above 20% high (red).">Over-90 AR share</dt>
+      <dd><b>{{ ratios.over90_pct|pct:0 }}</b> <span class="tag {{ ratio_status.over90_pct.css }}">{{ ratio_status.over90_pct.label }}</span></dd>
+      <dt title="Open AP ÷ open AR — how much of the receivable book is already owed out. Bands: under 60% good (green) · 60–75% watch (blue) · 75–90% tight (amber) · above 90% strained (red).">AP / AR</dt>
+      <dd><b>{{ ratios.ap_ar|pct:0 }}</b> <span class="tag {{ ratio_status.ap_ar.css }}">{{ ratio_status.ap_ar.label }}</span></dd>
+    </dl>
+  </div>
+  <div class="card tight">
+    <h2>AR / AP <small>open documents</small></h2>
+    <dl class="kv dense">
+      <dt title="All open AR: invoices + debit memos minus credit memos and unapplied payments.">AR total</dt>
+      <dd><b>{{ snap.ar_total|money }}</b> {% if deltas.ar_total %}<span class="chip {{ deltas.ar_total|posneg }}">{{ deltas.ar_total|signed_money }}</span>{% endif %}</dd>
+      <dt title="All open AP vouchers + prepayments minus debit adjustments.">AP total</dt>
+      <dd>{{ snap.ap_total|money }} {% if deltas.ap_total %}<span class="chip {{ deltas.ap_total|posneg_inv }}">{{ deltas.ap_total|signed_money }}</span>{% endif %}</dd>
+      <dt title="AR minus AP — the email's 'Net AR Exposure after AP'.">Net AR after AP</dt><dd><b>{{ ratios.net_exposure|money }}</b></dd>
+      <dt title="Open AR more than 90 days past due. The change chip compares to the previous day, like the email's 'Change' line.">AR over 90 days</dt>
+      <dd class="neg">{{ snap.ar_over90|money }} {% if deltas.ar_over90 %}<span class="chip {{ deltas.ar_over90|posneg_inv }}">{{ deltas.ar_over90|signed_money }}</span>{% endif %}</dd>
+      <dt title="Net credit memos + unapplied customer payments sitting on the book (they reduce AR).">Credits / unapplied</dt><dd>{{ snap.ar_credits|money }}</dd>
+      <dt title="Invoices entered in SL but not yet released{% if pending_count != None %} ({{ pending_count }} documents){% endif %}. Click to list them.">Pending (unreleased)</dt>
+      <dd><a href="#" class="drill" data-kind="ar_pending" data-title="Pending (unreleased) AR invoices">{{ snap.ar_pending|money }}</a></dd>
+    </dl>
+  </div>
+</div>
+
+{% if snap.wip_net != None %}
+<div class="card tight wip-strip" style="margin-bottom:12px">
+  <div class="row" style="align-items:center;gap:18px;flex-wrap:wrap">
+    <div title="Over/under billing on open jobs — the company WIP formula: contract value (SL) × PTT % complete − billed to date (SL project ledger), summed per job. Positive = underbilled: revenue earned but not yet billed — money waiting to be invoiced (it shows up first as cost and AP). The accountants' month-end entry (GL 50701) carries their adjusted figure; this is the raw formula on live data. Population: open jobs with a contract value, all divisions, excluding internal, service/T&M and staffing."><b>WIP · billing position</b> <span class="muted">open jobs</span></div>
+    <div><a href="#" class="drill" data-kind="wip" data-side="under" data-title="Underbilled jobs — earned ahead of billings" style="text-decoration:none"><span class="muted" title="Jobs where earned (CV × PTT %) exceeds billings — work done, not yet invoiced. Click for the jobs.">Underbilled</span> <b class="pos">{{ snap.wip_underbilled|money }}</b> <span class="muted">({{ wip_meta.under_jobs }})</span></a></div>
+    <div><a href="#" class="drill" data-kind="wip" data-side="over" data-title="Overbilled jobs — billed ahead of earned progress" style="text-decoration:none"><span class="muted" title="Jobs billed ahead of earned progress. Click for the jobs.">Overbilled</span> <b class="neg">{{ snap.wip_overbilled|money }}</b> <span class="muted">({{ wip_meta.over_jobs }})</span></a></div>
+    <div title="Underbilled minus overbilled — the company net WIP. Positive = revenue earned and waiting to be billed.">
+      <span class="muted">Net</span> <b class="{{ snap.wip_net|posneg }}" style="font-size:16px">{{ snap.wip_net|signed_money }}</b>
+      {% if wip_changes.day %}<span class="chip {{ wip_changes.day.net|posneg }}" title="Change vs {{ wip_changes.day.date|date:'D M j' }}.">{{ wip_changes.day.net|signed_money }} day</span>{% endif %}
+      {% if wip_changes.mtd %}<span class="chip {{ wip_changes.mtd.net|posneg }}" title="Change month-to-date (vs {{ wip_changes.mtd.date|date:'M j' }}).">{{ wip_changes.mtd.net|signed_money }} MTD</span>{% endif %}
+    </div>
+    {% if wip_meta.net_cost != None %}<div class="muted" title="Secondary view: the cost-vs-billings columns from PTT's WIP report (costs in excess of billings with contract/budget caps). It ignores margin on work performed, so it understates true WIP — reference only.">cost basis {{ wip_meta.net_cost|signed_money }}</div>{% endif %}
+    <a href="#" class="drill btn small" data-kind="wip" data-title="WIP by job — CV × PTT % − billed">all jobs ({{ wip_meta.jobs }})</a>
+    {% if wip_sa.n %}<a href="#" class="drill btn small" data-kind="wip" data-side="sa" data-title="Service agreements — outside WIP by rule" title="Service agreements (jobs titled SA…) bill on a schedule, so contract × PTT % − billed says nothing about earned work. They are left out of every WIP figure on this page and on the WIP by Job page; this lists them. If the formula were applied it would add {{ wip_sa.would_be|signed_money }} — it is not.">excl. {{ wip_sa.n }} service agreement{{ wip_sa.n|pluralize }} · {{ wip_sa.cv|money_k }} contract · {{ wip_sa.billed|money_k }} billed</a>{% endif %}
+    <a href="#" class="btn small" id="wiptoggle" onclick="wipDetails();return false">Details ▾</a>
+    <div class="chart" style="height:52px;flex:0 0 340px;width:340px;margin-left:auto" title="Net WIP, last 180 days. Green above zero = underbilled (money waiting to be billed); red below = billed ahead of work. Hover for daily values."><canvas id="c_wip"></canvas></div>
+  </div>
+  <div id="wipdetail" style="display:none;margin-top:12px;border-top:1px solid var(--line);padding-top:12px">
+    <div class="row" style="gap:14px;flex-wrap:wrap;margin-bottom:10px">
+      {% for key, label in wip_window_labels %}{% with c=wip_changes|getitem:key %}{% if c %}
+      <div class="wip-chip" title="Net WIP change since {{ c.date|date:'D M j' }} (the last snapshot before the window). Underbilled moved {{ c.under|signed_money }}, overbilled {{ c.over|signed_money }}.">
+        <div class="label">{{ label }} <span class="muted">since {{ c.date|date:"M j" }}</span></div>
+        <div class="val {{ c.net|posneg }}">{{ c.net|signed_money }}</div>
+        <div class="sub muted">under {{ c.under|signed_money }} · over {{ c.over|signed_money }}</div>
+      </div>
+      {% endif %}{% endwith %}{% endfor %}
+    </div>
+    <div class="chart" style="height:200px;margin-bottom:12px" title="Underbilled, overbilled and net WIP, daily. Shaded region of the net line: green above zero (underbilled — money waiting), red below."><canvas id="c_wipbig"></canvas></div>
+    <div class="grid" style="grid-template-columns:1fr 1.3fr">
+      <div>
+        <h3 title="The open jobs carrying the largest WIP positions right now (by absolute value). Share = the job's WIP relative to the company net.">Biggest contributors</h3>
+        <table class="data dense"><thead><tr><th>Project</th><th>Customer</th><th class="num" title="PTT % complete.">%</th><th class="num" title="Billed ÷ contract value.">Billed/CV</th><th class="num" title="CV × % − billed. Positive = underbilled.">WIP</th><th class="num">Share</th></tr></thead><tbody>
+        {% for j in wip_contributors %}<tr>
+          <td class="trunc fluid" style="width:44%"><a href="/projects/{{ j.cpn }}/" title="{{ j.title }}">{{ j.display }}</a> <span class="muted">{{ j.title }}</span></td>
+          <td class="trunc fluid" style="width:24%" title="{{ j.customer }}">{{ j.customer|default:"—" }}</td>
+          <td class="num muted">{{ j.pct|pct:0 }}</td>
+          <td class="num muted">{% if j.cv %}{% widthratio j.billed j.cv 100 %}%{% endif %}</td>
+          <td class="num {{ j.wip|posneg }}"><b>{{ j.wip|signed_money }}</b></td>
+          <td class="num muted">{{ j.share|pct:0 }}</td></tr>{% endfor %}
+        </tbody></table>
+        <a class="h3link" href="{% url 'dashboard:finance_wip' %}?sort=-abs_wip" title="The full WIP table: every job in the population with contract, PTT % (and how old the entry is, by whom), earned, billed, WIP, the change over the chosen period split into earned vs billed, cost and hours — any past month or year, filterable and sortable.">All {{ wip_meta.jobs }} jobs by WIP size → full WIP table</a>
+      </div>
+      <div>
+        <h3 title="Jobs that moved the WIP the most. Each change is split into its two drivers: earned progress (PTT % moved or CV changed) and billing (invoices posted). A big negative billing driver with flat earned = the job finally billed.">Biggest movers</h3>
+        <table class="data dense"><thead><tr><th>Project</th><th class="num" title="WIP now.">WIP</th><th class="num" title="Change vs the previous day.">Δ day</th><th class="num" title="Change week-to-date.">Δ WTD</th><th class="num" title="Change month-to-date.">Δ MTD</th><th title="What drove the month-to-date change: earned progress vs billings.">MTD driver</th></tr></thead><tbody>
+        {% for m in wip_movers %}<tr>
+          <td class="trunc fluid" style="width:34%"><a href="/projects/{{ m.cpn }}/" title="{{ m.title }}">{{ m.display }}</a> <span class="muted">{{ m.title }}</span>{% if m.closed_or_excluded %} <span class="tag" title="No longer in the open WIP population (closed or reclassified) — its WIP went to zero.">left</span>{% endif %}</td>
+          <td class="num {{ m.wip|posneg }}">{{ m.wip|signed_money }}</td>
+          <td class="num {{ m.day|posneg }}">{{ m.day|signed_money }}</td>
+          <td class="num {{ m.wtd|posneg }}">{{ m.wtd|signed_money }}</td>
+          <td class="num {{ m.mtd|posneg }}"><b>{{ m.mtd|signed_money }}</b></td>
+          <td class="muted" style="font-size:11.5px;white-space:nowrap">{% if m.mtd_earned != None %}earned {{ m.mtd_earned|signed_money }} · billed {{ m.mtd_billed|signed_money }}{% endif %}</td></tr>
+        {% empty %}<tr><td colspan="6" class="empty">No baseline snapshots yet for movement attribution.</td></tr>{% endfor %}
+        </tbody></table>
+        <a class="h3link" href="{% url 'dashboard:finance_wip' %}?side=moved&window=mtd&sort=-move" title="Every job whose WIP moved month-to-date, largest move first, split into its earned and billed drivers — with the PTT entries behind the movement, filters, and any past month or year as the period.">All month-to-date movers → full WIP table</a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<div class="grid two" style="margin-bottom:12px">
+  <div class="card">
+    <h2>Profit &amp; loss <small>GL by posting period{% if bs.source == 'rollback' and pnl_cur %} · as posted through {{ snap.snapshot_date|date:"M j" }}{% endif %} · revenue excludes interest income · click a figure for the postings</small></h2>
+    {% if pnl_cur %}<table class="data dense"><thead><tr><th></th>
+      <th class="num" title="Everything posted to fiscal period {{ prior_period }} so far — late postings keep landing after month end.">{{ prior_month_label }} (full month)</th>
+      <th class="num" title="Month-to-date postings in fiscal period {{ cur_period }}.">{{ cur_month_label }} (MTD)</th>
+    </tr></thead><tbody>
+      <tr><td title="Income accounts (3I) except 40100 interest income — the daily email's definition, reproduced to the penny.">Revenue</td>
+        <td class="num"><a href="#" class="drill" data-kind="gl" data-period="{{ prior_period }}" data-group="rev" data-title="{{ prior_month_label }} revenue by account">{{ pnl_prior.rev|money }}</a> <a class="muted" style="font-size:11px" href="{% url 'dashboard:finance_billings' %}?period={{ prior_period|slice:':4' }}-{{ prior_period|slice:'4:' }}&basis=posted" title="Every invoice and journal behind this figure — who keyed it, when, which job (Billings page, {{ prior_month_label }} by fiscal period).">billings ↗</a></td>
+        <td class="num"><a href="#" class="drill" data-kind="gl" data-period="{{ cur_period }}" data-group="rev" data-title="{{ cur_month_label }} MTD revenue by account">{{ pnl_cur.rev|money }}</a> <a class="muted" style="font-size:11px" href="{% url 'dashboard:finance_billings' %}?period={{ cur_period|slice:':4' }}-{{ cur_period|slice:'4:' }}&basis=posted" title="Every invoice and journal behind this figure — who keyed it, when, which job (Billings page, {{ cur_month_label }} by fiscal period).">billings ↗</a></td></tr>
+      <tr><td title="Cost-of-goods accounts 5xxxx: job labor, material, subcontract, burden.">COGS</td>
+        <td class="num"><a href="#" class="drill" data-kind="gl" data-period="{{ prior_period }}" data-group="cogs" data-title="{{ prior_month_label }} COGS by account">{{ pnl_prior.cogs|money }}</a></td>
+        <td class="num"><a href="#" class="drill" data-kind="gl" data-period="{{ cur_period }}" data-group="cogs" data-title="{{ cur_month_label }} MTD COGS by account">{{ pnl_cur.cogs|money }}</a></td></tr>
+      <tr style="font-weight:600"><td title="Revenue − COGS. A truer gross margin than the email's, which subtracted overhead too.">Gross margin</td>
+        <td class="num {{ pnl_prior.gm|posneg }}">{{ pnl_prior.gm|money }} <span class="muted">{{ pnl_prior.gm_pct|pct:0 }}</span></td>
+        <td class="num {{ pnl_cur.gm|posneg }}">{{ pnl_cur.gm|money }} <span class="muted">{{ pnl_cur.gm_pct|pct:0 }}</span></td></tr>
+      <tr><td title="Overhead accounts 6xxxx–7xxxx: salaries, rent, insurance, office.">Overhead</td>
+        <td class="num"><a href="#" class="drill" data-kind="gl" data-period="{{ prior_period }}" data-group="ovh" data-title="{{ prior_month_label }} overhead by account">{{ pnl_prior.ovh|money }}</a></td>
+        <td class="num"><a href="#" class="drill" data-kind="gl" data-period="{{ cur_period }}" data-group="ovh" data-title="{{ cur_month_label }} MTD overhead by account">{{ pnl_cur.ovh|money }}</a></td></tr>
+      <tr style="font-weight:600"><td title="Revenue − COGS − overhead. The daily email labels this line 'Gross Margin' (its Cost = all expenses).">Operating income</td>
+        <td class="num {{ pnl_prior.op|posneg }}">{{ pnl_prior.op|money }} <span class="muted">{{ pnl_prior.op_pct|pct:0 }}</span></td>
+        <td class="num {{ pnl_cur.op|posneg }}">{{ pnl_cur.op|money }} <span class="muted">{{ pnl_cur.op_pct|pct:0 }}</span></td></tr>
+      {% if pnl_cur.wip != None or pnl_prior.wip != None %}
+      <tr><td title="Change in the WIP position (earned − billed) during the month. Closed month: the entry the accountants booked into COGS at month-end (50701 — already inside operating income above). Open month: PCA's snapshot ΔWIP, not yet booked. Positive = work earned ahead of billings.">WIP change</td>
+        <td class="num {{ pnl_prior.wip|posneg }}">{{ pnl_prior.wip|signed_money }}{% if pnl_prior.wip_booked %} <span class="muted" title="Booked by the accountants — already inside this month's COGS and operating income.">booked</span>{% endif %}</td>
+        <td class="num {{ pnl_cur.wip|posneg }}">{{ pnl_cur.wip|signed_money }}{% if pnl_cur.wip_booked %} <span class="muted" title="Booked by the accountants — already inside this month's COGS and operating income.">booked</span>{% else %} <span class="muted">est.</span>{% endif %}</td></tr>
+      <tr style="font-weight:600"><td title="The percentage-of-completion view of the month. Open month: operating income + PCA's WIP change. Closed month: operating income as booked — its WIP entry is already inside COGS, so nothing is added. The % uses earned revenue (billed revenue + WIP change).">Adj. operating income</td>
+        <td class="num {{ pnl_prior.adj_op|posneg }}">{% if pnl_prior.adj_op != None %}{{ pnl_prior.adj_op|money }} <span class="muted">{{ pnl_prior.adj_pct|pct:0 }}</span>{% else %}—{% endif %}</td>
+        <td class="num {{ pnl_cur.adj_op|posneg }}">{% if pnl_cur.adj_op != None %}{{ pnl_cur.adj_op|money }} <span class="muted">{{ pnl_cur.adj_pct|pct:0 }}</span>{% else %}—{% endif %}</td></tr>
+      {% endif %}
+      <tr><td class="muted" title="GL rows created on {{ prev_bd|date:'D M j' }} posted into each period — the email's 'Previous Day' lines. Click for the postings.">Posted {{ prev_bd|date:"M j" }} <a style="font-size:11px" href="{% url 'dashboard:finance_billings' %}?day={{ prev_bd|date:'Y-m-d' }}" title="The invoices keyed on {{ prev_bd|date:'M j' }}, one by one, with who entered them and the jobs behind them (Billings page).">billings ↗</a></td>
+        <td class="num muted"><a href="#" class="drill" data-kind="gl" data-day="{{ prev_bd|date:'Y-m-d' }}" data-period="{{ prior_period }}" data-title="Postings on {{ prev_bd|date:'M j' }} into {{ prior_month_label }}">rev {{ pnl_prior.rev_pd|money_k }} · cost {{ pnl_prior.cost_pd|money_k }}</a></td>
+        <td class="num muted"><a href="#" class="drill" data-kind="gl" data-day="{{ prev_bd|date:'Y-m-d' }}" data-period="{{ cur_period }}" data-title="Postings on {{ prev_bd|date:'M j' }} into {{ cur_month_label }}">rev {{ pnl_cur.rev_pd|money_k }} · cost {{ pnl_cur.cost_pd|money_k }}</a></td></tr>
+    </tbody></table>{% else %}<div class="empty" style="padding:10px 0">Not captured for this day: month-to-date P&L was not stored, and the posting window does not reach back over both {{ cur_month_label }} and {{ prior_month_label }} to rebuild it. The monthly chart below is the ledger as it stands today.</div>{% endif %}
+    <div class="chart" style="margin-top:8px;height:120px"><canvas id="c_monthly"></canvas></div>
+  </div>
+  <div class="card" style="display:flex;flex-direction:column">{# flex column: the AR trend chart below grows into whatever height the P&L card leaves (Owner, 2026-09-08) #}
+    <h2>{{ cur_month_label }} postings by day <small>revenue and cost as they were entered · bars = posting-creation days{% if not is_latest %} · through {{ snap.snapshot_date|date:"M j" }}{% endif %}</small></h2>
+    {% if charts.pnl_days %}<div class="chart tall" style="height:180px"><canvas id="c_days"></canvas></div>{% elif charts.pnl_days == None %}<div class="empty" style="padding:10px 0">Not captured for this day.</div>{% else %}<div class="empty" style="padding:10px 0">No revenue or cost postings entered into {{ cur_month_label }} yet.</div>{% endif %}
+    <h2 style="margin-top:10px">AR &amp; over-90 trend <small>daily · shaded = reconstructed history, solid = live snapshots</small></h2>
+    <div class="chart" style="flex:1 1 auto;height:auto;min-height:180px;overflow:hidden"><canvas id="c_trend"></canvas></div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:12px">
+    <h2>AR aging by book <small>days past due · credits not aged (netted in Current) · click any cell for the invoices</small></h2>
+    <table class="data dense fin-matrix"><thead><tr><th></th>
+      {% for b, lbl in buckets %}<th class="num" title="{% if b == 'current' %}Not yet due (credit memos and unapplied payments also net here, unaged — same convention as the daily email).{% else %}{{ lbl }} days past the due date.{% endif %}">{{ lbl }}</th>{% endfor %}
+      <th class="num">Total</th><th class="num">%</th></tr></thead><tbody>
+    {% for r in ar_rows %}<tr>
+      <td title="{% if r.key == 'project' %}Invoices billed from projects (flexible billings) — no sales order.{% elif r.key == 'so1' %}Invoices from SO1-type sales orders.{% elif r.key == 'so2' %}Invoices from SO2-type sales orders.{% elif r.key == 'rma' %}Return-material documents.{% elif r.key == 'credit' %}Credit memos + customer payments not yet applied to an invoice — negative AR.{% else %}Open documents with no order and no project.{% endif %}">{{ r.label }}</td>
+      {% for b, lbl in buckets %}{% with v=r.cells|getitem:b %}<td class="num drill {% if v and r.key != 'credit' %}hb-{{ b }}{% endif %}" data-kind="ar" data-book="{{ r.key }}" data-bucket="{{ b }}" data-title="{{ r.label }} · {{ lbl }}">{% if v %}{{ v|money }}{% else %}<span class="muted">–</span>{% endif %}</td>{% endwith %}{% endfor %}
+      <td class="num drill" style="font-weight:600" data-kind="ar" data-book="{{ r.key }}" data-title="{{ r.label }} — all open">{{ r.total|money }}</td>
+      <td class="num muted">{{ r.pct|pct:0 }}</td></tr>
+    {% endfor %}
+    </tbody><tfoot><tr>
+      <td>Total</td>
+      {% for b, lbl in buckets %}<td class="num drill" data-kind="ar" data-bucket="{{ b }}" data-title="All AR · {{ lbl }}">{{ ar_col_totals|getitem:b|money }}</td>{% endfor %}
+      <td class="num drill" data-kind="ar" data-title="All open AR">{{ snap.ar_total|money }}</td><td class="num muted">100%</td>
+    </tr></tfoot></table>
+    <div class="note" style="margin-top:6px">Rows and columns reconcile to the AR total by construction — the email's manual "Difference" line no longer exists. Pending (unreleased) invoices are excluded until released: <a href="#" class="drill" data-kind="ar_pending" data-title="Pending (unreleased) AR invoices">{{ snap.ar_pending|money }}</a>.</div>
+</div>
+
+<div class="grid two" style="margin-bottom:12px">
+  <div class="card">
+    <h2>AP aging <small>days past due · click any cell for the vouchers</small></h2>
+    <table class="data dense fin-matrix"><thead><tr><th></th>
+      {% for b, lbl in buckets %}<th class="num">{{ lbl }}</th>{% endfor %}<th class="num">Total</th></tr></thead><tbody>
+    {% for r in ap_matrix %}<tr>
+      <td title="{% if r.key == 'VO' %}Released vendor vouchers with an open balance.{% elif r.key == 'PP' %}Prepayments to vendors.{% else %}Debit adjustments — reduce what is owed.{% endif %}">{{ r.label }}</td>
+      {% for b, lbl in buckets %}{% with v=r.cells|getitem:b %}<td class="num drill {% if v and r.key == 'VO' %}hb-{{ b }}{% endif %}" data-kind="ap" data-doc_type="{{ r.key }}" data-bucket="{{ b }}" data-title="{{ r.label }} · {{ lbl }}">{% if v %}{{ v|money }}{% else %}<span class="muted">–</span>{% endif %}</td>{% endwith %}{% endfor %}
+      <td class="num drill" style="font-weight:600" data-kind="ap" data-doc_type="{{ r.key }}" data-title="{{ r.label }} — all open">{{ r.total|money }}</td></tr>
+    {% endfor %}
+    </tbody><tfoot><tr><td>Total</td>
+      {% for b, lbl in buckets %}<td class="num drill" data-kind="ap" data-bucket="{{ b }}" data-title="All AP · {{ lbl }}">{{ ap_col_totals|getitem:b|money }}</td>{% endfor %}
+      <td class="num drill" data-kind="ap" data-title="All open AP">{{ snap.ap_total|money }}</td></tr></tfoot></table>
+    {% if ap_due != None %}<h3 style="margin-top:10px" title="Vouchers coming due in the 14 calendar days after {{ ap_due_from|date:'M j' }} — near-term cash needs.">Cash needed · 14 days from {{ ap_due_from|date:"M j" }}</h3>
+    <table class="data dense"><tbody>
+    {% for r in ap_due %}<tr><td>{{ r.due_date|date:"D M j" }}</td><td class="num"><a href="#" class="drill" data-kind="ap" data-due_from="{{ r.due_date|date:'Y-m-d' }}" data-due_to="{{ r.due_date|date:'Y-m-d' }}" data-title="AP due {{ r.due_date|date:'M j' }}">{{ r.amt|money }}</a></td><td class="num muted">{{ r.n }} voucher{{ r.n|pluralize }}</td></tr>
+    {% empty %}<tr><td class="empty">Nothing due in the next two weeks.</td></tr>{% endfor %}
+    {% if ap_due %}<tr style="font-weight:600"><td>Total</td><td class="num"><a href="#" class="drill" data-kind="ap" data-due_from="{{ ap_due_from|date:'Y-m-d' }}" data-due_to="{{ ap_due_to|date:'Y-m-d' }}" data-title="AP due in the next 14 days">{{ ap_due_total|money }}</a></td><td></td></tr>{% endif %}
+    </tbody></table>{% else %}<div class="note" style="margin-top:10px">Cash-due list not captured for this day (document lists are stored with each snapshot from Sep 1, 2026).</div>{% endif %}
+  </div>
+  <div class="card">
+    <h2>Largest over-90 customers <small>who is sitting on the old paper · click for their invoices · <a href="{% url 'dashboard:finance_ar' %}?show=over90&by=customer&from={{ snap.snapshot_date|date:'Y-m-d' }}" title="The full Accounts Receivable page: every open document by customer, age, due date, job or salesperson, with payment behaviour and invoice detail.">all of AR →</a></small></h2>
+    {% if top_over90 == None %}<div class="empty" style="padding:10px 0">Not captured for this day — customer and invoice lists are stored with each snapshot from Sep 1, 2026 onward.</div>{% else %}
+    <table class="data dense"><thead><tr><th>Customer</th><th class="num" title="Open AR more than 90 days past due.">Over-90 $</th><th class="num">Docs</th><th class="num" title="Share of all over-90 AR.">Share</th><th class="num">Oldest due</th></tr></thead><tbody>
+    {% for r in top_over90 %}<tr>
+      <td class="trunc fluid" style="width:50%" title="{{ r.name|default:r.customer_id_raw }}">{% if r.link_id %}<a href="{% url 'dashboard:customer_detail' r.link_id %}">{{ r.name }}</a>{% else %}{{ r.name|default:r.customer_id_raw }}{% endif %}</td>
+      <td class="num"><a href="#" class="drill" data-kind="ar" data-bucket="over90" data-cust="{{ r.customer_id_raw }}" data-title="{{ r.name }} · over 90 days">{{ r.amt|money }}</a></td>
+      <td class="num muted">{{ r.n }}</td>
+      <td class="num muted">{% if snap.ar_over90 %}{% widthratio r.amt snap.ar_over90 100 %}%{% endif %}</td>
+      <td class="num muted">{{ r.oldest|date:"M j y" }}</td></tr>
+    {% empty %}<tr><td colspan="5" class="empty">No AR over 90 days past due.</td></tr>{% endfor %}
+    </tbody></table>{% if top_over90_note %}<div class="note">{{ top_over90_note }}</div>{% endif %}{% endif %}
+    {% if largest_open != None %}<h2 style="margin-top:12px">Largest open invoices <small>all ages · <a href="{% url 'dashboard:finance_ar' %}?by=age&from={{ snap.snapshot_date|date:'Y-m-d' }}" title="Every open invoice grouped by age, expandable to lines, payments and job context.">all of AR by age →</a></small></h2>
+    <table class="data dense"><thead><tr><th>Ref</th><th>Customer</th><th>Book</th><th class="num">Due</th><th class="num">Days late</th><th class="num">Balance</th></tr></thead><tbody>
+    {% for r in largest_open %}<tr>
+      <td class="mono">{{ r.ref_nbr }}</td>
+      <td class="trunc fluid" style="width:45%" title="{{ r.customer_name }}">{% if r.link_id %}<a href="{% url 'dashboard:customer_detail' r.link_id %}">{{ r.customer_name }}</a>{% else %}{{ r.customer_name }}{% endif %}</td>
+      <td class="muted">{{ r.book }}</td>
+      <td class="num muted">{{ r.due_date|date:"M j y" }}</td>
+      <td class="num {% if r.days_past_due > 90 %}neg{% endif %}">{% if r.days_past_due and r.days_past_due > 0 %}{{ r.days_past_due }}{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="num">{{ r.amt|money }}</td></tr>{% endfor %}
+    </tbody></table>{% if largest_open_note %}<div class="note">{{ largest_open_note }}</div>{% endif %}{% endif %}
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:12px">
+  <details data-remember="history"{% if not is_latest %} open{% endif %}><summary><b>History</b> — 30 stored days up to {{ snap.snapshot_date|date:"M j" }} (reconstructed days marked ≈) · click a date to view that day</summary>
+  <div class="table-wrap" style="max-height:360px;margin-top:8px">
+  <table class="data dense"><thead><tr><th>Date</th><th class="num">AR total</th><th class="num">Current</th><th class="num">1–30</th><th class="num">31–60</th><th class="num">61–90</th><th class="num">&gt;90</th><th class="num">AP total</th><th class="num">Net AR−AP</th><th class="num" title="Net WIP position (over − under billed) on open jobs.">Net WIP</th><th class="num">Assets</th><th class="num">NI YTD</th><th class="num">Rev MTD</th></tr></thead><tbody>
+  {% for h in history %}<tr>
+    <td>{% if h.pk == snap.pk %}<b>{{ h.snapshot_date|date:"D M j" }}</b>{% else %}<a href="?date={{ h.snapshot_date|date:'Y-m-d' }}">{{ h.snapshot_date|date:"D M j" }}</a>{% endif %}{% if h.reconstructed %} <span class="muted" title="Reconstructed from document history, not a live pull — balance-sheet and P&L columns are blank for these days.">≈</span>{% endif %}</td>
+    <td class="num">{{ h.ar_total|money }}</td><td class="num muted">{{ h.ar_current|money }}</td><td class="num muted">{{ h.ar_d30|money }}</td>
+    <td class="num muted">{{ h.ar_d60|money }}</td><td class="num muted">{{ h.ar_d90|money }}</td><td class="num">{{ h.ar_over90|money }}</td>
+    <td class="num">{{ h.ap_total|money }}</td><td class="num muted">{% if h.ar_total != None and h.ap_total != None %}{{ h.ar_total|sub_money:h.ap_total }}{% else %}—{% endif %}</td>
+    <td class="num {{ h.wip_net|posneg }}">{{ h.wip_net|signed_money }}</td><td class="num muted">{{ h.assets|money }}</td><td class="num muted">{{ h.net_income_ytd|money }}</td><td class="num muted">{{ h.revenue_mtd|money }}</td></tr>{% endfor %}
+  </tbody></table></div></details>
+</div>
+
+<!-- drill-down modal (shared partial; wired by PCADrill in finance_modals.js) -->
+{% include "dashboard/_fin_drill_modal.html" %}
+<!-- liabilities breakdown modal — content fetched from finance_liabilities on click -->
+<div class="fin-modal" id="liabmodal" onclick="if(event.target===this)this.style.display='none'">
+  <div class="fin-modal-box liab-box" id="liabbox"><div class="empty">loading…</div></div>
+</div>
+<!-- bank figures modal -->
+<div class="fin-modal" id="bankmodal" onclick="if(event.target===this)this.style.display='none'">
+  <div class="fin-modal-box" style="max-width:430px">
+    <div class="fin-modal-head"><h2>Today's bank figures</h2><a href="#" onclick="document.getElementById('bankmodal').style.display='none';return false" class="fin-modal-close">✕</a></div>
+    <form method="post" action="{% url 'dashboard:finance_bank_figures' %}">{% csrf_token %}
+      <div class="filters" style="flex-direction:column;align-items:stretch;gap:8px">
+        <label>Bank checking balance <input name="checking_bank_balance" value="{{ bank.checking_bank_balance|default_if_none:'' }}" placeholder="45,414.25"></label>
+        <label>Float (outstanding checks) <input name="float_amount" value="{{ bank.float_amount|default_if_none:'' }}" placeholder="948,463.93"></label>
+        <label>Borrowing base available <input name="borrowing_base_available" value="{{ bank.borrowing_base_available|default_if_none:'' }}" placeholder="3,850,027.83"></label>
+        <label>Credit line used <input name="credit_line_used" value="{{ bank.credit_line_used|default_if_none:'' }}" placeholder="547,591.57"></label>
+        <label>Payroll changes note <input name="payroll_note" value="{{ bank.payroll_note|default:'' }}" placeholder="none"></label>
+        <button class="btn primary">Save for today</button>
+      </div>
+      <div class="note" style="margin-top:8px">Stored locally only; SL is never written. Leave blank what you don't have.</div>
+    </form>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}{% if snap %}
+{{ charts|json_script:"fincharts" }}
+<script src="{% static 'dashboard/finance_modals.js' %}"></script>
+<script>
+function wipDetails(open) {   // the WIP strip's Details panel; open/closed remembered across days (PCA.pref, base.html)
+  const d = document.getElementById('wipdetail'), b = document.getElementById('wiptoggle');
+  if (!d || !b) return;
+  if (open == null) open = d.style.display === 'none';
+  d.style.display = open ? 'block' : 'none'; b.textContent = open ? 'Details ▴' : 'Details ▾';
+  PCA.setPref('wipdetail', open);
+}
+if (PCA.pref('wipdetail')) wipDetails(true);   // before the charts below are built, so the panel's chart sizes to a visible box
+const FC = JSON.parse(document.getElementById('fincharts').textContent);
+const fmt$ = v => v == null ? '—' : v.toLocaleString('en-US', {style: 'currency', currency: 'USD', maximumFractionDigits: 2});
+// ---- drill-down + liabilities modals (finance_modals.js) ----
+{% if is_latest %}
+PCADrill.bind('{% url "dashboard:finance_drill" %}');
+PCALedger.bind({liabilities: '{% url "dashboard:finance_liabilities" %}', assets: '{% url "dashboard:finance_assets" %}'});
+{% else %}
+// viewing a past day: GL drills are cut off at this day's postings (as its figures were stored); the open-document
+// lists and the balance-sheet breakdowns can only be today's, and each modal says so (finance_drill `notice`,
+// _ledger_breakdown_view `viewed_date`) instead of silently blocking the click
+PCADrill.bind('{% url "dashboard:finance_drill" %}', {asOf: '{{ snap.snapshot_date|date:"Y-m-d" }}'});
+PCALedger.bind({liabilities: '{% url "dashboard:finance_liabilities" %}?date={{ snap.snapshot_date|date:"Y-m-d" }}',
+                assets: '{% url "dashboard:finance_assets" %}?date={{ snap.snapshot_date|date:"Y-m-d" }}'});
+{% endif %}
+// ---- charts ----
+if (document.getElementById('c_days')) new Chart(document.getElementById('c_days'), { type: 'bar',
+  data: { labels: FC.pnl_days.map(r => r.d.slice(5)), datasets: [
+    { label: 'Revenue posted', data: FC.pnl_days.map(r => r.rev), backgroundColor: 'rgba(23,138,82,.85)', borderRadius: 2 },
+    { label: 'Cost posted', data: FC.pnl_days.map(r => r.cost), backgroundColor: 'rgba(198,40,40,.7)', borderRadius: 2 } ] },
+  options: { responsive: true, maintainAspectRatio: false, scales: { y: { ticks: { callback: v => PCA.money(v) }, grid: { color: '#eef2f7' } }, x: { grid: { display: false } } },
+    onClick: (e, els) => { if (els.length) window.open('{% url "dashboard:finance_billings" %}?day=' + FC.pnl_days[els[0].index].d + '&per={{ cur_period }}', '_blank'); },   // a bar opens that day's billings (Billings page, entries posted into this month)
+    onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+    plugins: { legend: { position: 'bottom' }, tooltip: { callbacks: { label: c => c.dataset.label + ': ' + fmt$(c.raw), footer: () => 'click for the invoices keyed that day' } } } } });
+new Chart(document.getElementById('c_monthly'), {
+  data: { labels: FC.monthly.map(r => r.p.slice(0,4) + '-' + r.p.slice(4)), datasets: [
+    { type: 'bar', label: 'Revenue', data: FC.monthly.map(r => r.rev), backgroundColor: 'rgba(31,94,255,.55)', borderRadius: 2 },
+    { type: 'line', label: 'Gross margin', data: FC.monthly.map(r => r.rev - r.cogs), borderColor: '#178a52', pointRadius: 2, tension: .2 },
+    { type: 'line', label: 'Operating income', data: FC.monthly.map(r => r.rev - r.cogs - r.ovh), borderColor: '#b7791f', pointRadius: 2, tension: .2 } ] },
+  options: { responsive: true, maintainAspectRatio: false, scales: { y: { ticks: { callback: v => PCA.money(v) }, grid: { color: '#eef2f7' } }, x: { grid: { display: false }, ticks: { maxTicksLimit: 7 } } },
+    plugins: { legend: { position: 'bottom' }, tooltip: { callbacks: { label: c => c.dataset.label + ': ' + fmt$(c.raw) } } } } });
+if (document.getElementById('c_wip')) {
+  const wipPts = FC.trend.filter(r => r.wip != null);
+  const wipVals = wipPts.map(r => r.wip);
+  const wLo = Math.min(0, ...wipVals), wHi = Math.max(0, ...wipVals);
+  const wPad = Math.max((wHi - wLo) * 0.08, 1);
+  new Chart(document.getElementById('c_wip'), {
+    data: { labels: wipPts.map(r => r.d), datasets: [
+      { type: 'line', label: 'Net WIP', data: wipVals,
+        segment: { borderColor: c => (c.p0.parsed.y + c.p1.parsed.y) / 2 >= 0 ? '#178a52' : '#c62828' },
+        borderColor: '#178a52',
+        fill: { target: { value: 0 }, above: 'rgba(23,138,82,.16)', below: 'rgba(198,40,40,.14)' },
+        pointRadius: 0, pointHitRadius: 8, tension: .2, borderWidth: 1.5 } ] },
+    options: { responsive: true, maintainAspectRatio: false, animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { display: false },
+        tooltip: { callbacks: { title: items => items[0].label + (wipPts[items[0].dataIndex].rec ? ' (reconstructed)' : ' (live)'),
+                                label: c => 'Net WIP ' + fmt$(c.raw) } } },
+      scales: { x: { display: false }, y: { display: false, min: wLo - wPad, max: wHi + wPad, bounds: 'data' } } } });
+}
+if (document.getElementById('c_wipbig')) {
+  const wp = FC.trend.filter(r => r.wip != null);
+  new Chart(document.getElementById('c_wipbig'), {
+    data: { labels: wp.map(r => r.d), datasets: [
+      { type: 'line', label: 'Net WIP', data: wp.map(r => r.wip), borderWidth: 2.5, pointRadius: 0, tension: .15,
+        segment: { borderColor: c => (c.p0.parsed.y + c.p1.parsed.y) / 2 >= 0 ? '#178a52' : '#c62828' }, borderColor: '#178a52',
+        fill: { target: { value: 0 }, above: 'rgba(23,138,82,.10)', below: 'rgba(198,40,40,.10)' } },
+      { type: 'line', label: 'Underbilled', data: wp.map(r => r.wip_u), borderColor: 'rgba(23,138,82,.55)', borderWidth: 1.25, borderDash: [5,3], pointRadius: 0, tension: .15 },
+      { type: 'line', label: 'Overbilled', data: wp.map(r => r.wip_o == null ? null : -r.wip_o), borderColor: 'rgba(198,40,40,.55)', borderWidth: 1.25, borderDash: [5,3], pointRadius: 0, tension: .15 } ] },
+    options: { responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { position: 'bottom' },
+        tooltip: { callbacks: { title: items => items[0].label + (wp[items[0].dataIndex].rec ? ' (reconstructed)' : ' (live)'),
+                                label: c => c.dataset.label + ' ' + fmt$(c.dataset.label === 'Overbilled' ? -c.raw : c.raw) } } },
+      scales: { x: { ticks: { maxTicksLimit: 9 }, grid: { display: false } },
+                y: { ticks: { callback: v => PCA.money(v) }, grid: { color: '#eef2f7' } } } } });
+}
+// click-to-show tooltips for definition terms (hover titles also remain)
+(function () {
+  let tipEl = null;
+  const hide = () => { if (tipEl) { tipEl.remove(); tipEl = null; } };
+  document.addEventListener('click', e => {
+    const t = e.target.closest('dt[title], th[title], h3[title], .board-bar[title], div[title], span[title], small[title], b[title]');
+    if (!t || e.target.closest('a, button, input, .drill, canvas')) { hide(); return; }
+    const text = t.getAttribute('title');
+    if (!text) { hide(); return; }
+    e.preventDefault();
+    hide();
+    tipEl = document.createElement('div');
+    tipEl.className = 'click-tip';
+    tipEl.textContent = text;
+    document.body.appendChild(tipEl);
+    const r = t.getBoundingClientRect();
+    tipEl.style.left = Math.min(r.left, window.innerWidth - 380) + 'px';
+    tipEl.style.top = (r.bottom + window.scrollY + 6) + 'px';
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') hide(); });
+})();
+const arTrend = FC.trend.filter(r => r.ar != null);
+new Chart(document.getElementById('c_trend'), {
+  data: { labels: arTrend.map(r => r.d), datasets: [
+    { type: 'line', label: 'AR total', data: arTrend.map(r => r.ar), borderColor: '#1f5eff', backgroundColor: 'rgba(31,94,255,.08)', fill: true, pointRadius: 0, tension: .15 },
+    { type: 'line', label: 'AR over 90', data: arTrend.map(r => r.over90), borderColor: '#c62828', pointRadius: 0, tension: .15 },
+    { type: 'line', label: 'AP total', data: arTrend.map(r => r.ap), borderColor: '#b7791f', borderDash: [4,3], pointRadius: 0, tension: .15 } ] },
+  options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+    scales: { y: { ticks: { callback: v => PCA.money(v) }, grid: { color: '#eef2f7' } }, x: { ticks: { maxTicksLimit: 8 }, grid: { display: false } } },
+    plugins: { legend: { position: 'bottom' }, tooltip: { callbacks: { label: c => c.dataset.label + ': ' + fmt$(c.raw), afterTitle: items => arTrend[items[0].dataIndex].rec ? 'reconstructed' : 'live snapshot' } } } } });
+</script>
+{% endif %}{% endblock %}

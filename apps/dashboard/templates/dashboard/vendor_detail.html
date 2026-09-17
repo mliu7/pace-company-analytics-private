@@ -1,0 +1,209 @@
+{% extends "dashboard/base.html" %}{% load humanize pca %}
+{% block title %}{{ vname }} · Vendors · Pace Company Analytics{% endblock %}
+{% block content %}
+<div class="topbar">
+  <div class="title"><h1>{{ vname }}</h1>
+    <small>{% if is_family %}<span class="ar-chip info" title="{{ family_title }}">{{ family_chip }}</span> · {% endif %}<span class="mono">{{ vid }}</span>
+      {% if v %} · {% if v.status == 'A' %}active{% elif v.status %}status {{ v.status }}{% endif %}{% if v.class_id %} · class {{ v.class_id }}{% endif %}{% if v.terms %} · terms {{ v.terms }}{% endif %}{% if v.city %} · {{ v.city }}{% if v.state %}, {{ v.state }}{% endif %}{% endif %}{% if v.phone %} · {{ v.phone }}{% endif %}{% if v.email %} · {{ v.email }}{% endif %}{% if v.sl_created_at %} · in SL since {{ v.sl_created_at|date:"M Y" }}{% endif %}{% endif %}
+      {% if first_paid %} · first paid {{ first_paid|date:"M Y" }} · <b>{{ total_paid|money }}</b> over {{ total_n }} payment{{ total_n|pluralize }} since 2013{% endif %}
+      · <a href="{% url 'dashboard:finance_vendors' %}">all vendors</a></small></div>
+</div>
+
+<div class="grid kpi" style="margin-bottom:12px">
+  <div class="card kpi"><div class="label" title="Checks / EFTs cut January 1 to today (voids negative), against the same span last year (to {{ same_day|date:'M j, Y' }}).">Paid {{ today.year }} YTD</div>
+    <div class="value sm">{{ ytd|money }}</div>
+    <div class="sub">{% if ytd_card %}<span class="warn-ink" title="Settled by company credit card — cleared through the card holding account (GL 10450), no cash to this vendor; the card issuer was paid instead.">{{ ytd_card|money_k }} of it by card</span> · {% endif %}{% if prior_ytd %}vs {{ prior_ytd|money_k }} last year · <span class="{% if ytd_delta > 0 %}warn-ink{% elif ytd_delta < 0 %}pos{% endif %}">{{ ytd_delta|signed_money }}{% if ytd_delta_pct != None %} ({% if ytd_delta_pct > 0 %}+{% endif %}{{ ytd_delta_pct|pct:0 }}){% endif %}</span>{% else %}nothing paid in the same span last year{% endif %}</div></div>
+  <div class="card kpi"><div class="label" title="Rank among all vendors by dollars paid this year, and this vendor's share of everything paid through AP this year.">Rank this year</div>
+    <div class="value sm">{% if rank %}#{{ rank }} <span class="muted">of {{ rank_of }}</span>{% else %}—{% endif %}</div>
+    <div class="sub">{% if ytd_share != None %}{{ ytd_share|pct:1 }} of AP paid YTD · {% endif %}{{ paid_yr|money_k }} over {{ paid_n }} payment{{ paid_n|pluralize }} in the last 12 months</div></div>
+  <div class="card kpi"><div class="label" title="Dollar-weighted days from the vendor's invoice date to our check date, last 12 months, next to the vendor's terms.">Days to pay</div>
+    <div class="value sm">{% if avg_wait != None %}{{ avg_wait }}d{% if terms_days %} <span class="muted" style="font-size:14px">/ terms {{ terms_days }}</span>{% endif %}{% else %}—{% endif %}</div>
+    <div class="sub">{% if early_pct != None %}<span {% if early_pct > 0.25 %}class="warn-ink"{% endif %} title="Share of dollars paid under 30 days from the invoice — earlier than necessary.">{{ early_pct|pct:0 }} paid under 30d</span>{% if late_pct %} · <span class="{% if late_pct > 0.25 %}neg{% endif %}" title="Share of dollars paid after the voucher's due date.">{{ late_pct|pct:0 }} after due</span>{% endif %}{% if disc %} · {{ disc|money }} discounts taken{% endif %}{% else %}no applications in the window{% endif %}</div></div>
+  <div class="card kpi"><div class="label" title="Open AP balance right now (vouchers − adjustments).">Open AP</div>
+    <div class="value sm">{{ open_ap|money }}</div><div class="sub">{{ open_docs|length }} open doc{{ open_docs|length|pluralize }}{% if past_due %} · <span class="warn-ink">{{ past_due }} past due</span>{% endif %}</div></div>
+  <div class="card kpi"><div class="label" title="Undelivered quantity × unit cost on open PO lines / material received in the last 365 days.">Open POs / received 12 mo</div>
+    <div class="value sm">{{ open_po|money_k }} <span class="muted">/</span> {{ rcvd_yr|money_k }}</div>
+    <div class="sub">{{ po_open|length }} open PO line{{ po_open|length|pluralize }}</div></div>
+</div>
+
+<div class="card tight" style="margin-bottom:12px">
+  <div class="row" style="gap:8px 14px;flex-wrap:wrap;align-items:center">
+    <b title="How the payments were made, by dollars over the whole history: card = settled with a company credit card (cleared through the card holding account, GL 10450 — no cash to the vendor; SL does not say which card); ACH = SL check numbers starting 01 (never printed, settle as ACH debits) and EFTs; check = printed checks; hand check = manual checks.">How we pay them</b>
+    {% for m in pay_mix %}<span class="pill {% if m.how == 'void' %}bad{% elif m.how == 'card' %}warn{% elif m.how == 'ACH' or m.how == 'EFT' %}info{% endif %}" title="{{ m.n }} payment{{ m.n|pluralize }} · {{ m.amt|money }}">{{ m.how }}{% if m.share != None %} <b>{{ m.share|pct:0 }}</b>{% else %} <b>{{ m.n }}</b>{% endif %}</span>{% endfor %}
+    {% if cash_mix %}<span class="muted" style="margin-left:6px" title="The cash or holding account each payment was drawn on (the cash side of the payment in SL). A holding account means the vendor is settled another way — e.g. the Amex holding account is paid by the card and settled when the card bill is paid.">from</span>
+    {% for c in cash_mix %}<span class="pill" title="GL {{ c.acct }} · {{ c.n }} payment{{ c.n|pluralize }} · {{ c.amt|money }}">{{ c.descr|lower|capfirst }} <b>{{ c.amt|money_k }}</b></span>{% endfor %}{% endif %}
+    {% if cadence != None %}<span class="muted" style="margin-left:auto" title="Median days between payment dates over the last three years.">paid about every <b>{{ cadence }}</b> days</span>{% endif %}
+  </div>
+</div>
+
+{% if months %}
+<div class="card tight" style="margin-bottom:12px">
+  <div class="row" style="align-items:flex-end;gap:3px;height:64px">
+    <b style="align-self:center;margin-right:10px" title="Payments cut per month, last 14 months (voids netted).">Paid by month</b>
+    {% for m in months %}<div title="{{ m.m|date:'M Y' }}: {{ m.amt|money }} ({{ m.n }} payment{{ m.n|pluralize }})" style="width:26px;display:flex;flex-direction:column;align-items:center;gap:2px">
+      <div style="width:16px;height:{{ m.px }}px;background:var(--accent,#3b82f6);border-radius:3px 3px 0 0;opacity:.8"></div>
+      <span class="muted" style="font-size:9px">{{ m.m|date:"M"|slice:":1" }}</span></div>{% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<div class="grid two" style="margin-bottom:12px">
+  <div class="card">
+    <h2>Paid by year <small>checks and EFTs by check date, voids negative · every year since 2013</small></h2>
+    <div class="table-wrap tall"><table class="data dense"><thead><tr>
+      <th>Year</th><th class="num">Payments</th><th class="num">Paid</th>
+      <th class="num" title="Change vs the year before. Amber = more, green = less.">Δ</th>
+      <th class="num" title="This vendor's share of everything Pace paid through AP that year.">Share of AP</th>
+      <th class="num" title="Largest single payment that year.">Largest</th>
+      <th class="num" title="Share of the year's cash paid by ACH / EFT rather than a printed check (card settlements excluded).">ACH</th>
+      <th class="num" title="Share of the year's dollars settled with a company credit card rather than cash from the bank.">Card</th></tr></thead><tbody>
+    {% for y in years %}<tr>
+      <td><b>{{ y.y }}</b>{% if y.y == today.year %} <span class="muted">to date</span>{% endif %}</td>
+      <td class="num muted">{{ y.n }}{% if y.voids %} <span class="neg" title="{{ y.voids }} void{{ y.voids|pluralize }}">({{ y.voids }} void)</span>{% endif %}</td>
+      <td class="num"><b>{{ y.amt|money }}</b></td>
+      <td class="num" style="white-space:nowrap">{% if y.delta != None %}<span class="{% if y.delta > 0 %}warn-ink{% elif y.delta < 0 %}pos{% endif %}">{{ y.delta|signed_money }}{% if y.delta_pct != None %} <small>({% if y.delta_pct > 0 %}+{% endif %}{{ y.delta_pct|pct:0 }})</small>{% endif %}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="num muted">{{ y.share|pct:1 }}</td>
+      <td class="num muted">{{ y.biggest|money }}</td>
+      <td class="num muted">{{ y.ach_share|pct:0 }}</td>
+      <td class="num {% if y.card_share %}warn-ink{% else %}muted{% endif %}">{% if y.card_share %}{{ y.card_share|pct:0 }}{% else %}—{% endif %}</td></tr>
+    {% empty %}<tr><td colspan="8" class="empty">No payments on record.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </div>
+  <div class="card">
+    <h2>Jobs this vendor was charged to <small>expense lines carrying a project · {% if job_total.jobs %}{{ job_total.jobs }} job{{ job_total.jobs|pluralize }} · {{ job_total.amt|money }}{% else %}none{% endif %} · top 15</small></h2>
+    <div class="table-wrap tall"><table class="data dense"><thead><tr>
+      <th>Job</th><th>Division</th><th class="num">Lines</th><th class="num" title="First and last year with a line for this vendor on the job.">Years</th><th class="num">Charged</th></tr></thead><tbody>
+    {% for j in job_rows %}<tr>
+      <td class="trunc fluid" style="width:50%;min-width:180px" title="{% if j.project %}{{ j.project.display_number }} {{ j.project.title }}{% else %}{{ j.pk }}{% endif %}">{% if j.project %}<a href="{% url 'dashboard:project_detail' j.project.canonical_project_number %}">{{ j.project.display_number }}</a> <span class="muted">{{ j.project.title }}</span>{% else %}<span class="mono">{{ j.pk }}</span> <span class="muted">not in the project master</span>{% endif %}</td>
+      <td class="muted">{% if j.project and j.project.division %}{{ j.project.division.code }}{% else %}—{% endif %}</td>
+      <td class="num muted">{{ j.n }}</td>
+      <td class="num muted" style="white-space:nowrap">{% if j.first_y %}{{ j.first_y }}{% if j.last_y != j.first_y %}–{{ j.last_y }}{% endif %}{% else %}—{% endif %}</td>
+      <td class="num"><b>{{ j.amt|money }}</b></td></tr>
+    {% empty %}<tr><td colspan="5" class="empty">{% if lines_loaded %}No voucher or receipt line on this vendor names a job — overhead or stock, not job cost.{% else %}Expense lines not loaded yet.{% endif %}</td></tr>{% endfor %}
+    </tbody></table></div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:12px" id="where">
+  <h2>Where the money went <small>every year since 2013 · {{ exp_total|money }} all time · vouchers: the expense side of each voucher (GL account + subaccount = division, vendor credits netted){% if clearing_amt %} · PO purchases: {{ clearing_amt|money }} was vouchered against PO clearing, so those dollars are shown by what the PO <b>receipts</b> debited — {{ rcpt_n }} receipt line{{ rcpt_n|pluralize }}, {{ rcpt_total|money }}: inventory or project cost by subaccount, the job's division when the receipt names a job, warehouse stock when it names none{% endif %}</small></h2>
+  <div>
+    <div>
+      <h3 title="Subaccount of each expense line: 0100 → 010 Hardware Sales, 0700 / 0701 → 070 Premise Security, 0000 → corporate overhead; PO purchases by what the receipt debited.">By division</h3>
+      <div class="table-wrap tall"><table class="data dense" id="bydiv"><thead><tr><th>Division</th>{% for y in year_cols %}<th class="num">{{ y }}</th>{% endfor %}{% if has_earlier %}<th class="num" title="Before {{ earliest }}.">Earlier</th>{% endif %}<th class="num">Total</th><th class="num">Share</th><th class="num" title="Distinct jobs named on the lines.">Jobs</th></tr></thead><tbody>
+      {% for b in by_div %}<tr>
+        <td class="trunc fluid" style="width:34%;min-width:150px" title="{{ b.label }} · from {{ b.src }}">{{ b.label }}{% if b.src == 'receipts' %} <span class="muted" style="font-size:11px">receipts</span>{% endif %}</td>
+        {% for c in b.cols %}<td class="num {% if not c %}muted{% endif %}">{% if c %}{{ c|money }}{% else %}—{% endif %}</td>{% endfor %}
+        {% if has_earlier %}<td class="num muted">{% if b.earlier %}{{ b.earlier|money }}{% else %}—{% endif %}</td>{% endif %}
+        <td class="num"><b>{{ b.total|money }}</b></td><td class="num muted">{{ b.share|pct:0 }}</td><td class="num muted">{{ b.jobs|default:"—" }}</td></tr>
+      {% empty %}<tr><td colspan="{{ year_cols|length|add:5 }}" class="empty">{% if lines_loaded %}No expense lines for this vendor.{% else %}Expense lines not loaded yet — run a finance refresh.{% endif %}</td></tr>{% endfor %}
+      </tbody>{% if by_div %}<tfoot><tr><td>Total</td>{% for t in exp_years %}<td class="num">{% if t %}{{ t|money }}{% endif %}</td>{% endfor %}{% if has_earlier %}<td class="num">{{ exp_earlier|money }}</td>{% endif %}<td class="num">{{ exp_total|money }}</td><td></td><td></td></tr></tfoot>{% endif %}</table></div>
+    </div>
+    <div style="margin-top:12px">
+      <h3 title="GL account of each expense line — what kind of cost this vendor is (12000 inventory = PO receipts into stock or for a job).">By GL account</h3>
+      <div class="table-wrap tall"><table class="data dense" id="byacct"><thead><tr><th>Account</th>{% for y in year_cols %}<th class="num">{{ y }}</th>{% endfor %}{% if has_earlier %}<th class="num" title="Before {{ earliest }}.">Earlier</th>{% endif %}<th class="num">Total</th><th class="num">Share</th></tr></thead><tbody>
+      {% for b in by_acct %}<tr>
+        <td class="trunc fluid" style="width:34%;min-width:150px" title="{{ b.label }} · from {{ b.src }}">{{ b.label|lower|capfirst }}{% if b.src == 'receipts' %} <span class="muted" style="font-size:11px">receipts</span>{% endif %}</td>
+        {% for c in b.cols %}<td class="num {% if not c %}muted{% endif %}">{% if c %}{{ c|money }}{% else %}—{% endif %}</td>{% endfor %}
+        {% if has_earlier %}<td class="num muted">{% if b.earlier %}{{ b.earlier|money }}{% else %}—{% endif %}</td>{% endif %}
+        <td class="num"><b>{{ b.total|money }}</b></td><td class="num muted">{{ b.share|pct:0 }}</td></tr>
+      {% empty %}<tr><td colspan="{{ year_cols|length|add:4 }}" class="empty">{% if lines_loaded %}No expense lines for this vendor.{% else %}Expense lines not loaded yet.{% endif %}</td></tr>{% endfor %}
+      </tbody></table></div>
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:12px">
+  <h2>Payments <small>most recent {{ checks|length }} · click a payment for the invoices it covered and what each one was charged to</small></h2>
+  <div class="table-wrap"><table class="data dense pay-table"><thead><tr>
+    <th>Ref</th><th class="num">Date</th>
+    <th title="card = settled with a company credit card through the holding account (no cash to the vendor), ACH (SL check numbers starting 01, never printed), printed check, EFT, hand check or void — and the cash / holding account it was drawn on.">How</th>
+    <th class="num" title="Date the check cleared on the bank statement (BMO checking only, from bank reconciliation).">Cleared</th>
+    <th class="num" title="Dollar-weighted days from vendor invoice date to check date.">Held</th>
+    <th class="num" style="min-width:96px">Amount</th></tr></thead><tbody>
+  {% for c in checks %}
+  <tr class="pay-group" data-g="c{{ forloop.counter }}" onclick="snapToggleRows('c{{ forloop.counter }}')">
+    <td style="width:38%"><span class="pay-caret" id="caret-c{{ forloop.counter }}">▸</span><span class="mono">{{ c.ref_nbr }}</span> {% if c.doc_type == 'VC' %}<span class="tag critical">void</span>{% endif %}{% if c.doc_desc %} <span class="muted">{{ c.doc_desc }}</span>{% endif %}{% if c.vouchers %} <span class="muted">· {{ c.vouchers|length }} invoice{{ c.vouchers|length|pluralize }}</span>{% endif %}</td>
+    <td class="num">{{ c.doc_date|date:"M j, Y" }}</td>
+    <td style="white-space:nowrap"><span class="pill {% if c.how == 'void' %}bad{% elif c.how == 'card' %}warn{% elif c.how == 'ACH' or c.how == 'EFT' %}info{% endif %}" style="padding:2px 8px"{% if c.how == 'card' %} title="Settled with a company credit card: cleared through the holding account, no cash to the vendor. SL does not record which card."{% endif %}>{{ c.how }}</span>{% if c.cash_descr %} <span class="muted" title="GL {{ c.cash_acct }}">{{ c.cash_descr|lower|capfirst }}</span>{% endif %}</td>
+    <td class="num muted">{% if c.cleared %}{{ c.cleared|date:"M j" }}{% else %}—{% endif %}</td>
+    <td class="num">{% if c.wait_days != None %}{{ c.wait_days }}d{% if c.early %} <span class="warn-ink" title="Paid under 30 days from the vendor invoice — earlier than necessary.">!</span>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num {% if c.doc_type == 'VC' %}neg{% endif %}">{% if c.doc_type == 'VC' %}−{% endif %}{{ c.amount|money:2 }}</td></tr>
+  {% for a in c.vouchers %}
+  <tr class="pay-inv pay-hidden" data-g="c{{ forloop.parentloop.counter }}">
+    <td class="pay-indent mono trunc fluid" style="width:38%;min-width:160px" title="{{ a.invoice_nbr|default:a.doc_desc }}">{{ a.voucher_ref }} <span class="muted" style="font-family:inherit">{{ a.invoice_nbr|default:a.doc_desc }}</span></td>
+    <td class="num muted" style="white-space:nowrap">inv {{ a.inv_date|date:"M j" }}{% if a.due_date %} · due {{ a.due_date|date:"M j" }}{% endif %}</td>
+    <td colspan="2" style="white-space:normal">{% for l in a.lines %}<span class="muted" title="GL {{ l.gl_account }} {{ l.acct_descr }} · subaccount {{ l.gl_subaccount }}{% if l.po_nbr %} · PO {{ l.po_nbr }}{% endif %}{% if l.rcpt_nbr %} · receipt {{ l.rcpt_nbr }}{% endif %}{% if l.tran_desc %} · {{ l.tran_desc }}{% endif %}">{% if l.clearing %}PO clearing{% if l.po_nbr %} · PO {{ l.po_nbr }}{% endif %} → {% for x in l.via %}<b>{{ x.div }}</b>{% if x.div_name %} {{ x.div_name|truncatewords:2 }}{% endif %}{% if x.project %} · <a href="{% url 'dashboard:project_detail' x.project.canonical_project_number %}" onclick="event.stopPropagation()">{{ x.project.display_number }}</a>{% elif x.pk %} · {{ x.pk }}{% endif %}{% if not forloop.last %}, {% endif %}{% empty %}<span title="No receipt on record for this line.">receipt not on record</span>{% endfor %}{% else %}<b>{{ l.div }}</b>{% if l.div_name %} {{ l.div_name|truncatewords:2 }}{% endif %} · {{ l.acct_descr|lower|capfirst|default:l.gl_account }}{% if l.project %} · <a href="{% url 'dashboard:project_detail' l.project.canonical_project_number %}" onclick="event.stopPropagation()">{{ l.project.display_number }}</a>{% elif l.pk %} · {{ l.pk }}{% endif %}{% endif %} {{ l.amt|money }}{% if l.n > 1 %} <span style="font-size:11px">({{ l.n }} lines)</span>{% endif %}</span>{% if not forloop.last %}<br>{% endif %}{% empty %}<span class="muted">no expense lines on record</span>{% endfor %}</td>
+    <td class="num">{% if a.wait != None %}<span {% if a.early %}class="warn-ink" title="Paid under 30 days from this invoice — earlier than necessary."{% endif %}>{{ a.wait }}d</span>{% endif %}</td>
+    <td class="num">{{ a.adj_amount|money:2 }}</td></tr>
+  {% endfor %}
+  {% empty %}<tr><td colspan="6" class="empty">No payments on record.</td></tr>{% endfor %}
+  </tbody></table></div>
+</div>
+
+<div class="grid two" style="margin-bottom:12px">
+  <div class="card">
+    <h2>Open AP <small>unpaid vouchers and credits, oldest due first</small></h2>
+    <div class="table-wrap"><table class="data dense"><thead><tr>
+      <th>Ref</th><th>Invoice #</th><th class="num">Invoiced</th><th class="num">Due</th><th class="num" style="min-width:90px">Balance</th></tr></thead><tbody>
+    {% for d in open_docs %}<tr>
+      <td class="mono">{{ d.ref_nbr }} {% if d.doc_type != 'VO' %}<span class="tag">{{ d.doc_type }}</span>{% endif %}</td>
+      <td class="muted trunc fluid" style="width:40%" title="{{ d.invoice_nbr }}">{{ d.invoice_nbr }}</td>
+      <td class="num">{{ d.doc_date|date:"M j" }}</td>
+      <td class="num">{% if d.due_date %}<span {% if d.days_past_due and d.days_past_due > 0 and d.sign > 0 %}class="warn-ink" title="{{ d.days_past_due }} days past due."{% endif %}>{{ d.due_date|date:"M j" }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="num {% if d.sign < 0 %}neg{% endif %}">{% if d.sign < 0 %}−{% endif %}{{ d.doc_bal|money:2 }}</td></tr>
+    {% empty %}<tr><td colspan="5" class="empty">Nothing open.</td></tr>{% endfor %}
+    </tbody>{% if open_docs %}<tfoot><tr><td>Total · {{ open_docs|length }}</td><td></td><td></td><td></td><td class="num">{{ open_ap|money:2 }}</td></tr></tfoot>{% endif %}</table></div>
+  </div>
+  <div class="card">
+    <h2>Open PO lines <small>undelivered quantity × unit cost · ≈ = job deduced from SO demand</small></h2>
+    <div class="table-wrap"><table class="data dense"><thead><tr>
+      <th>PO</th><th>Item</th><th>Job</th><th class="num">Open qty</th><th class="num" style="min-width:90px">Open $</th></tr></thead><tbody>
+    {% for ln in po_open %}<tr>
+      <td class="mono">{{ ln.po_nbr }} <span class="muted" style="font-family:inherit">{{ ln.po_date|date:"M j" }}</span></td>
+      <td class="mono trunc fluid" style="width:40%;min-width:160px" title="{{ ln.descr }}">{{ ln.item_id|default:"—" }} <span class="muted" style="font-family:inherit" title="{{ ln.descr }}">{{ ln.descr }}</span></td>
+      <td class="trunc fluid" style="white-space:nowrap;width:15%">{% if ln.project %}<a href="{% url 'dashboard:project_detail' ln.project.canonical_project_number %}">{{ ln.project.display_number }}</a>{% elif ln.deduced_project %}<a href="{% url 'dashboard:project_detail' ln.deduced_project.canonical_project_number %}" class="snap-ded" title="Deduced from sales-order demand.">≈ {{ ln.deduced_project.display_number }}</a>{% else %}<span class="muted">stock</span>{% endif %}</td>
+      <td class="num muted">{{ ln.open_qty|num:1 }} × {{ ln.unit_cost|money:2 }}</td>
+      <td class="num">{{ ln.open_amt|money:2 }}</td></tr>
+    {% empty %}<tr><td colspan="5" class="empty">No open PO lines.</td></tr>{% endfor %}
+    </tbody>{% if po_open %}<tfoot><tr><td>Total · {{ po_open|length }}</td><td></td><td></td><td></td><td class="num">{{ open_po|money:2 }}</td></tr></tfoot>{% endif %}</table></div>
+  </div>
+</div>
+
+<div class="grid two" style="margin-bottom:12px">
+  <div class="card">
+    <h2>Top items <small>by received value, last 12 months</small></h2>
+    <div class="table-wrap"><table class="data dense"><thead><tr>
+      <th>Item</th><th class="num">Qty</th><th class="num">Lines</th><th class="num" style="min-width:90px">Received $</th></tr></thead><tbody>
+    {% for t in top_items %}<tr>
+      <td class="mono trunc fluid" style="width:55%;min-width:160px" title="{{ t.descr }}">{{ t.item_id }} <span class="muted" style="font-family:inherit" title="{{ t.descr }}">{{ t.descr }}</span></td>
+      <td class="num muted">{{ t.qty|num:0 }}</td>
+      <td class="num muted">{{ t.n }}</td>
+      <td class="num">{{ t.amt|money:2 }}</td></tr>
+    {% empty %}<tr><td colspan="4" class="empty">No item-coded receipts in the window.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </div>
+  <div class="card">
+    <h2>Material received <small>last 90 days, newest first · ≈ = job deduced from SO demand</small></h2>
+    <div class="table-wrap"><table class="data dense"><thead><tr>
+      <th>Receipt</th><th>PO</th><th>Item</th><th>Job</th><th class="num">Qty</th><th class="num" style="min-width:90px">Cost</th></tr></thead><tbody>
+    {% for ln in receipts %}<tr>
+      <td class="mono">{{ ln.rcpt_nbr }} <span class="muted" style="font-family:inherit">{{ ln.rcpt_date|date:"M j" }}</span></td>
+      <td class="mono muted">{{ ln.po_nbr }}</td>
+      <td class="mono trunc fluid" style="width:40%;min-width:160px" title="{{ ln.descr }}">{{ ln.item_id|default:"—" }} <span class="muted" style="font-family:inherit" title="{{ ln.descr }}">{{ ln.descr }}</span></td>
+      <td class="trunc fluid" style="white-space:nowrap;width:15%">{% if ln.project %}<a href="{% url 'dashboard:project_detail' ln.project.canonical_project_number %}">{{ ln.project.display_number }}</a>{% elif ln.deduced_project %}<a href="{% url 'dashboard:project_detail' ln.deduced_project.canonical_project_number %}" class="snap-ded" title="Deduced from sales-order demand.">≈ {{ ln.deduced_project.display_number }}</a>{% else %}<span class="muted">stock</span>{% endif %}</td>
+      <td class="num muted">{{ ln.qty|num:1 }} × {{ ln.unit_cost|money:2 }}</td>
+      <td class="num">{{ ln.ext_cost|money:2 }}</td></tr>
+    {% empty %}<tr><td colspan="6" class="empty">Nothing received in the last 90 days.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+function snapToggleRows(g) {
+  document.querySelectorAll('.pay-inv[data-g="' + g + '"]').forEach(tr => tr.classList.toggle('pay-hidden'));
+  const c = document.getElementById('caret-' + g);
+  if (c) c.textContent = c.textContent === '▾' ? '▸' : '▾';
+}
+</script>
+{% endblock %}

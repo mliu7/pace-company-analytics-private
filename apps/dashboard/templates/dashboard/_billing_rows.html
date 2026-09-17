@@ -1,0 +1,1 @@
+{% for g, rows in parts %}{% for r in rows %}{% include "dashboard/_billing_row.html" with r=r g=g hw=True %}{% endfor %}{% endfor %}

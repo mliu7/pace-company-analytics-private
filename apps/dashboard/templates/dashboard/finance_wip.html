@@ -1,0 +1,70 @@
+{% extends "dashboard/base.html" %}{% load humanize pca %}
+{% block title %}WIP by Job · Pace Company Analytics{% endblock %}
+{% block main_class %} dense{% endblock %}
+{% block content %}
+{% if not snap %}
+<div class="card empty">No finance snapshot yet. Run <code>python manage.py refresh_finance</code> (about 15 seconds) or use the refresh button on the Daily Snapshot.</div>
+{% else %}
+<div class="topbar">
+  <div class="title"><h1>WIP by job <small style="display:inline;font-size:14px">{{ per.label }}</small></h1>
+    <small>WIP = contract value × PTT % complete − billed to date; positive = underbilled. Pick any month or year for a historical report. Hover or click a column header for its definition; click a project for its full trace.</small></div>
+  <div class="row">
+    {% if per.live %}<span class="pill info" title="Live figures: GL / AR / AP and project data as last pulled from SL and PTT.">live · pulled {{ snap.as_of|date:"M j, g:i A" }}</span>
+    {% else %}<span class="pill info" title="{% if sources.end == 'snapshot' %}Per-job WIP from the finance snapshot stored for this date — the same figures the Daily Snapshot history and the Divisional P&L use.{% else %}No stored snapshot for this date: rebuilt now from cumulative billings by transaction date and each PTT %'s real validity window (contract values are today's — SL keeps no history).{% endif %}">as of {{ per.end|date:"M j, Y" }} · {% if sources.end == 'snapshot' %}stored snapshot{% else %}reconstructed{% endif %}</span>{% endif %}
+    <span class="pill" title="Net WIP of the whole population at the period end (underbilled − overbilled, {{ pop_n }} jobs).">net WIP&nbsp;<b class="{{ pop_net|posneg }}">{{ pop_net|signed_money }}</b></span>
+    {% if sa_sum.n %}<a class="pill" href="?period={{ per.key }}&side=sa" title="Service agreements (jobs titled SA…) bill on a schedule; contract × PTT % − billed says nothing about earned work, so they are outside WIP by rule — never in this page's totals, the Daily Snapshot or the Divisional P&L. Click to list them. Applying the formula anyway would add {{ sa_sum.would_be|signed_money }}; it is not applied.">excl. {{ sa_sum.n }} service agreement{{ sa_sum.n|pluralize }} · {{ sa_sum.billed|money_k }} billed</a>{% endif %}
+    <a class="btn small" href="{% url 'dashboard:finance_daily' %}#wipdetail">← Daily Snapshot</a>
+  </div>
+</div>
+
+<form method="get" class="card tight" style="margin-bottom:12px">
+  <input type="hidden" name="sort" value="{{ sort }}">
+  <div class="filters">
+    <label title="Which WIP report to run: a live to-date window, or any past month / year (WIP at the period end, change over the period).">Period<select name="period">
+      {% for grp, opts in period_groups %}<optgroup label="{{ grp }}">{% for k, l in opts %}<option value="{{ k }}" {% if per.key == k %}selected{% endif %}>{{ l }}</option>{% endfor %}</optgroup>{% endfor %}
+    </select></label>
+    <label title="Which jobs to list. 'Moved' = WIP changed over the period; 'left the population' = in the baseline but no longer an open WIP job at the period end (closed or reclassified), so its WIP fell to zero.">Show<select name="side">
+      <option value="">all jobs</option>
+      <option value="under" {% if g.side == 'under' %}selected{% endif %}>underbilled only</option>
+      <option value="over" {% if g.side == 'over' %}selected{% endif %}>overbilled only</option>
+      <option value="moved" {% if g.side == 'moved' %}selected{% endif %}>moved in the period</option>
+      <option value="left" {% if g.side == 'left' %}selected{% endif %}>left the population</option>
+      <option value="sa" {% if g.side == 'sa' %}selected{% endif %}>service agreements (excluded)</option>
+    </select></label>
+    <label>Division<select name="division"><option value="">all</option>{% for d in divisions %}<option value="{{ d }}" {% if g.division == d %}selected{% endif %}>{{ d }}</option>{% endfor %}</select></label>
+    <label>PM<select name="pm"><option value="">any</option>{% for k, n in pms %}<option value="{{ k }}" {% if g.pm == k %}selected{% endif %}>{{ n }}</option>{% endfor %}</select></label>
+    <label>State<select name="state"><option value="">any</option>{% for st in states %}<option value="{{ st }}" {% if g.state == st %}selected{% endif %}>{{ st|state_label }}</option>{% endfor %}</select></label>
+    <label title="Age of the most recent PTT entry on the job (the later of the % complete and the remaining hours) at the period end.">PTT entry<select name="stale">
+      <option value="">any age</option>
+      <option value="fresh" {% if g.stale == 'fresh' %}selected{% endif %}>updated in the last 14 days</option>
+      <option value="30" {% if g.stale == '30' %}selected{% endif %}>not updated for 30+ days</option>
+      <option value="45" {% if g.stale == '45' %}selected{% endif %}>not updated for 45+ days (stale)</option>
+      <option value="90" {% if g.stale == '90' %}selected{% endif %}>not updated for 90+ days</option>
+      <option value="never" {% if g.stale == 'never' %}selected{% endif %}>never entered</option>
+      <option value="nopct" {% if g.stale == 'nopct' %}selected{% endif %}>PTT % is 0 / blank</option>
+    </select></label>
+    <label title="Hide jobs whose WIP and period change are both smaller than this.">Min |WIP| or |Δ|<input type="number" name="min" value="{{ g.min }}" placeholder="$" style="min-width:90px"></label>
+    <label>Search<input type="search" name="q" value="{{ g.q }}" placeholder="number, title, customer, PM"></label>
+    <button class="btn primary">Apply</button>
+    <a class="btn" href="{% url 'dashboard:finance_wip' %}">Reset</a>
+  </div>
+</form>
+
+<div class="card tight" style="margin-bottom:12px">
+  <div class="row" style="gap:14px;flex-wrap:wrap">
+    <div class="wip-chip" title="Jobs in the filtered set, and the population they come from."><div class="label">Jobs</div><div class="val">{{ tot.n|intcomma }}</div><div class="sub muted">{% if g.side == 'sa' %}outside the population of {{ pop_n }} — by rule{% else %}of {{ pop_n }} in the population{% endif %}{% if tot.left %} · {{ tot.left }} left it{% endif %}</div></div>
+    <div class="wip-chip" title="Underbilled minus overbilled across the filtered rows. With no filters this equals the net WIP in the header."><div class="label">Net WIP · filtered</div><div class="val {{ tot.wip|posneg }}">{{ tot.wip|signed_money }}</div><div class="sub muted">under {{ tot.under|money }} · over {{ tot.over|money }}</div></div>
+    <div class="wip-chip" title="{% if tot.move != None %}Sum of the WIP change over {{ per.label }} across the filtered rows, since the {{ per.start|date:'D M j, Y' }} baseline{% if sources.start == 'reconstructed' %} (baseline reconstructed — no stored snapshot for that date){% endif %}. Δ WIP = Δ earned − Δ billed.{% else %}No baseline is available for this period, so no change can be shown.{% endif %}"><div class="label">Δ WIP · {{ per.label|lower }}</div><div class="val {{ tot.move|posneg }}">{% if tot.move != None %}{{ tot.move|signed_money }}{% else %}—{% endif %}</div><div class="sub muted">{% if tot.move != None %}earned {{ tot.e_move|signed_money }} − billed {{ tot.b_move|money }} · since {{ per.start|date:"M j" }}{% else %}no baseline{% endif %}</div></div>
+    <div class="wip-chip" title="{% if tot.adj_gp != None %}The filtered jobs' real result for {{ per.label|lower }}: GP (revenue billed in the period − direct cost posted in the period) plus Δ WIP (the change in earned-but-unbilled revenue). Δ WIP alone is not profit; Adj. GP is.{% else %}Needs a baseline for the period.{% endif %}"><div class="label">Adj. GP · {{ per.label|lower }}</div><div class="val {{ tot.adj_gp|posneg }}">{% if tot.adj_gp != None %}{{ tot.adj_gp|signed_money }}{% else %}—{% endif %}</div><div class="sub muted">{% if tot.adj_gp != None %}GP {{ tot.gp_p|signed_money }} (billed {{ tot.rev_p|money }} − cost {{ tot.cost_p|money }}) + Δ WIP {{ tot.move|signed_money }}{% else %}no baseline{% endif %}</div></div>
+    <div class="wip-chip" title="Rows whose most recent PTT entry (% complete or remaining hours) was older than {{ stale_days }} days at the period end, or was never made — the WIP on these rests on a stale estimate. Also counts rows with no PTT % at all (earned = 0, so any billing shows as overbilled)."><div class="label">Stale PTT entries</div><div class="val {% if tot.stale %}neg{% endif %}">{{ tot.stale }}</div><div class="sub muted"><a href="?{% qs_without request 'stale' %}&stale=45">over {{ stale_days }} days or never</a> · <a href="?{% qs_without request 'stale' %}&stale=nopct">{{ tot.no_pct }} with no %</a></div></div>
+  </div>
+</div>
+
+<div class="card">
+  {% include "dashboard/_job_table.html" %}
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>if (window.PCAJobTable) PCAJobTable.clickTips(document);   /* definitions pin on click page-wide here (KPI chips, filter labels) */</script>
+{% endblock %}

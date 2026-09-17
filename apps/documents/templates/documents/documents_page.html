@@ -1,0 +1,56 @@
+{% extends "dashboard/base.html" %}{% load humanize pca documents static %}
+{% block title %}Documents · Pace Company Analytics{% endblock %}
+{% block extra_css %}{% include "documents/_css.html" %}{% endblock %}
+{% block content %}
+<div class="topbar"><div class="title"><h1>Documents</h1>
+  <small>Every job's files on SharePoint and the P: drive, read-only, linked to SL jobs and bids by the numbers in folder and file names · {{ tot.files|intcomma }} files in {{ tot.folders|intcomma }} folders across {{ repos|length }} locations{% if last_run %} · indexed {{ last_run|date:"M j, g:i a" }}{% endif %}</small></div>
+  <div class="row"><a class="btn small" href="{% url 'documents:documents_findings' %}" title="Proposal checks: missing sections, price vs bid, clause deviations.">Findings{% if findings.serious %} <span class="chip neg">{{ findings.serious }}</span>{% endif %}</a></div></div>
+
+<div class="grid kpi" style="margin-bottom:14px">
+  <div class="card kpi doc-kpi" data-filter="link=" title="Live files across the indexed libraries and the P: drive (deleted items are kept out)."><div class="label">Files</div><div class="value">{{ tot.files|intcomma }}</div><div class="sub">{{ tot.folders|intcomma }} folders</div></div>
+  <div class="card kpi doc-kpi" data-filter="link=linked" title="Files whose folder or file name carries an SL job number, an AV quote number (= the SL number with a hyphen) or a confirmed link."><div class="label">Linked to a job or bid</div><div class="value">{{ tot.linked_pct|pct:0|default:"—" }}</div><div class="sub">{{ tot.linked|intcomma }} files</div></div>
+  <div class="card kpi doc-kpi" data-filter="link=check" title="Linked by a low-confidence rule (a number inside the name, a fuzzy client + project name) — confirm or reject on the file's page."><div class="label">Needs a check</div><div class="value {% if tot.low %}neg{% endif %}">{{ tot.low|intcomma }}</div><div class="sub">confidence under {{ low|pct:0 }}</div></div>
+  <div class="card kpi doc-kpi" data-filter="link=unlinked" title="No job, bid or customer could be read from the name or the folders above it — the unlinked-files queue."><div class="label">Unlinked</div><div class="value">{{ tot.unlinked|intcomma }}</div><div class="sub">queue</div></div>
+  <div class="card kpi doc-kpi" data-filter="age=14" title="Files modified in the last 14 days (the source's own modified time)."><div class="label">Changed, 14 days</div><div class="value">{{ tot.changed|intcomma }}</div></div>
+  <div class="card kpi doc-kpi" data-filter="text=ok" title="Files whose text has been extracted (PDF, Word, Excel, text, Outlook messages) — searchable from the global search."><div class="label">Text extracted</div><div class="value">{{ tot.text_ok|intcomma }}</div><div class="sub">{% if tot.text_failed %}{{ tot.text_failed }} failed (no text layer){% else %}bounded per refresh{% endif %}</div></div>
+  <div class="card kpi doc-kpi" data-filter="findings=1" title="Open proposal-check findings: errors (price vs bid) and warnings (missing sections, clause deviations)."><div class="label">Findings open</div><div class="value {% if findings.error %}neg{% endif %}">{{ findings.serious }}</div><div class="sub">{{ findings.error }} error · {{ findings.warn }} warn · {{ findings.info }} info</div></div>
+</div>
+
+{% if share and share.last_error %}<div class="note doc-warn" style="margin-bottom:12px"><b>P: drive not readable from this machine:</b> {{ share.last_error }} — the index shows the fixture tree / last successful walk. Grant the terminal and the scheduled refresh access to Network Volumes (System Settings › Privacy &amp; Security), then run <code>manage.py refresh_documents</code>.</div>{% endif %}
+
+<div class="card tight" style="margin-bottom:14px"><h2>Locations <small>click a row to browse it · SharePoint through Microsoft Graph (delta), the P: drive through a read-only walk · nothing is ever written back</small></h2>
+<div class="table-wrap"><table class="data dense" id="doc-repos"><thead><tr><th>Location</th><th>Division</th><th class="num">Files</th><th class="num">Folders</th><th class="num" title="Files linked to a job or bid.">Linked</th><th class="num" title="Low-confidence links to confirm or reject.">Check</th><th class="num">Unlinked</th><th class="num" title="Modified in the last 14 days.">Changed 14d</th><th class="num" title="Text extracted / failed.">Text</th><th>Last indexed</th><th>Status</th></tr></thead><tbody>
+{% for r in repos %}<tr class="doc-repo-row" data-filter="repo={{ r.key|urlencode }}" style="cursor:pointer" title="Browse {{ r.name }}">
+  <td>{% if r.is_share %}<b>P: drive</b> <span class="muted mono">{{ r.name|slice:"9:" }}</span>{% else %}{{ r.name }}{% endif %}{% if r.web_url %} <a href="{{ r.web_url }}" target="_blank" rel="noopener" title="Open the library in SharePoint" onclick="event.stopPropagation()">↗</a>{% endif %}</td>
+  <td class="muted">{{ r.division|default:"—" }}</td><td class="num">{{ r.files|intcomma }}</td><td class="num">{{ r.folders|intcomma }}</td>
+  <td class="num">{% if r.files %}{{ r.linked_pct|pct:0 }}{% else %}—{% endif %}</td><td class="num {% if r.low %}neg{% endif %}">{{ r.low }}</td><td class="num">{{ r.unlinked }}</td><td class="num">{{ r.changed }}</td>
+  <td class="num muted">{{ r.text_ok }}{% if r.text_failed %} / <span class="neg">{{ r.text_failed }}</span>{% endif %}</td>
+  <td class="muted">{% if r.last_indexed %}{{ r.last_indexed|date:"M j, g:i a" }}{% else %}never{% endif %}</td>
+  <td>{% if r.last_error %}<span class="pill bad" title="{{ r.last_error }}">error</span>{% elif r.last_indexed %}<span class="pill good">ok</span>{% else %}<span class="pill">pending</span>{% endif %}</td></tr>{% endfor %}
+</tbody></table></div></div>
+
+<div class="card" id="browse" style="margin-bottom:14px"><h2>Browse <small id="doc-count">loading…</small></h2>
+  <div class="row" style="margin-bottom:8px;gap:8px"><input type="search" id="doc-q" placeholder="file, folder, job number or title…" value="{{ preset.q }}" style="min-width:280px;font:inherit;padding:6px 10px;border:1px solid var(--line-strong);border-radius:8px">
+    <button class="btn small" id="doc-reset" title="Clear every filter and the search.">Reset</button>
+    <span class="muted" style="font-size:12px">every filter and column choice is remembered · shift-click a heading to sort by a second key</span></div>
+  <div class="doc-facets" id="doc-facets"></div>
+  <div class="ledger-chips" id="doc-cols"><span class="dim">Columns:</span></div>
+  <div class="table-wrap doc-wrap" id="doc-wrap"><table class="data dense doc-table" id="doc-table"><thead></thead><tbody></tbody></table></div>
+  <div class="note" style="margin-top:8px">A <b>link</b> is how PCA knows which job a file belongs to: <b>linked</b> = the folder or file name carries the SL job number (or the AV quote number, which is the SL number with a hyphen: 25-4476 = 254476); <b>check</b> = a weaker rule (a number inside the name, a fuzzy client + project-name match to a bid) that you can confirm or reject on the file's page; <b>unlinked</b> = nothing in the name or the folders above it names a job. Files inherit their folder's link. Open ↗ uses your own SharePoint login or the smb:// path; the UNC is shown for the Windows desktop.</div>
+</div>
+
+<div class="grid two" style="margin-bottom:14px">
+  <div class="card"><h2>Recently changed <small>last 14 days, newest first</small></h2>
+    {% if recent %}<div class="table-wrap" style="max-height:380px"><table class="data dense"><thead><tr><th>File</th><th>Job</th><th>Where</th><th class="num">Modified</th><th>By</th></tr></thead><tbody>
+    {% for f in recent %}<tr data-ref="{{ f.id }}"><td><a href="{% url 'documents:document_preview' f.id %}" title="{{ f.path }}">{{ f.name }}</a></td>
+      <td>{% if f.linked_project %}<a href="{% url 'dashboard:project_detail' f.linked_project.canonical_project_number %}">{{ f.linked_project.display_number }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="muted">{{ f.location }}</td><td class="num muted">{{ f.mtime|date:"M j, g:i a" }}</td><td class="muted">{{ f.modified_by }}</td></tr>{% endfor %}
+    </tbody></table></div>{% else %}<div class="empty">Nothing changed in the last 14 days.</div>{% endif %}</div>
+  <div class="card"><h2>Folder naming by location <small>how the job folders are named — the linking rules read the number</small></h2>
+    {% for h in hygiene %}<div class="doc-hyg"><div class="row" style="justify-content:space-between"><b>{% if h.repo.is_share %}P: drive{% else %}{{ h.repo.name }}{% endif %}</b><span class="muted" title="Top two folder levels carrying an SL job number or quote number.">{{ h.numbered }} of {{ h.n }} folders numbered{% if h.pct != None %} · {{ h.pct|pct:0 }}{% endif %}</span></div>
+      <div class="row" style="gap:6px;margin:4px 0 6px">{% for s in h.styles %}{% if s.n %}<details class="doc-style" data-remember="hyg-{{ h.repo.id }}-{{ s.key }}"><summary class="lchip {% if s.key == 'name_only' %}off{% else %}on{% endif %}" title="{{ s.label }}">{{ s.label }} <small>{{ s.n }}</small></summary><div class="doc-style-list">{% for fo in s.examples %}<div class="mono">{{ fo.path }}</div>{% endfor %}{% if s.n > s.examples|length %}<div class="muted">… {{ s.n|add:"-12" }} more</div>{% endif %}</div></details>{% endif %}{% endfor %}</div></div>{% endfor %}
+    <div class="note">Convention that links best: <code>265092 - Job name</code> at the top of the library (or <code>25-4476 Job name</code> for AV quotes). Folders with no number can still be linked by hand from any file's page; the Data Quality page lists numbered folders whose number matches no SL job.</div></div>
+</div>
+{% endblock %}
+{% block scripts %}<script src="{% static 'documents/documents.js' %}?v={{ ASSET_VERSION }}"></script>
+<script>PCADocs.init({url: "{% url 'documents:documents_json' %}", preset: {{ preset|docjson }}, findingsUrl: "{% url 'documents:documents_findings' %}", rules: {{ rules|docjson }}, low: {{ low }}});</script>{% endblock %}

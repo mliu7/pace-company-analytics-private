@@ -1,0 +1,15 @@
+{# Production status card on the project page (SharePoint spec §10 "Production status" cross-link). Renders nothing when
+   the project has no planning data; never raises (the project page includes it for every project). #}
+{% load pca %}{% with pp=project|default:p %}{% if pp and pp.pk %}{% with rows=pp.status_rows.all punches=pp.punch_projects.all approvals=pp.approval_requests.all %}{% if rows or punches or approvals %}
+<div class="card tight" id="production" style="margin-bottom:14px">
+  <h2>Production <small>status board rows, open punch items and approval requests for this job · <a href="/planning/status/?hl={{ pp.canonical_project_number }}">status board</a></small></h2>
+  {% if rows %}<table class="data dense"><thead><tr><th>Div</th><th>Task</th><th>Phase status</th><th>Equipment status</th><th>PM</th><th>Critical stop</th><th class="num" title="Union hours remaining">Hrs left</th><th class="num">Done</th><th>Updated</th></tr></thead><tbody>
+  {% for r in rows %}<tr{% if r.completed %} class="muted"{% endif %}><td>{{ r.division }}</td><td><a href="/planning/status/?hl={{ r.id }}" title="Open on the status board">{{ r.name|truncatechars:70 }}</a>{% if r.completed %} <span class="pill good">completed</span>{% endif %}</td><td>{{ r.phase_status|default:"—" }}</td><td>{{ r.equipment_status|default:"—" }}</td><td>{% if r.pm %}{{ r.pm.canonical_name }}{% else %}{{ r.pm_raw|default:"—" }}{% endif %}</td><td>{{ r.end|date:"n/j/y"|default:"—" }}</td><td class="num">{{ r.hours_left|floatformat:0 }}</td><td class="num">{{ r.percent|floatformat:0 }}%</td><td class="muted">{{ r.last_update_date|date:"n/j/y"|default:"—" }}</td></tr>{% endfor %}
+  </tbody></table>{% endif %}
+  {% for q in punches %}{% with items=q.items.all %}
+  <div class="note" style="margin-top:8px"><b>Punch list {{ q.code }}</b> ({{ q.division }}) · <a href="/planning/punch/{{ q.id }}/">{{ items|length }} item{{ items|length|pluralize }}</a>{% if q.pm %} · PM {{ q.pm.canonical_name }}{% endif %}
+    {% for it in items %}{% if not it.date_completed %}<div style="margin-left:12px">· {{ it.description|truncatechars:90 }}{% if it.due_by %} <span class="muted">due {{ it.due_by|date:"n/j/y" }}</span>{% endif %}{% if it.critical >= 4 %} <span class="pill bad">crit {{ it.critical }}</span>{% endif %}</div>{% endif %}{% endfor %}
+  </div>{% endwith %}{% endfor %}
+  {% if approvals %}<div class="note" style="margin-top:8px"><b>Approval requests</b> · {% for a in approvals %}<a href="/planning/approvals/?q={{ a.project_number_raw|default:a.project_name|urlencode }}">{{ a.kind }} · {{ a.get_status_display }}{% if a.needed_by %} · needed {{ a.needed_by|date:"n/j/y" }}{% endif %}</a>{% if not forloop.last %} · {% endif %}{% endfor %}</div>{% endif %}
+</div>
+{% endif %}{% endwith %}{% endif %}{% endwith %}

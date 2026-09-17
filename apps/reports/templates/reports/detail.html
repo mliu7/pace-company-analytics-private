@@ -1,0 +1,5 @@
+{% extends "dashboard/base.html" %}{% block title %}{{ report.title }} · Reports{% endblock %}{% block content %}
+<div class="topbar"><div><h1>{{ report.title }}</h1><p>{{ report.summary }}</p></div>{% if can_manage %}<a class="btn" href="{% url 'reports:report_audience' report.pk %}">Manage access</a>{% endif %}</div>
+<div class="card" style="margin-bottom:16px"><h2>Who can access this report</h2><p>{% for person in audience %}<span class="tag">{{ person.display_name }}{% if person.pk == report.owner_id %} · creator{% elif person.is_superadmin %} · administrator{% endif %}</span> {% endfor %}</p>
+<p>Selected groups: {% for group in report.groups.all %}{{ group.name }}{% if not forloop.last %}, {% endif %}{% empty %}none{% endfor %}. Their current and future members have access. Company superadmins and the creator always have access.</p></div>
+<iframe title="{{ report.title }}" src="{% url 'reports:report_content' report.pk %}" sandbox="allow-scripts" referrerpolicy="no-referrer" style="width:100%;height:78vh;border:1px solid #dce2e9;border-radius:12px;background:white"></iframe>{% endblock %}

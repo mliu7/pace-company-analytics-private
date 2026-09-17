@@ -1,0 +1,6 @@
+{% load humanize pca documents %}{% if acc.documents %}{% customer_documents c as D %}{% if D.n %}
+<div class="card doc-card" id="documents" style="margin-bottom:14px">
+  <h2>Documents <small title="Files linked to this customer's jobs and bids on SharePoint and the P: drive.">{{ D.n }} file{{ D.n|pluralize }} across the customer's jobs{% if D.n_recent %} · <b>{{ D.n_recent }} changed in 14 days</b>{% endif %} · <a href="{{ D.page_url }}">browse</a></small></h2>
+  <style>{% include "documents/_css.html" %}</style>
+  {% include "documents/_file_groups.html" with D=D scope="cdocs" %}
+</div>{% endif %}{% endif %}

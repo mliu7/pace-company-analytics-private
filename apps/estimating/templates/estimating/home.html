@@ -1,0 +1,45 @@
+{% extends "dashboard/base.html" %}{% load humanize pca static %}
+{% block title %}Estimating · Pace Company Analytics{% endblock %}
+{% block extra_css %}@import url("{% static 'estimating/estimating.css' %}");{% endblock %}
+{% block content %}
+<div class="topbar">
+  <div class="title"><h1>Estimating</h1>
+    <small><b>{{ stats.current|intcomma }}</b> current catalog rows across <b>{{ stats.brands|intcomma }}</b> brands from <b>{{ stats.sources }}</b> vendor price files (latest dated {{ stats.latest_label|default:"—" }}; {{ stats.total|intcomma }} rows loaded, hygiene hides duplicates, pre-2023 prices and superseded versions) · search scores every row (exact / prefix / contains / brand / description / word overlap), compare up to 6, add straight into a working estimate · <a href="{% url 'estimating:estimating_sources' %}">sources &amp; hygiene</a> · <a href="{% url 'estimating:estimating_rates' %}">rate card</a> · <a href="{% url 'estimating:estimating_estimates' %}">estimates</a> · <a href="{% url 'estimating:estimating_import' %}">import</a></small></div>
+</div>
+<div class="est-layout">
+<div>
+  <div class="card tight">
+    <div class="est-search">
+      <input type="search" id="si" placeholder="part number, brand, or words from a description…" autofocus title="Scoring: exact normalized part 100 · exact part 99 · prefix 85 · contains 70 · brand 55 · description 45 · word overlap 25–45. Esc clears.">
+      <span class="est-examples">{% for e in examples %}<span class="chip" data-example="{{ e }}" title="Try this search">{{ e }}</span>{% endfor %}</span>
+    </div>
+    <div class="est-filters">
+      <b title="Cleaned manufacturer. Type to filter the list; Enter picks the first match; Esc clears.">Brand</b>
+      <input id="brand" list="brands" placeholder="any brand" autocomplete="off"><datalist id="brands">{% for b in brands %}<option value="{{ b.name }}">{{ b.n }} rows</option>{% endfor %}</datalist>
+      <button class="btn small" id="brand-clear" title="Clear the brand filter">×</button>
+      <span class="muted">·</span><b>Sort</b>
+      {% for k, label in sorts.items %}<a class="btn small" data-sort="{{ k }}" href="#" onclick="return false" title="{% if k == 'match' %}Score first, then cheapest{% elif k == 'alpha' %}Brand then part number{% else %}Dealer cost{% endif %}">{{ label }}</a>{% endfor %}
+      <span class="muted">·</span>
+      <label title="Only rows with a dealer cost (on by default, as the dashboard did)"><input type="checkbox" id="hascost"> Has cost</label>
+      <label title="Include rows the hygiene pass hid (duplicates, pre-2023 prices, superseded versions)"><input type="checkbox" id="archived"> Show archived</label>
+      <span class="muted" style="margin-left:auto">column headers sort too</span>
+    </div>
+  </div>
+  <div class="card tight" id="selcard" style="margin-top:10px" hidden></div>
+  <div class="est-tabs"><a class="btn small" data-tab="results" id="tab-results" href="#" onclick="return false">Results</a><a class="btn small" data-tab="compare" id="tab-compare" href="#" onclick="return false">Compare <span class="chip" id="nb-cmp">0</span></a></div>
+  <div id="v-results"><div id="results"><div class="empty">Type a part number, a brand or words from a description — or pick a brand to browse it.</div></div><div class="est-pager" id="pager"></div></div>
+  <div id="v-compare" hidden><div class="card tight"><div class="row" style="justify-content:space-between;margin-bottom:8px"><b>Compare</b><span class="note">lowest dealer cost and highest cost→MSRP margin get the ★ · <a href="#" id="cmp-clear" onclick="return false">clear</a></span></div><div class="cmp-grid" id="cmp-grid"></div></div></div>
+</div>
+<div class="card tight est-rail">
+  <div class="row" style="justify-content:space-between;margin-bottom:6px"><b title="Adds from the results, the selected card and compare go into this estimate — remembered per browser">Estimate summary</b></div>
+  <select id="rail-est" style="width:100%;font:inherit;padding:6px 8px;border:1px solid var(--line-strong);border-radius:8px" title="Working estimate"><option value="">— pick an estimate —</option>{% for e in estimates %}<option value="{{ e.id }}" {% if est_id|stringformat:"s" == e.id|stringformat:"s" %}selected{% endif %}>{{ e }}{% if e.client_name %} · {{ e.client_name }}{% endif %}</option>{% endfor %}</select>
+  {% if can_write %}<form id="rail-new" class="row" style="margin-top:6px;gap:4px"><input id="rail-new-title" placeholder="new estimate title" style="flex:1;font:inherit;padding:5px 8px;border:1px solid var(--line-strong);border-radius:8px"><button class="btn small" type="submit" title="Start a blank estimate and make it the working one">New</button></form>{% endif %}
+  <div id="rail-body" style="margin-top:8px"></div>
+</div>
+</div>
+<div class="toast" id="toast"></div>
+{% endblock %}
+{% block scripts %}
+<script id="est-cfg" type="application/json">{"search_url": "{% url 'estimating:estimating_search' %}", "item_url": "{% url 'estimating:estimating_item' 0 %}", "detail_url": "{% url 'estimating:estimate_detail' 0 %}", "export_url": "{% url 'estimating:estimate_export' 0 %}", "save_url": "{% url 'estimating:estimate_save' %}", "can_write": {{ can_write|yesno:"true,false" }}, "compare_limit": 6, "q": "{{ q|escapejs }}", "brand": "{{ brand|escapejs }}", "est_id": "{{ est_id|escapejs }}", "brands": [{% for b in brands %}"{{ b.name|escapejs }}"{% if not forloop.last %},{% endif %}{% endfor %}]}</script>
+<script src="{% static 'estimating/search.js' %}"></script>
+{% endblock %}

@@ -1,0 +1,43 @@
+{% extends "dashboard/base.html" %}{% load humanize pca %}
+{% block title %}010 Orders · Pace Company Analytics{% endblock %}
+{% block content %}
+<div class="topbar"><div class="title"><h1>Hardware orders</h1>
+  <small>CNET sales orders with SL fulfillment truth. Quoted GM% = CNET price vs cost; Real GM% = SL invoiced vs shipped cost; drift = SL cost − quoted cost (shipped orders).</small></div></div>
+<form method="get" class="card tight" style="margin-bottom:12px"><input type="hidden" name="type" value="{{ g.type }}">
+  <div class="filters">
+    <label>Search<input type="search" name="q" value="{{ g.q }}" placeholder="order #, customer, PO, SL #"></label>
+    <label>Status<select name="status"><option value="">any</option>{% for s in statuses %}<option value="{{ s.status }}" {% if g.status == s.status %}selected{% endif %}>{{ s.status|default:"(blank)" }} ({{ s.n }})</option>{% endfor %}</select></label>
+    <label>Rep<select name="rep"><option value="">any</option>{% for r in reps %}<option value="{{ r.r }}" {% if g.rep == r.r %}selected{% endif %}>{{ r.r }}</option>{% endfor %}</select></label>
+    <label>Year<select name="year"><option value="">any</option>{% for y in years %}<option value="{{ y.y }}" {% if g.year == y.y|stringformat:"s" %}selected{% endif %}>{{ y.y }}</option>{% endfor %}</select></label>
+    <button class="btn primary">Apply</button>
+    <a class="btn {% if g.chip == 'backlog' %}primary{% endif %}" href="?chip=backlog" title="Ordered, not fully shipped, not cancelled.">Backlog</a>
+    <a class="btn {% if g.chip == 'drift' %}primary{% endif %}" href="?chip=drift" title="Shipped orders where SL cost differs from quoted cost by more than $250.">Drift outliers</a>
+    <a class="btn {% if g.type == 'all' %}primary{% endif %}" href="?type={% if g.type == 'all' %}{% else %}all{% endif %}" title="Include SO2 project-material orders (default: SO1 box sales only).">incl. SO2</a>
+    <a class="btn" href="{% url 'dashboard:sales010_orders' %}">Reset</a>
+  </div></form>
+<div class="card tight" style="margin-bottom:12px"><div class="row" style="font-size:13px">
+  <span><b>{{ total_row.n|intcomma }}</b>{% if total_row.capped %}+ (showing newest 2,000 — narrow the filters for exact totals){% endif %} orders</span> · <span>bookings <b>{{ total_row.amt|money_k }}</b></span> · <span>open backlog in view <b>{{ total_row.backlog|money_k }}</b></span></div></div>
+<div class="table-wrap tall"><table class="data dense"><thead><tr>
+  <th>CNET #</th><th>SL order</th><th>Customer</th><th>Rep</th><th class="num">Ordered</th><th>Status</th>
+  <th class="num">Total</th><th class="num" title="CNET price vs CNET cost.">Quoted GM%</th><th class="num" title="SL invoiced vs SL shipped cost.">Real GM%</th>
+  <th class="num" title="SL shipped cost − CNET quoted cost. Positive = cost came in higher than quoted.">Drift $</th>
+  <th class="num" title="Invoiced so far / order total.">Invoiced</th><th class="num" title="Days from ordered to first ship.">Ship days</th><th>PO</th></tr></thead><tbody>
+{% for r in rows %}<tr class="{% if not r.fully_shipped and r.status != 'Delivered' and r.status != 'Shipped' and r.ship_days == None and r.ordered_at and not r.sl_cancelled %}{% endif %}">
+  <td><a href="{% url 'dashboard:sales010_order_detail' r.document_number %}"><b>{{ r.document_number }}</b></a>{% if r.sl_cancelled %} <span class="tag critical">cancelled</span>{% endif %}</td>
+  <td class="mono muted">{{ r.sl_ord_nbr|default:"—" }}{% if r.sl_so_type and r.sl_so_type != 'SO1' %} <span class="tag">{{ r.sl_so_type }}</span>{% endif %}</td>
+  <td class="trunc fluid" style="width:30%" title="{{ r.customer }}">{% if r.ccode %}<a href="{% url 'dashboard:customer_detail' r.ccode %}" style="color:inherit">{{ r.customer }}</a>{% else %}{{ r.customer }}{% endif %}</td>
+  <td>{{ r.rep }}</td><td class="num muted">{{ r.ordered_at|date:"Y-m-d" }}</td>
+  <td><span class="tag {% if r.status == 'BackOrder' %}high{% elif r.status == 'Submitted' %}in_progress{% endif %}">{{ r.status }}</span></td>
+  <td class="num"><b>{{ r.total|money }}</b></td>
+  <td class="num muted">{{ r.quoted_gm|pct }}</td>
+  <td class="num {% if r.real_gm != None and r.quoted_gm != None and r.real_gm < r.quoted_gm %}neg{% endif %}">{{ r.real_gm|pct }}</td>
+  <td class="num">{% if r.drift != None %}<span class="{% if r.drift > 0 %}neg{% elif r.drift < 0 %}pos{% endif %}">{{ r.drift|signed_money }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+  <td class="num muted">{% if r.realized_revenue %}{{ r.realized_revenue|money }}{% else %}—{% endif %}</td>
+  <td class="num muted">{{ r.ship_days|numdash }}</td>
+  <td class="muted trunc fluid" style="width:12%;min-width:90px" title="{{ r.customer_po }}">{{ r.customer_po }}</td>
+</tr>{% empty %}<tr><td colspan="13" class="empty">No orders match.</td></tr>{% endfor %}</tbody></table></div>
+{% if page.paginator.num_pages > 1 %}<div class="pager">{% qs_without request 'page' as bq %}
+{% if page.has_previous %}<a class="btn small" href="?{{ bq }}&page={{ page.previous_page_number }}">‹ prev</a>{% endif %}
+<span>page {{ page.number }} of {{ page.paginator.num_pages }}</span>
+{% if page.has_next %}<a class="btn small" href="?{{ bq }}&page={{ page.next_page_number }}">next ›</a>{% endif %}</div>{% endif %}
+{% endblock %}

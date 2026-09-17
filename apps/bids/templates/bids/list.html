@@ -1,0 +1,16 @@
+{% extends "dashboard/base.html" %}{% load humanize pca bids static %}
+{% block title %}Bid list · Pace Company Analytics{% endblock %}
+{% block extra_css %}{% include "bids/_css.html" %}{% endblock %}
+{% block content %}
+<div class="bids">
+{% include "bids/_tabs.html" %}
+<div class="card">
+  <h2>All bids <small id="list_n">loading…</small><span class="row" style="gap:6px"><input type="search" id="list_q" placeholder="filter loaded rows…" style="max-width:220px"><select id="list_cols" title="Column set"><option value="std">standard columns</option><option value="outcome">outcome columns</option><option value="portal">portal columns</option><option value="all">all columns</option></select></span></h2>
+  <div class="facets" id="list_facets"></div>
+  <div class="table-wrap list-wrap"><table class="data dense" id="list"><thead></thead><tbody></tbody></table></div>
+  <div class="note">Every row under the filters above is loaded (no cap). Facet chips narrow the loaded rows; click a header to sort, shift-click for a second key. Value, budget and probability are as typed in the portal; SL contract, final GP and accuracy come from SL and only fill for jobs SL has closed and stabilised.</div>
+</div>
+</div>
+<script id="bids-filters-json" type="application/json">{{ filters_json|safe }}</script>
+{% endblock %}
+{% block scripts %}<script src="{% static 'bids/bids.js' %}"></script><script>PCABids.list("{% url 'bids:bids_list_json' %}");</script>{% endblock %}

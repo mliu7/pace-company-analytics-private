@@ -1,0 +1,47 @@
+{% extends "dashboard/base.html" %}{% load humanize pca %}
+{% block title %}Active Book · Pace Company Analytics{% endblock %}
+{% block content %}
+<div class="topbar">
+  <div class="title"><h1>Active book &amp; forecast — {{ division_label }}</h1>
+    <small>Every open project with its deterministic estimate at completion. Revenue = contract value; labor = posted + unposted PTT hours + PM remaining hours × observed loaded rate; non-labor = max(actual + commitments, budget).</small></div>
+  {% include "dashboard/_division_bar.html" %}
+</div>
+<div class="grid kpi" style="margin-bottom:14px">
+  <div class="card kpi"><div class="label">Open projects</div><div class="value">{{ active.n }}</div><div class="sub">{{ active.in_progress }} in progress · {{ active.awarded }} awarded · {{ active.field_complete }} field-complete · {{ active.dormant }} dormant</div></div>
+  <div class="card kpi"><div class="label">Contract value</div><div class="value">{{ active.cv|money_k }}</div><div class="sub">billed {{ active.billed|money_k }} · cost to date {{ active.cost|money_k }}</div></div>
+  <div class="card kpi"><div class="label">Sold GP</div><div class="value">{{ active.sold_gp|money_k }}</div><div class="sub">{{ active.sold_pct|pct }} · current budgets</div></div>
+  <div class="card kpi"><div class="label">Forecast GP (EAC)</div><div class="value {{ active.eac_gp|posneg }}">{{ active.eac_gp|money_k }}</div><div class="sub">{{ active.eac_pct|pct }} · shortfall vs sold {{ active.shortfall|money_k }}</div></div>
+  <div class="card kpi"><div class="label">At risk</div><div class="value {% if active.at_risk_n %}neg{% endif %}">{{ active.at_risk_n }}</div><div class="sub">high/critical · {{ active.at_risk_cv|money_k }} revenue</div></div>
+  <div class="card kpi"><div class="label">Unposted labor</div><div class="value sm">{{ active.unposted_h|hours }}</div><div class="sub">≈ {{ active.unposted_cost|money_k }} PTT hours not yet in SL payroll</div></div>
+</div>
+<form method="get" class="card tight" style="margin-bottom:12px"><input type="hidden" name="div" value="{{ div_code }}"><input type="hidden" name="sort" value="{{ sort }}">
+  <div class="filters">
+    <label>Lifecycle<select name="state"><option value="">all open</option>{% for s in "awarded_not_started,in_progress,field_complete,dormant"|split %}<option value="{{ s }}" {% if g.state == s %}selected{% endif %}>{{ s|state_label }}</option>{% endfor %}</select></label>
+    <label>Risk<select name="risk"><option value="">any</option>{% for r in "low,moderate,high,critical"|split %}<option value="{{ r }}" {% if g.risk == r %}selected{% endif %}>{{ r }} ({{ risk_counts|getitem:r|default:0 }})</option>{% endfor %}</select></label>
+    <label>PM<select name="pm"><option value="">any</option>{% for o in pms %}<option value="{{ o.k }}" {% if g.pm == o.k %}selected{% endif %}>{{ o.n }} ({{ o.c }})</option>{% endfor %}</select></label>
+    <button class="btn primary">Apply</button><a class="btn" href="{% url 'dashboard:forecast' %}?div={{ div_code }}">Reset</a>
+  </div></form>
+<div class="table-wrap tall"><table class="data dense">
+  <thead><tr>
+    <th>{% sort_link request 'number' 'Project' 'SL project number — click for the full trace.' %}</th><th title="Title and billing customer from SL.">Title</th><th>{% sort_link request 'state' 'State' 'Lifecycle: Awarded (no hours) / In Progress / Field Complete (no recent work, remaining ≈ 0) / Dormant (remaining hours but no work 45+ days).' %}</th>
+    <th>{% sort_link request 'risk' 'Risk' 'Heuristic 0–100: projected loss (+45), EAC margin <10% (+25), >5 pts under sold (+25), hours overrun >110% (+15) / >130% (+10), dormant (+10), no PM estimate (+5). critical also when projected loss > $50k.' %}</th><th class="num">{% sort_link request 'eac_gp' 'EAC GP $' 'Forecast gross profit at completion (deterministic): revenue − forecast direct cost. Revenue = contract value (T&M: at least billed-to-date).' %}</th><th class="num">{% sort_link request 'eac_pct' 'EAC GP%' 'Forecast margin at completion.' %}</th><th class="num" title="EAC margin minus sold margin, percentage points. Negative = giving back margin vs the budget.">vs sold</th>
+    <th>{% sort_link request 'pm' 'PM' 'Project manager from SL.' %}</th><th class="num">{% sort_link request 'cv' 'Contract' 'Current contract value from SL (no original is kept).' %}</th><th class="num">{% sort_link request 'sold_pct' 'Sold GP%' 'Sold margin on the current budget.' %}</th>
+    <th class="num">{% sort_link request 'cost' 'Cost to date' 'Actual direct cost posted in SL: labor (wages+burden), material, subcontract, other.' %}</th><th class="num">{% sort_link request 'hours' 'PTT hrs' 'Field hours logged in PTT so far.' %}</th>
+    <th class="num">{% sort_link request 'remaining' 'Rem hrs' 'PM-entered remaining hours (PTT, latest revision). Blank = the PM has not set an estimate; the EAC then falls back to budget − actual.' %}</th><th class="num" title="Forecast total labor hours (worked + remaining) vs the budgeted hours. ▲ = forecast exceeds budget by more than 10%.">EAC / bud hrs</th><th title="The specific reasons behind the risk score, plus ⚠ when the forecast needed a fallback (hover for details).">Why</th><th class="num">{% sort_link request 'last_work' 'Last work' 'Most recent PTT field entry.' %}</th>
+  </tr></thead><tbody>
+  {% for r in rows %}<tr>
+    <td><a href="{% url 'dashboard:project_detail' r.canonical_project_number %}"><b>{{ r.display_number }}</b></a></td>
+    <td class="trunc fluid" style="width:35%;min-width:160px" title="{{ r.title }}">{{ r.title }}<br><span class="muted">{{ r.customer_name|default:"" }}</span></td>
+    <td><span class="tag {{ r.lifecycle_state }}">{{ r.lifecycle_state|state_label }}</span></td>
+    <td class="nowrap">{% if r.risk_level %}<span class="tag {{ r.risk_level }}">{{ r.risk_level }}</span> <span class="muted">{{ r.risk_score }}</span>{% endif %}</td>
+    <td class="num {{ r.eac_gp_dollars|posneg }}"><b>{{ r.eac_gp_dollars|money }}</b></td><td class="num {% if r.eac_gp_percent < 0 %}neg{% endif %}">{{ r.eac_gp_percent|pct }}</td>
+    <td class="num {{ r.projected_margin_change_points|posneg }}">{{ r.projected_margin_change_points|pts }}</td>
+    <td class="nowrap">{% if r.pm_key %}<a href="{% url 'dashboard:person_detail' r.pm_key %}" style="color:inherit">{{ r.pm_name }}</a>{% endif %}</td>
+    <td class="num">{{ r.contract_value|money }}{% cv_mark r %}</td><td class="num muted">{{ r.sold_gp_percent|pct }}</td><td class="num">{{ r.actual_direct_cost|money }}</td>
+    <td class="num">{{ r.ptt_hours_total|num }}</td><td class="num muted">{{ r.pm_remaining_hours|num }}</td>
+    <td class="num">{{ r.eac_labor_hours|num }} <span class="muted">/ {{ r.budget_labor_hours|num }}</span>{% if r.hours_overrun_ratio and r.hours_overrun_ratio > 1.1 %} <span class="neg">▲</span>{% endif %}</td>
+    <td class="muted trunc fluid" style="width:20%;font-size:12px" title="{% for x in r.risk_reasons %}{{ x }}; {% endfor %}">{% for x in r.risk_reasons %}{{ x }}{% if not forloop.last %}; {% endif %}{% endfor %}{% if r.warnings %} <span title="{{ r.warnings|join:'; ' }}">⚠</span>{% endif %}</td>
+    <td class="num muted">{{ r.last_work_date|date:"M j"|default:"—" }}</td>
+  </tr>{% empty %}<tr><td colspan="19" class="empty">No open projects match.</td></tr>{% endfor %}
+  </tbody></table></div>
+{% endblock %}

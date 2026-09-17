@@ -1,0 +1,16 @@
+{% extends "dashboard/base.html" %}{% load pca %}
+{% block title %}Access audit · Pace Company Analytics{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="{% url 'access:console_people' %}">People &amp; access</a> › {% if full %}full audit{% else %}change log{% endif %}</div>
+<div class="card"><h2>{% if full %}Full audit log <small>everything except page views — see Usage for those</small>{% else %}Permission change log{% endif %}</h2>
+<table class="data dense"><thead><tr><th class="num">When</th><th>Actor</th>{% if full %}<th>Acting as</th>{% endif %}<th>Event</th><th>Target</th><th>Role / capability</th><th>Detail</th></tr></thead><tbody>
+{% for e in events %}<tr>
+  <td class="num muted">{{ e.at|date:"Y-m-d H:i" }}</td>
+  <td>{{ e.actor.display_name|default:"—" }}</td>
+  {% if full %}<td class="muted">{{ e.acting_as.display_name|default:"" }}</td>{% endif %}
+  <td><span class="tag">{{ e.kind|nice }}</span></td>
+  <td>{{ e.target.display_name|default:"" }}</td>
+  <td class="mono">{{ e.capability_or_role }}</td>
+  <td class="muted" style="width:35%">{{ e.meta }}</td>
+</tr>{% empty %}<tr><td colspan="7" class="empty">no events yet</td></tr>{% endfor %}</tbody></table></div>
+{% endblock %}

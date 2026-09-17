@@ -1,0 +1,66 @@
+{% extends "dashboard/base.html" %}{% load humanize pca bids static %}
+{% block title %}Bids · Pace Company Analytics{% endblock %}
+{% block extra_css %}{% include "bids/_css.html" %}{% endblock %}
+{% block content %}
+<div class="bids">
+{% include "bids/_tabs.html" %}
+
+<div class="grid kpi" style="margin-bottom:14px">
+  <div class="card kpi drill" data-kind="open" data-title="Open pipeline"><div class="label" title="Quoting + submitted + on hold, Σ Project Value. Open = the portal has not recorded a decision.">Open pipeline</div><div class="value">{{ kp.open_value|money_k }}</div><div class="sub">{{ kp.open_n }} bids · {{ kp.bidders }} bidders</div></div>
+  <div class="card kpi drill" data-kind="stage" data-bucket="submitted" data-title="Submitted, awaiting decision"><div class="label" title="Submitted and awaiting the customer's decision.">Submitted</div><div class="value">{{ kp.submitted_value|money_k }}</div><div class="sub">{{ kp.submitted_n }} bids · avg {{ kp.avg_value|default_if_none:0|money_k }}</div></div>
+  <div class="card kpi drill" data-kind="stage" data-bucket="quoting" data-title="Quoting"><div class="label" title="Still being priced.">Quoting</div><div class="value">{{ kp.quoting_value|money_k }}</div><div class="sub">{{ kp.quoting_n }} bids</div></div>
+  <div class="card kpi"><div class="label" title="Σ value × the portal's Probability of Close, over scored open bids. Unscored bids count zero here.">Weighted pipeline</div><div class="value">{{ kp.weighted|money_k }}</div><div class="sub">{% if kp.weighted_pct != None %}{{ kp.weighted_pct|pct:0 }} of open{% endif %} · {{ kp.unscored_n }} unscored{% if kp.avg_close != None %} · avg {{ kp.avg_close|floatformat:0 }}%{% endif %}</div></div>
+  <div class="card kpi drill" data-kind="expected" data-title="Open bids behind the expected bookings"><div class="label" title="Σ value × stated probability over open list bids expected to decide within 90 days (submitted date + the division's median decision cycle). 'By hit rate' values the same bids at each estimator's own historical hit rate instead (spec D4). 'Past the median cycle' = still open longer than the division's median submitted-to-award time.">Expected bookings</div>
+    <div class="value">{{ kp.eb90.stated|money_k }}</div>
+    <div class="sub">by hit rate {{ kp.eb90.historical|money_k }} · {{ kp.eb90.count }} bids{% if kp.eb_overdue.count %} · <span class="neg" title="{{ kp.eb_overdue.value|money }} of open bids have waited longer than the median decision cycle">{{ kp.eb_overdue.count }} past the median cycle</span>{% endif %}</div></div>
+  <div class="card kpi"><div class="label" title="Bids submitted this calendar month (portal Submitted date).">Submitted this month</div><div class="value">{{ kp.month_submitted_value|money_k }}</div><div class="sub">{{ kp.month_submitted_n }} bids</div></div>
+  <div class="card kpi"><div class="label" title="Awarded this month (portal Awarded date; SL confirms won).">Won this month</div><div class="value">{{ kp.month_won_value|money_k }}</div><div class="sub">{{ kp.month_won_n }} bids{% if kp.month_won_margin != None %} · {{ kp.month_won_margin|pct:1 }} margin{% endif %}</div></div>
+  <div class="card kpi"><div class="label" title="Won ÷ (won + lost) on bids decided in the last 12 months. SL is the truth for won.">Hit rate, 12 mo</div><div class="value">{% if kp.hit12 != None %}{{ kp.hit12|pct:0 }}{% else %}—{% endif %}</div><div class="sub">{{ kp.decided12 }} decided{% if kp.hit12_w != None %} · {{ kp.hit12_w|pct:0 }} by $ {% endif %}{% if kp.cycle_median %} · {{ kp.cycle_median|floatformat:0 }}d cycle{% endif %}</div></div>
+</div>
+
+<div class="grid two" style="margin-bottom:14px">
+  <div class="card"><h2>Funnel <small>{% if f.year %}{{ f.year }}{% else %}last 24 months{% endif %} · click a bar for the bids</small></h2><div class="chart" style="height:220px"><canvas id="c_funnel"></canvas></div></div>
+  <div class="card"><h2>Open pipeline by bidder <small>Σ value · click for the bids</small></h2><div class="chart" style="height:220px"><canvas id="c_bidder"></canvas></div></div>
+  <div class="card"><h2>Open pipeline by probability <small>the estimator's stated chance</small></h2><div class="chart" style="height:220px"><canvas id="c_prob"></canvas></div></div>
+  <div class="card"><h2>Win rate by quarter <small>decided bids · count and by value</small></h2><div class="chart" style="height:220px"><canvas id="c_trend"></canvas></div></div>
+</div>
+
+<div class="grid two" style="margin-bottom:14px">
+  <div class="card">
+    <h2>Needs attention <small>{{ kp.attention|length }} live rows with a gap · the portal's own hygiene rules</small></h2>
+    {% if attention %}<div class="table-wrap" style="max-height:420px"><table class="data dense"><thead><tr><th>Bid</th><th>Stage</th><th class="num">Value</th><th>Due</th><th>Why</th></tr></thead><tbody>
+    {% for r in attention %}<tr>
+      <td><a href="{% url 'bids:bid_detail' r.id %}">{{ r.project_name|default:r.job_number_raw|truncatechars:44 }}</a><div class="muted" style="font-size:11px">{{ r.client_label|truncatechars:34 }}{% if r.estimator %} · {{ r.estimator }}{% endif %}</div></td>
+      <td><span class="pill {{ r.stage|stage_class }}">{{ r.stage_label }}</span></td>
+      <td class="num">{% if r.value %}{{ r.value|money_k }}{% else %}—{% endif %}</td>
+      <td class="nowrap">{{ r.bid_due|date:'M j'|default:'—' }}</td>
+      <td style="white-space:normal;min-width:150px">{% for x in r.reasons %}<span class="tag warn">{{ x }}</span> {% endfor %}</td>
+    </tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty">Nothing needs attention under these filters.</div>{% endif %}
+  </div>
+  <div class="card">
+    <h2>Follow-ups &amp; leaks</h2>
+    {% if followups %}<h3 class="sub-h">Open follow-ups</h3><table class="data dense"><tbody>{% for x in followups %}<tr><td class="nowrap {% if x.due and x.due < today %}neg{% endif %}">{{ x.due|date:'M j'|default:'—' }}</td><td><a href="{% url 'bids:bid_detail' x.bid_id %}">{{ x.bid.project_name|truncatechars:40 }}</a></td><td class="trunc" title="{{ x.text }}">{{ x.text|truncatechars:60 }}</td><td class="muted nowrap">{{ x.owner.canonical_name|default:'' }}</td></tr>{% endfor %}</tbody></table>{% endif %}
+    <h3 class="sub-h" title="Awarded in the portal for 14+ days with no SL job number — someone won work and never told SL, or the job # was never typed into the portal.">Awarded, no SL job <span class="muted">({{ kp.leaks|length }})</span></h3>
+    {% if leaks %}<div class="table-wrap" style="max-height:230px"><table class="data dense"><tbody>{% for r in leaks %}<tr><td class="nowrap">{{ r.awarded_on|date:'M j, Y'|default:'—' }}</td><td><a href="{% url 'bids:bid_detail' r.id %}">{{ r.project_name|truncatechars:44 }}</a></td><td class="muted trunc">{{ r.client_label|truncatechars:24 }}</td><td class="num">{{ r.value|money_k }}</td><td class="muted">{{ r.estimator|default:'' }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty">No leaks.</div>{% endif %}
+    <h3 class="sub-h" title="Open bids whose portal row has not been touched for 30+ days.">Stale open bids <span class="muted">({{ kp.stale|length }})</span></h3>
+    {% if stale %}<div class="table-wrap" style="max-height:230px"><table class="data dense"><tbody>{% for r in stale %}<tr><td class="nowrap">{{ r.portal_modified|date:'M j' }}</td><td><a href="{% url 'bids:bid_detail' r.id %}">{{ r.project_name|truncatechars:44 }}</a></td><td><span class="pill {{ r.stage|stage_class }}">{{ r.stage_label }}</span></td><td class="num">{{ r.value|money_k }}</td><td class="muted">{{ r.estimator|default:'' }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty">Nothing stale.</div>{% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <h2>Quoting activity <small>by month of bid due date · last 12 months · click a cell for the bids</small>
+    <span class="row" style="gap:6px">
+      <select id="pv_axis" onchange="location.search=PCA.qs({axis:this.value})">{% for k, l in axes %}<option value="{{ k }}" {% if axis == k %}selected{% endif %}>by {{ l }}</option>{% endfor %}</select>
+      <select id="pv_value" onchange="location.search=PCA.qs({pv:this.value})"><option value="value" {% if pv_value == 'value' %}selected{% endif %}>$ quoted</option><option value="count" {% if pv_value == 'count' %}selected{% endif %}>bids</option></select>
+    </span></h2>
+  <div class="table-wrap" style="max-height:520px"><table class="data dense pivot"><thead><tr><th class="fz">{{ axis|capfirst }}</th>{% for c in pivot.cols %}<th class="num">{{ c|slice:"5:" }}/{{ c|slice:"2:4" }}</th>{% endfor %}<th class="num">Total</th></tr></thead><tbody>
+    {% for r in pivot.rows %}<tr><td class="fz">{{ r.key }}</td>{% for v in r.cells %}<td class="num {% if not v %}muted{% endif %} drill" data-kind="pivot" data-axis="{{ axis }}" data-bucket="{{ r.key }}" data-month="{{ pivot.cols|index:forloop.counter0 }}" data-title="{{ r.key }} · {{ pivot.cols|index:forloop.counter0 }}">{% if v %}{% if pv_value == 'value' %}{{ v|money_k }}{% else %}{{ v|floatformat:0 }}{% endif %}{% else %}·{% endif %}</td>{% endfor %}<td class="num"><b>{% if pv_value == 'value' %}{{ r.total|money_k }}{% else %}{{ r.total|floatformat:0 }}{% endif %}</b></td></tr>{% endfor %}
+    <tr class="tot"><td class="fz">Total</td>{% for v in pivot.totals %}<td class="num">{% if pv_value == 'value' %}{{ v|money_k }}{% else %}{{ v|floatformat:0 }}{% endif %}</td>{% endfor %}<td class="num">{% if pv_value == 'value' %}{{ pivot.grand|money_k }}{% else %}{{ pivot.grand|floatformat:0 }}{% endif %}</td></tr>
+  </tbody></table></div>
+</div>
+</div>
+{% include "dashboard/_fin_drill_modal.html" %}
+<script id="bids-charts" type="application/json">{{ charts_json|safe }}</script>
+<script id="bids-filters-json" type="application/json">{{ filters_json|safe }}</script>
+{% endblock %}
+{% block scripts %}<script src="{% static 'dashboard/finance_modals.js' %}"></script><script src="{% static 'bids/bids.js' %}"></script><script>PCABids.overview("{% url 'bids:bids_analytics_json' %}");</script>{% endblock %}

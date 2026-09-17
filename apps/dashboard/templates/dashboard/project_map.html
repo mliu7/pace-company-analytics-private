@@ -1,0 +1,78 @@
+{% extends "dashboard/base.html" %}{% load static humanize pca %}
+{% block title %}Project Map · Pace Company Analytics{% endblock %}
+{% block extra_css %}.main { padding: 0; overflow: hidden; }{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{% static 'dashboard/vendor/maplibre-gl.css' %}">
+<link rel="stylesheet" href="{% static 'dashboard/project_map.css' %}?v={{ ASSET_VERSION }}">
+<button class="pmap-nav-scrim" id="map-nav-scrim" aria-label="Close navigation" hidden></button>
+<div class="pmap" id="pmap">
+  <header class="pmap-header">
+    <button class="map-button pmap-nav-toggle" id="map-navigation" aria-label="Open navigation" aria-expanded="false">☰</button>
+    <div class="pmap-heading"><span class="pmap-eyebrow">PACE · FIELD OF VIEW</span><h1>Project Map<span class="pmap-live-dot" title="Current local data"></span></h1></div>
+    <div class="pmap-stats" id="pmap-stats" aria-live="polite"><span class="pmap-loading">Loading your sites…</span></div>
+    <button class="map-button pmap-focus" id="map-focus" title="Expand map" aria-label="Expand map">⛶</button>
+  </header>
+  <div class="pmap-map">
+    <div id="map" aria-label="Interactive project map"></div>
+    <div class="pmap-toolbar" aria-label="Map views">
+      <div class="map-button-group"><button class="map-button" data-view="chicago">Chicagoland</button><button class="map-button" data-view="loop">The Loop</button><button class="map-button" data-view="fit" title="Fit all matching sites">Fit sites</button></div>
+      <div class="map-button-group"><button class="map-button" id="map-orbit" aria-pressed="false" title="Slowly orbit the skyline">↻ Orbit</button><button class="map-button" data-view="top" id="map-perspective" aria-label="Switch to overhead view">2D</button><button class="map-button" id="map-theme" title="Switch to night map" aria-label="Switch to night map">☾</button></div>
+    </div>
+    <div class="pmap-map-status"><span class="pmap-status-dot"></span><span id="map-scale-label">Project skyline</span><span class="pmap-status-sep">/</span><label for="f-metric" title="Building height shows the total for jobs at this location">Site total</label><select id="f-metric"><option value="cv">Contract value{% if cfg.sales %} / bookings{% endif %}</option><option value="h">Hours in window</option><option value="cost">Cost to date</option><option value="hc" title="Adds project crew counts at each site; a person on multiple jobs can be counted more than once">Project crew counts</option><option value="bill">Billed to date</option></select></div>
+    <div class="pmap-tl-banner" id="pmap-tl-banner" hidden></div>
+    <div class="pmap-map-empty" id="map-empty" hidden><b>No matching sites</b><span>Try a different search or clear your filters.</span><button class="map-button" data-reset>Reset filters</button></div>
+    <div class="pmap-map-error" id="map-error" role="status" hidden></div>
+  </div>
+  <aside class="pmap-side" id="pmap-side" aria-label="Map explorer">
+    <div class="pmap-explorer-head"><span>Explore the work</span><button class="map-button icon" id="explorer-toggle" title="Minimize explorer" aria-label="Minimize explorer" aria-expanded="true">−</button></div>
+    <div class="pmap-explorer-body">
+      <div class="pmap-search"><span aria-hidden="true">⌕</span><input type="search" id="f-q" placeholder="Find a project, customer, address…" aria-label="Search projects and sites"><kbd>/</kbd></div>
+      <div class="pmap-window"><label for="f-w">Time window</label><select id="f-w"><option value="week">This week</option><option value="month">This month</option><option value="90d" selected>Last 90 days</option><option value="year">This year</option><option value="all">All time</option><option value="custom">Custom dates…</option></select></div>
+      <div id="f-custom" hidden><input type="date" id="f-from" aria-label="Start date"><input type="date" id="f-to" aria-label="End date"><button class="map-button" id="f-apply">Apply</button></div>
+      <div class="pmap-legend" id="pmap-legend" aria-label="Filter divisions"></div>
+      <div class="pmap-tabs" role="tablist" aria-label="Explore map">
+        <button role="tab" id="tab-sites" aria-controls="panel-sites" aria-selected="true" data-tab="sites">Sites <span id="sites-n"></span></button>
+        <button role="tab" id="tab-crew" aria-controls="panel-crew" aria-selected="false" data-tab="crew" tabindex="-1">People</button>
+        <button role="tab" id="tab-filters" aria-controls="panel-filters" aria-selected="false" data-tab="filters" tabindex="-1">Filters <span id="filter-n" hidden></span></button>
+      </div>
+      <div id="panel-sites" role="tabpanel" aria-labelledby="tab-sites" class="pmap-tabpanel">
+        <div class="pmap-list-tools"><label><input type="checkbox" id="sites-in-view"> In view</label><select id="sites-sort" aria-label="Sort sites"><option value="cv">Largest value</option><option value="h">Most activity</option><option value="name">Name A–Z</option></select></div>
+        <div class="pmap-sites" id="pmap-sites" aria-label="Matching sites"></div><button class="pmap-show-more" id="sites-more" hidden>Show more sites</button>
+      </div>
+      <div id="panel-crew" role="tabpanel" aria-labelledby="tab-crew" class="pmap-tabpanel" hidden>
+        <div class="pmap-row"><input type="search" id="p-q" placeholder="Find a person…" aria-label="Find a person"><button class="map-button" id="p-clear" hidden>Clear</button></div>
+        <p class="pmap-caption" id="pmap-people-n"></p><div class="pmap-people" id="pmap-people"></div>
+      </div>
+      <div id="panel-filters" role="tabpanel" aria-labelledby="tab-filters" class="pmap-tabpanel" hidden>
+        <div class="pmap-filter-title"><h3>Project status</h3><button class="pmap-text-button" id="f-reset">Reset all</button></div><div class="pmap-states" id="f-states"></div>
+        <div class="pmap-grid2">
+          <label>Project manager<select id="f-pm"><option value="">Everyone</option></select></label>
+          <label>Min. contract<select id="f-mincv"><option value="0">Any value</option><option value="10000">$10k+</option><option value="50000">$50k+</option><option value="100000">$100k+</option><option value="500000">$500k+</option><option value="1000000">$1M+</option></select></label>
+          <label>Type<select id="f-mode"><option value="">All types</option></select></label><label>Solution<select id="f-sol"><option value="">All solutions</option></select></label><label>Sector<select id="f-sec"><option value="">All sectors</option></select></label>
+          <label>Color by<select id="f-color"><option value="d">Division</option><option value="s">Project status</option><option value="sol">Solution</option><option value="heat">Crew activity</option><option value="q">Location confidence</option>{% if cfg.margins %}<option value="gpp">GP margin</option>{% endif %}</select></label>
+        </div>
+        <label class="pmap-check"><input type="checkbox" id="f-crew"> With crew activity only</label>
+        <details class="pmap-unlocated" data-remember="unlocated"><summary>Missing locations <span id="pmap-unloc-n"></span></summary><div class="pmap-people" id="pmap-unloc"></div></details>
+      </div>
+      <div class="pmap-active-filters" id="pmap-active-filters"></div>
+    </div>
+  </aside>
+  <footer class="pmap-timebar" id="pmap-timeline">
+    <button class="pmap-play" id="tl-play" aria-label="Play timeline" title="Replay this window month by month">▶</button>
+    <div class="pmap-time-title"><span id="timeline-mode">Activity window</span><b id="tl-label"></b></div>
+    <input type="range" id="tl-scrub" min="0" max="0" value="0" step="1" aria-label="Explore activity by month">
+    <button class="pmap-text-button" id="tl-speed" title="Playback speed" value="700">1×</button>
+    <button class="pmap-text-button" id="tl-stop" hidden>Full window</button><span id="pmap-window-label"></span>
+  </footer>
+  <aside class="pmap-detail" id="pmap-detail" aria-label="Site details" tabindex="-1" hidden></aside>
+</div>
+{{ cfg|json_script:"pmap-cfg" }}
+{% endblock %}
+{% block scripts %}
+<script src="{% static 'dashboard/vendor/maplibre-gl.js' %}"></script>
+<script src="{% static 'dashboard/vendor/earcut-2.2.4.min.js' %}"></script>
+<script src="{% static 'dashboard/vendor/polygon-clipping-0.15.7.min.js' %}"></script>
+<script src="{% static 'dashboard/project_map_geometry.js' %}?v={{ ASSET_VERSION }}"></script>
+<script src="{% static 'dashboard/project_map_towers.js' %}?v={{ ASSET_VERSION }}"></script>
+<script src="{% static 'dashboard/project_map.js' %}?v={{ ASSET_VERSION }}"></script>
+{% endblock %}

@@ -1,0 +1,27 @@
+{% extends "dashboard/base.html" %}
+{% load humanize pca static %}
+{% block title %}Production · Approvals · Pace Company Analytics{% endblock %}
+{% block extra_css %}@import url("{% static 'planning/planning.css' %}?v={{ PL_VERSION }}");{% endblock %}
+{% block content %}
+<div class="topbar"><div class="title"><h1>BOM &amp; labor approvals</h1><small>Submit documentation requests, review them, approve. The requester is the signed-in user; approving requires the approve capability and records who decided.</small></div>
+  <div class="actions row no-print"><a class="btn" id="ap-csv" href="{% url 'planning:planning_approval_export' %}" title="CSV of the rows currently shown">Export CSV</a>{% if can_write %}<button class="btn primary" id="ap-new">+ New request</button>{% endif %}</div></div>
+{% include "planning/_tabs.html" %}
+<div class="grid kpi" id="ap-kpi" style="margin-bottom:12px"></div>
+<div class="pl-toolbar">
+  <input type="search" id="ap-q" placeholder="Search project, number, requester, approver, department, notes…">
+  <select id="ap-status" style="font:inherit;padding:6px 8px;border:1px solid var(--line-strong);border-radius:8px"><option value="">All statuses</option><option value="pending">Pending approval</option><option value="approved">Approved</option></select>
+  <select id="ap-type" style="font:inherit;padding:6px 8px;border:1px solid var(--line-strong);border-radius:8px"><option value="">All request types</option><option value="BOM">BOM</option><option value="Labor">Labor</option></select>
+  <span class="spacer"></span><span class="pl-status" id="ap-msg"></span>
+</div>
+<div class="note" style="margin-bottom:8px">Click any request row or Edit to open and update the request. Chips, approver names and the cards act as filters.</div>
+<div class="card tight"><div class="table-wrap tall"><table class="data dense" id="ap-table" style="min-width:1320px"></table></div></div>
+<div class="pl-drawer-bg" id="ap-drawer-bg"></div>
+<aside class="pl-drawer" id="ap-drawer" role="dialog"><div class="head"><h2 id="ap-drawer-title">Request</h2><button class="pl-close" id="ap-drawer-close">✕</button></div><div class="body" id="ap-drawer-body"></div><div class="foot" id="ap-drawer-foot"></div></aside>
+{{ dataset|json_script:"ap-data" }}
+{% endblock %}
+{% block scripts %}
+<script src="{% static 'planning/planning.js' %}?v={{ PL_VERSION }}"></script>
+<script>window.AP_CONF = {editUrl: "{% url 'planning:planning_approval_edit' %}", decideUrl: "{% url 'planning:planning_approval_decide' %}", exportUrl: "{% url 'planning:planning_approval_export' %}", canWrite: {{ can_write|yesno:"true,false" }}, canApprove: {{ can_approve|yesno:"true,false" }}, who: "{{ who|escapejs }}",
+  init: {filter: "{{ request.GET.filter|default:''|escapejs }}", q: "{{ request.GET.q|default:''|escapejs }}"}};</script>
+<script src="{% static 'planning/approvals.js' %}?v={{ PL_VERSION }}"></script>
+{% endblock %}

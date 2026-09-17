@@ -1,0 +1,724 @@
+{% extends "dashboard/base.html" %}{% load humanize pca %}
+{% block title %}{{ p.display_number }} {{ p.title }} · Pace Company Analytics{% endblock %}
+{% block content %}{% load extension_hooks %}{% extension_cards "project" p %}
+<div class="crumbs"><a href="{% url 'dashboard:project_list' %}?div={{ p.division.code }}">Projects</a> › {{ p.division.code }} {{ p.division.name }}</div>
+<div class="topbar">
+  <div class="title">
+    <h1>{{ p.display_number }} <span style="font-weight:500">{{ p.title }}</span></h1>
+    <small>
+      <span class="tag {{ p.lifecycle_state }}">{{ p.lifecycle_state|state_label }}</span>
+      <span class="tag">{{ p.project_mode_rule|nice }}</span>
+      <span class="tag">{{ p.solution_class|nice|default:"unclassified" }}</span>
+      {% if p.customer %}<a href="{% url 'dashboard:customer_detail' p.customer.sl_customer_id %}">{{ p.customer.canonical_name }}</a>{% if p.customer.market_sector %} · {{ p.customer.market_sector }}{% endif %}{% endif %}
+      · PM {% if p.project_manager %}<a href="{% url 'dashboard:person_detail' p.project_manager.employee_key %}">{{ p.project_manager.canonical_name }}</a>{% else %}—{% endif %}
+      · Div head {{ p.division_head.canonical_name|default:"—" }}
+      · Sales {{ p.salesperson.name|default:p.salesperson_code|default:"—" }}{% if p.salesperson_non_commission %} <span class="muted">(non-commission)</span>{% endif %}
+      {% if p.estimator %} · Estimator {{ p.estimator.canonical_name }}{% endif %}
+      {% if p.ptt_project_pk %} · <a class="muted" href="https://timetracker.pace-systems.com/time_tracking/project/{{ p.ptt_project_pk }}/report-per-date/" target="_blank" rel="noopener" title="Open this project in Pace Time Tracker (new tab)">PTT&nbsp;↗</a>{% endif %}
+    </small>
+  </div>
+  <div class="row">
+    {% if pred and acc.margins %}<span class="pill {% if pred.risk_level == 'low' %}good{% elif pred.risk_level == 'moderate' %}warn{% else %}bad{% endif %}">Risk {{ pred.risk_level }} · {{ pred.risk_score }}</span>{% endif %}
+    {% for f in p.data_quality_flags %}{% if f != 'sl_commitments_already_shipped' %}<span class="pill warn" title="{{ f }}">{{ f|nice }}</span>{% endif %}{% endfor %}
+  </div>
+</div>
+
+<div class="grid wide-narrow" style="margin-bottom:14px">
+  {% if acc.margins %}
+  <div class="card">
+    <h2>Scoreboard <small>sold (current budget) → to date → {% if p.is_closed %}final{% else %}forecast at completion{% endif %}{% if pred %} · EAC as of {{ pred.as_of_date|date:"M j" }}, labor rate {{ pred.labor_rate_used|money:2 }}/h via <span title="Rate hierarchy: this project's own posted rate (≥80 h) → current crew's 13-week loaded rate → division rolling rate → budget rate → $90 default.">{{ pred.labor_rate_method|nice }}</span>{% endif %}</small></h2>
+    <table class="data score">
+      <thead><tr><th></th>
+        <th class="num" title="Current SL budget. SL keeps no original budget or change-order history, so 'sold' means the budget as it stands today.">Sold</th>
+        <th class="num" title="Actuals posted in SL so far.">To date</th>
+        {% if not p.is_closed %}<th class="num" title="Deterministic estimate at completion: posted labor + unposted PTT hours × rate + PM remaining hours × rate; non-labor at least budget, or actual + open commitments if higher.">At completion</th>{% endif %}
+      </tr></thead>
+      <tbody>
+        <tr><td>Revenue <span class="muted" title="Sold = SL contract value{% if p.budget_touched_after_setup %} (budget edited {{ p.contract_value_row_last_edited_at|date:'M j, Y' }}){% else %} (untouched since setup){% endif %} · To date = AR invoices − credits.">ⓘ</span></td>
+          <td class="num">{{ p.contract_value|money }}{% cv_mark p %}</td>
+          <td class="num">{{ p.billed_revenue|money }}</td>
+          {% if not p.is_closed %}<td class="num">{% if pred %}{{ pred.eac_revenue|money }}{% else %}—{% endif %}</td>{% endif %}</tr>
+        <tr><td>Direct cost</td>
+          <td class="num">{{ p.budget_direct_cost|money }}</td>
+          <td class="num">{{ p.actual_direct_cost|money }}</td>
+          {% if not p.is_closed %}<td class="num">{% if pred %}{{ pred.eac_direct_cost|money }}{% else %}—{% endif %}</td>{% endif %}</tr>
+        <tr class="strong"><td>Gross profit</td>
+          <td class="num">{{ p.sold_gp_dollars|money }}</td>
+          <td class="num {{ p.actual_gp_dollars|posneg }}">{{ p.actual_gp_dollars|money }}</td>
+          {% if not p.is_closed %}<td class="num {{ pred.eac_gp_dollars|posneg }}">{% if pred %}{{ pred.eac_gp_dollars|money }}{% else %}—{% endif %}</td>{% endif %}</tr>
+        <tr><td class="muted">GP margin</td>
+          <td class="num muted">{{ p.sold_gp_percent|pct }}</td>
+          <td class="num muted">{{ p.actual_gp_percent|pct }}{% if p.is_closed and vs_sold_pts != None %} · <span class="{{ vs_sold_pts|posneg }}">{{ vs_sold_pts|pts }}</span> vs sold{% endif %}</td>
+          {% if not p.is_closed %}<td class="num muted">{% if pred %}{{ pred.eac_gp_percent|pct }}{% if pred.projected_margin_change_points != None %} · <span class="{{ pred.projected_margin_change_points|posneg }}">{{ pred.projected_margin_change_points|pts }}</span> vs sold{% endif %}{% else %}—{% endif %}</td>{% endif %}</tr>
+      </tbody>
+    </table>
+    {% with note=p|cv_explain %}{% if note or acc.finance_write %}
+    <div class="cv-line muted">{{ note }}{% if acc.finance_write %} <details class="cv-adjust"><summary title="Set the contract value this app should use for this project (SL is never changed), or confirm SL is right.">adjust</summary>
+      <form method="post" action="{% url 'dashboard:project_contract_value' p.canonical_project_number %}">{% csrf_token %}
+        <input name="value" placeholder="contract value" inputmode="decimal"> <input name="reason" placeholder="why (kept in the log)" maxlength="300" required>
+        <label><input type="checkbox" name="confirm_sl"> SL is right</label> <button class="btn small">Save</button>{% if p.contract_value_override %} <button class="btn small" name="clear" value="1" formnovalidate>Remove override</button>{% endif %}
+      </form></details>{% endif %}</div>
+    {% endif %}{% endwith %}
+    {% if p.contract_value %}
+    <div class="board-bar" title="Billed {{ p.billed_revenue|money }} of {{ p.contract_value|money }} contract value; the marker is earned revenue (CV × PM % complete) {{ p.earned_revenue|money }}.">
+      <div class="board-bar-label"><span>Billing</span><span>{{ p.billed_revenue|money }} of {{ p.contract_value|money }}{% if p.project_mode_rule == 'service_agreement' %} · <span class="muted" title="Service agreements bill on a schedule; contract × PTT % − billed says nothing about earned work, so this job is outside WIP by rule (docs/07 §3).">service agreement — billed on schedule, not in WIP</span>{% else %}{% if board.over_billed != None %} · {% if board.over_billed >= 0 %}overbilled {{ board.over_billed|money }}{% else %}underbilled {{ board.over_billed|absolute|money }}{% endif %}{% endif %}{% endif %}</span></div>
+      <div class="bar big"><span style="width:{{ board.billed_pct|default:0 }}%"></span>{% if board.earned_pct != None %}<i class="mark" style="left:{{ board.earned_pct }}%" title="earned revenue {{ p.earned_revenue|money }}"></i>{% endif %}</div>
+    </div>
+    {% endif %}
+    {% if p.actual_direct_cost %}
+    <div class="board-bar" title="Direct cost spent so far vs the projected total; the marker is the current budget {{ p.budget_direct_cost|money }}.">
+      <div class="board-bar-label"><span>Cost</span><span>{{ p.actual_direct_cost|money }} spent{% if pred and not p.is_closed %} of {{ pred.eac_direct_cost|money }} projected{% endif %} · budget {{ p.budget_direct_cost|money }}</span></div>
+      <div class="bar big {% if pred and p.budget_direct_cost and pred.eac_direct_cost > p.budget_direct_cost %}warn{% endif %}"><span style="width:{{ board.cost_pct|default:0 }}%"></span>{% if board.cost_budget_pct != None %}<i class="mark" style="left:{{ board.cost_budget_pct }}%" title="current budget {{ p.budget_direct_cost|money }}"></i>{% endif %}</div>
+    </div>
+    {% endif %}
+    {% if pred.warnings %}<div class="callout warn" style="margin-top:10px">{% for w in pred.warnings %}{{ w }}{% if not forloop.last %} · {% endif %}{% endfor %}</div>{% endif %}
+  </div>
+  {% endif %}
+  <div class="card">
+    <h2>Vitals</h2>
+    <dl class="kv">
+      <dt title="PTT's labor-weighted blend of hours-remaining and expense-remaining, set by the PM.">PM % complete</dt><dd><b>{{ p.pm_percent_complete|pct:0 }}</b> <span class="muted">{{ p.pm_percent_complete_updated_at|date:"M j, Y"|default:"never set" }}</span></dd>
+      <dt title="Hours worked ÷ (hours worked + PM remaining hours).">Labor % (calc)</dt><dd>{{ p.labor_percent_complete_calc|pct:0 }}</dd>
+      <dt title="PTT field hours (onsite + OT + offsite). SL = payroll hours posted to the job; budget = SL budget hours; remaining = PM estimate.">Hours</dt><dd><b>{{ p.ptt_hours_total|hours }}</b> <span class="muted">SL {{ p.actual_labor_hours_sl|hours }} · budget {{ p.budget_labor_hours|hours }} · remaining {{ p.pm_remaining_hours|hours }}</span></dd>
+      {% if pred and pred.eac_labor_hours %}<dt title="Worked + PM remaining.">Hours at completion</dt><dd>{{ pred.eac_labor_hours|hours }}{% if pred.hours_overrun_ratio %} <span class="muted">= {{ pred.hours_overrun_ratio|pct:0 }} of budget</span>{% endif %}</dd>{% endif %}
+      {% if acc.margins %}<dt title="Actual labor cost (wages + burden) ÷ SL labor hours, vs the budgeted rate.">Loaded rate</dt><dd>{{ p.effective_loaded_labor_rate|money:2 }}/h <span class="muted">vs budget {{ p.budget_labor_rate|money:2 }}/h</span></dd>
+      {% if pred and pred.unposted_labor_hours %}<dt title="PTT hours logged after the last posted pay period — cost that has not hit SL yet.">Unposted labor</dt><dd>{{ pred.unposted_labor_hours|hours }} <span class="muted">≈ {{ pred.unposted_labor_cost|money }}</span></dd>{% endif %}{% endif %}
+      {% if acc.margins %}<dt title="Open PO lines ({{ commit_summary.open_po|money }}) + warehouse stock received for this job and not yet shipped to it ({{ commit_summary.warehouse|money }}).{% if commit_summary.phantom %} SL itself reports {{ commit_summary.sl|money }} of commitments, but {{ commit_summary.phantom|money }} of that is warehouse stock already shipped to this job — its cost is already in actuals, so it is excluded here.{% endif %} Click the amount for the line-by-line detail.">Open commitments</dt><dd><a href="#commitments" class="jump" title="Jump to the open-commitment lines: {{ commit_summary.n_open }} line{{ commit_summary.n_open|pluralize }} — {{ commit_summary.open_po|money }} open PO lines + {{ commit_summary.warehouse|money }} warehouse stock awaiting shipment.">{{ commit_summary.open|money }}</a>{% if commit_summary.n_open %} <span class="muted">{{ commit_summary.n_open }} line{{ commit_summary.n_open|pluralize }}</span>{% endif %}</dd>
+      {% if pred %}<dt>Risk</dt><dd><span class="tag {{ pred.risk_level }}">{{ pred.risk_level }}</span> {{ pred.risk_score }}{% if pred.risk_reasons %}<div class="muted" style="margin-top:2px">{% for r in pred.risk_reasons %}{{ r }}{% if not forloop.last %} · {% endif %}{% endfor %}</div>{% endif %}</dd>{% endif %}{% endif %}
+      <dt>Crew · dates</dt><dd>{{ p.distinct_workers }} people <span class="muted">{{ p.first_work_date|date:"M j, Y"|default:"—" }} → {{ p.last_work_date|date:"M j, Y"|default:"—" }}</span></dd>
+    </dl>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:14px">
+  <h2>Progress &amp; remaining <small>used + estimated remaining vs budget — hours from PTT, dollars from SL, remaining from the PM estimate and the EAC</small></h2>
+  <table class="data"><thead><tr>
+    <th></th>
+    <th class="num" title="What has gone in so far: PTT hours for the hour rows, SL actuals for the dollar rows.">Used</th>
+    <th class="num" title="Estimated still to come: the PM's remaining-hours estimate for hours; for dollars, remaining labor cost and any open commitments / unspent budget the EAC still expects.">Est remaining</th>
+    <th class="num" title="Used + estimated remaining.">Projected</th>
+    <th class="num" title="Current SL budget (SL keeps no original budget).">Budget</th>
+    <th class="num" title="Projected minus budget. Over = red, under = green.">Over / Under</th>
+  </tr></thead><tbody>
+  {% for r in progress_rows %}
+  <tr {% if r.strong %}style="font-weight:600"{% endif %}>
+    <td title="{{ r.help }}">{{ r.label }}</td>
+    <td class="num">{% if r.unit == 'h' %}{% if r.drill and r.used %}<a href="#" class="hours-drill" data-type="{{ r.drill }}" data-label="{{ r.label }}" title="Click for the individual PTT entries behind these hours — who, when, and their notes.">{{ r.used|hours }}</a>{% else %}{{ r.used|hours }}{% endif %}{% else %}{{ r.used|money }}{% endif %}</td>
+    <td class="num muted">{% if r.unit == 'h' %}{{ r.rem|hours }}{% else %}{{ r.rem|money }}{% endif %}</td>
+    <td class="num"><b>{% if r.unit == 'h' %}{{ r.proj|hours }}{% else %}{{ r.proj|money }}{% endif %}</b></td>
+    <td class="num muted">{% if r.unit == 'h' %}{{ r.budget|hours }}{% else %}{{ r.budget|money }}{% endif %}</td>
+    <td class="num">{% if r.over == None %}<span class="muted">—</span>{% elif r.over > 0 %}<span class="neg">{% if r.unit == 'h' %}{{ r.over|absolute|hours }}{% else %}{{ r.over|absolute|money }}{% endif %} over</span>{% elif r.over < 0 %}<span class="pos">{% if r.unit == 'h' %}{{ r.over|absolute|hours }}{% else %}{{ r.over|absolute|money }}{% endif %} under</span>{% else %}<span class="muted">on budget</span>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody></table>
+</div>
+
+<div class="card" style="margin-bottom:14px">
+  <h2>Change orders &amp; budget history <small>SL keeps no change-order table — this is rebuilt from the tasks Pace adds for change orders (their creation stamp = date and user), the app's own before/after log of every budget edit since {{ co_summary.first_history|date:"M j, Y" }}, and SL's last-edit stamp on older rows</small></h2>
+  <div class="row" style="gap:14px;flex-wrap:wrap;margin-bottom:10px">
+    {% if acc.margins %}
+    <div class="wip-chip" title="Contract value today (sum of all task CONTRACT VALUE budgets)."><div class="label">Current contract</div><div class="val">{{ co_summary.current_cv|money }}</div></div>
+    <div class="wip-chip" title="Current contract minus every known contract change. Blank when an earlier edit's prior value is not recorded in SL, so the original cannot be reconstructed."><div class="label">Original contract</div><div class="val">{% if co_summary.original_cv != None %}{{ co_summary.original_cv|money }}{% elif co_summary.original_cv_assumed != None %}≈ {{ co_summary.original_cv_assumed|money }}{% else %}<span class="muted" style="font-size:13px">not recoverable</span>{% endif %}</div><div class="sub muted">{% if co_summary.original_cv == None and co_summary.original_cv_assumed != None %}assumes {{ co_summary.cv_unknown_edits }} edit{{ co_summary.cv_unknown_edits|pluralize }} with unknown prior value changed nothing{% elif co_summary.original_cv == None %}{{ co_summary.cv_unknown_edits }} edit{{ co_summary.cv_unknown_edits|pluralize }} with unknown prior value{% else %}before all recorded changes{% endif %}</div></div>
+    <div class="wip-chip" title="Tasks whose id or description reads like a change order (CO1, AVCO5, COR15, 'Change Order 3'), with their contract value."><div class="label">Change orders</div><div class="val {{ co_summary.change_orders_amount|posneg }}">{{ co_summary.change_orders }}</div><div class="sub muted">{{ co_summary.change_orders_amount|signed_money }} contract</div></div>
+    <div class="wip-chip" title="Other tasks added after the project's first week (work orders under a blanket, added scope not labelled as a CO)."><div class="label">Other tasks added</div><div class="val">{{ co_summary.scope_added }}</div><div class="sub muted">{{ co_summary.scope_added_amount|signed_money }} contract</div></div>
+    {% endif %}
+    <div class="wip-chip" title="Budget rows changed in place. Exact = before and after both known (local history); the rest only have SL's date and user."><div class="label">In-place edits</div><div class="val">{{ co_summary.edits }}</div><div class="sub muted">{{ co_summary.edits_exact }} with before → after</div></div>
+  </div>
+  {% if co_groups %}
+  <div class="table-wrap" style="max-height:360px">
+  <table class="data dense"><thead><tr>
+    <th>When</th><th>Type</th><th>Task</th><th>Entered by</th>
+    {% if acc.margins %}<th class="num" title="Project contract value before → after this change (whole project, not just the task). ≈ = an edit with no recorded prior value sits between here and today, so the figure assumes that edit changed nothing.">Contract before → after</th><th class="num" title="Direct-cost budget (labor + material + subcontract + other) for the whole project, before → after.">Cost budget before → after</th>{% endif %}
+    <th class="num" title="Budgeted labor hours for the whole project, before → after.">Budget hrs before → after</th><th>Detail</th></tr></thead><tbody>
+  {% for g in co_groups %}<tr>
+    <td style="white-space:nowrap" title="{{ g.at|date:'D M j, Y g:i A' }}">{{ g.at|date:"M j, Y" }}</td>
+    <td><span class="tag {% if g.kind == 'change_order' %}critical{% elif g.kind == 'scope_added' %}ok{% else %}moderate{% endif %}">{% if g.kind == 'change_order' %}change order{% elif g.kind == 'scope_added' %}task added{% else %}edited{% endif %}</span></td>
+    <td class="trunc fluid" style="width:25%;min-width:140px" title="{{ g.task_description }}"><span class="mono">{{ g.task_id }}</span> <span class="muted">{{ g.task_description }}</span></td>
+    <td class="mono" style="white-space:nowrap">{{ g.by|default:"?" }}{% if g.prog %} <span class="muted" title="SL screen: PAPRJ = project maintenance, PABSM = budget maintenance">{{ g.prog }}</span>{% endif %}</td>
+    {% if acc.margins %}
+    <td class="num" style="white-space:nowrap">{% if g.cv %}{% if g.cv.delta != None %}<span class="{% if not g.cv.before_certain %}muted{% endif %}" title="{% if not g.cv.before_certain %}Approximate: assumes a later edit with unknown prior value changed nothing. {% endif %}Task {{ g.task_id }}: {{ g.cv.prior_value|money }} → {{ g.cv.new_value|money }}">{% if not g.cv.before_certain %}≈ {% endif %}{{ g.cv.proj_before|money }}</span> → <b class="{% if not g.cv.after_certain %}muted{% endif %}">{{ g.cv.proj_after|money }}</b> <span class="chip {{ g.cv.delta|posneg }}">{{ g.cv.delta|signed_money }}</span>{% else %}<span class="muted" title="SL did not keep the value before this edit. Task {{ g.task_id }} is now {{ g.cv.new_value|money }}; the project total shown assumes the edit changed nothing.">? → {{ g.cv.proj_after|money }}</span>{% endif %}{% endif %}</td>
+    <td class="num" style="white-space:nowrap">{% if g.cost %}{% if g.cost.delta != None %}<span class="{% if not g.cost.before_certain %}muted{% endif %}" title="Task {{ g.task_id }}: {{ g.cost.prior_value|money }} → {{ g.cost.new_value|money }}">{% if not g.cost.before_certain %}≈ {% endif %}{{ g.cost.proj_before|money }}</span> → <b class="{% if not g.cost.after_certain %}muted{% endif %}">{{ g.cost.proj_after|money }}</b> <span class="chip {{ g.cost.delta|posneg }}">{{ g.cost.delta|signed_money }}</span>{% else %}<span class="muted" title="SL did not keep the value before this edit. Task {{ g.task_id }} cost budget is now {{ g.cost.new_value|money }}.">? → {{ g.cost.proj_after|money }}</span>{% endif %}{% endif %}</td>
+    {% endif %}
+    <td class="num" style="white-space:nowrap">{% if g.hours %}{% if g.hours.delta != None %}<span class="{% if not g.hours.before_certain %}muted{% endif %}" title="Task {{ g.task_id }}: {{ g.hours.prior_value|floatformat:0 }} → {{ g.hours.new_value|floatformat:0 }} h">{% if not g.hours.before_certain %}≈ {% endif %}{{ g.hours.proj_before|floatformat:0 }}</span> → <b class="{% if not g.hours.after_certain %}muted{% endif %}">{{ g.hours.proj_after|floatformat:0 }} h</b> <span class="chip {{ g.hours.delta|posneg }}">{{ g.hours.delta|floatformat:"+0" }}</span>{% else %}<span class="muted" title="SL did not keep the value before this edit. Task {{ g.task_id }} is now {{ g.hours.new_value|floatformat:0 }} h.">? → {{ g.hours.proj_after|floatformat:0 }} h</span>{% endif %}{% endif %}</td>
+    <td class="muted" style="font-size:11.5px;white-space:nowrap">{% if g.confidence == 'exact' and g.kind == 'budget_edited' and acc.margins and g.cv %}{{ g.cv.prior_value|money }} → {{ g.cv.new_value|money }}{% elif g.confidence == 'exact' %}<span class="tag low" title="Amounts are exact: the task's budget rows were never edited after it was created, or both before and after values are in local history.">exact</span>{% elif g.confidence == 'approx' %}<span class="tag moderate" title="{{ g.note }}">now</span>{% else %}<span class="tag high" title="{{ g.note }}">prior ?</span>{% endif %}</td></tr>
+  {% endfor %}
+  </tbody></table></div>
+  {% else %}<div class="note">No change orders, added tasks or budget edits found for this project: every task was created in the project's first week and no budget row has been edited since.</div>{% endif %}
+</div>
+
+<div class="grid two" style="margin-bottom:14px">
+  {% if acc.margins %}
+  <div class="card">
+    <h2>Budget vs actual by SL account <small>current budget · PJPTDSUM · contract value lives in the scoreboard above (the REVENUE budget row is SL's revenue figure)</small></h2>
+    <table class="data"><thead><tr><th>Account</th><th class="num">Budget</th><th class="num">Actual</th><th class="num">Δ</th><th class="num">Bud hrs</th><th class="num">Act hrs</th><th class="num">Open commit</th></tr></thead><tbody>
+    {% for r in summary %}{% if r.category != 'excluded_memo' and r.sl_acct != 'CONTRACT VALUE' %}<tr>
+      <td>{{ r.sl_acct }} <span class="muted">{{ r.category|nice }}</span></td>
+      <td class="num">{{ r.budget|money }}</td><td class="num">{% if r.actual %}<a href="#" class="acct-drill" data-acct="{{ r.sl_acct }}" title="Click to list every SL posting behind this amount — vendor, voucher, item, date.">{{ r.actual|money }}</a>{% else %}{{ r.actual|money }}{% endif %}</td>
+      <td class="num {% if r.category == 'revenue' or r.category == 'contract_value' %}{{ r.delta|posneg }}{% else %}{{ r.delta|posneg_inv }}{% endif %}">{% if r.budget or r.actual %}{{ r.delta|signed_money }}{% endif %}</td>
+      <td class="num muted">{% if r.category == 'labor_wage' %}{{ r.budget_units|num }}{% endif %}</td>
+      <td class="num muted">{% if r.category == 'labor_wage' %}{{ r.units|num }}{% endif %}</td>
+      <td class="num muted">{% if r.open_commit or r.phantom_commit %}<a href="#commitments" class="jump" title="Open PO lines + warehouse stock not yet shipped to the job — click for the lines.{% if r.phantom_commit %} SL shows {{ r.committed|money }} committed on this account, but {{ r.phantom_commit|money }} is warehouse stock already shipped here (cost already in actuals) — excluded.{% endif %}">{{ r.open_commit|money }}</a>{% endif %}</td>
+    </tr>{% endif %}{% endfor %}
+    </tbody></table>
+    <div class="chart" style="margin-top:10px"><canvas id="c_bva"></canvas></div>
+    {% if by_task|length > 1 %}
+    <h3 style="margin-top:12px">By SL task</h3>
+    <table class="data"><thead><tr><th>Task</th><th class="num">CV</th><th class="num">Billed</th><th class="num">Budget cost</th><th class="num">Actual cost</th><th class="num">Bud hrs</th><th class="num">Hrs</th></tr></thead><tbody>
+    {% for t in by_task %}<tr><td>{{ t.task_id }} <span class="muted">{{ tasks|getitem:t.task_id|default:"" }}</span></td><td class="num">{{ t.cv|money }}</td><td class="num">{{ t.billed|money }}</td><td class="num">{{ t.budget_cost|money }}</td><td class="num">{{ t.cost|money }}</td><td class="num muted">{{ t.budget_hours|num }}</td><td class="num">{{ t.hours|num }}</td></tr>{% endfor %}
+    </tbody></table>
+    {% endif %}
+  </div>
+  {% endif %}
+  <div class="card">
+    <h2>Labor: hours worked vs PM forecast <small>PTT cumulative hours · PM remaining-hours revisions</small></h2>
+    <div class="chart tall"><canvas id="c_hours"></canvas></div>
+    {% if system_mix %}<div style="margin-top:10px"><div class="progress-stack">{% for k, v in system_mix %}<span style="width:{% widthratio v 1 100 %}%;background:{% cycle '#1f5eff' '#178a52' '#b7791f' '#6a3ff0' '#0e9aa7' '#c62828' '#8d6e63' '#546e7a' %}" title="{{ k }} {% widthratio v 1 100 %}%"></span>{% endfor %}</div>
+    <div class="legend">{% for k, v in system_mix %}<span><i style="background:{% cycle '#1f5eff' '#178a52' '#b7791f' '#6a3ff0' '#0e9aa7' '#c62828' '#8d6e63' '#546e7a' as sysc %}"></i>{{ k }} {% widthratio v 1 100 %}%</span>{% endfor %}</div></div>{% endif %}
+    {% if work_mix %}<div class="legend" style="margin-top:4px">Work type: {% for k, v in work_mix %}<span>{{ k|default:"(blank)" }} {% widthratio v 1 100 %}%</span>{% endfor %}</div>{% endif %}
+  </div>
+</div>
+
+{% if commit_lines and acc.margins %}
+<div class="card" id="commitments" style="margin-bottom:14px">
+  <h2>Open commitments <small title="Open PO lines + warehouse stock received for this job and not yet shipped to it.{% if commit_summary.phantom %} SL itself reports {{ commit_summary.sl|money }}; the difference is warehouse stock already shipped to the job (cost already in actuals) — listed under the fold below.{% endif %}">{{ commit_summary.n_open }} open line{{ commit_summary.n_open|pluralize }} = {{ commit_summary.open|money }}</small></h2>
+  <table class="data"><thead><tr><th>Kind</th><th>Task</th><th>Acct</th><th>Item</th><th>PO</th><th>Vendor</th><th class="num">PO / receipt date</th><th class="num">Qty</th><th class="num">Shipped to job</th><th class="num">Open qty</th><th class="num">SL amount</th><th class="num">Open amount</th></tr></thead><tbody>
+  {% for c in commit_lines %}{% if not c.is_phantom %}<tr>
+    <td>{% if c.source_type == 'open_po' %}Open PO line{% if c.voucher_matched %} <span class="tag high" title="An AP voucher for the same vendor and amount is already posted to this job — the cost is in actuals and this PO was never closed in SL. Treated as fulfilled (no future cost); close the PO in SL.">already vouchered</span>{% endif %}{% else %}Warehouse stock (allocated){% endif %}</td><td class="muted">{{ c.task_id }}</td><td class="muted">{{ c.sl_acct }}</td>
+    <td class="mono trunc fluid" style="width:30%;min-width:140px"{% if c.comment and c.source_type == 'open_po' %} title="{{ c.comment }}"{% endif %}>{{ c.item_id }}{% if c.comment and c.source_type == 'open_po' %} <span class="muted">{{ c.comment }}</span>{% endif %}</td>
+    <td class="mono">{{ c.po_number }}{% if c.receipt_number %} <span class="muted">rcpt {{ c.receipt_number }}</span>{% endif %}</td><td class="muted">{{ c.vendor_id }}</td>
+    <td class="num muted">{{ c.po_date|default:c.receipt_date|date:"Y-m-d" }}{% if c.promise_date %} <span class="muted">due {{ c.promise_date|date:"M j" }}</span>{% endif %}</td>
+    <td class="num">{{ c.units|num:1 }}</td><td class="num muted">{% if c.qty_shipped_to_project != None %}{{ c.qty_shipped_to_project|num:1 }}{% endif %}</td><td class="num">{{ c.open_units|num:1 }}</td>
+    <td class="num muted">{{ c.amount|money:2 }}</td><td class="num">{{ c.open_amount|money:2 }}</td></tr>{% endif %}{% endfor %}
+  {% if not commit_summary.n_open %}<tr><td colspan="12" class="empty">No real open commitments: no open PO lines and no warehouse stock awaiting shipment to this job.</td></tr>{% endif %}
+  </tbody></table>
+  {% if commit_summary.n_phantom %}
+  <details data-remember="phantom" style="margin-top:8px"><summary>Allocations already shipped to the job ({{ commit_summary.n_phantom }} rows, {{ commit_summary.phantom|money }}) — why SL still shows them as commitments</summary>
+  <div class="note" style="margin:6px 0">Each row is a PO receipt at the warehouse for this job. SL created a project-inventory allocation ("commitment") on receipt; the stock then shipped to the job on a sales order (cost posted to MATERIALS via OM/IN), but the allocation was never relieved, so SL keeps reporting it — and <code>ItemSite.QtyAvail</code> for the item goes negative by the same quantity. Cleaning these up is an SL housekeeping task (unallocate in Inventory); nothing here writes to SL.</div>
+  <table class="data"><thead><tr><th>Task</th><th>Acct</th><th>Item</th><th>Received on PO</th><th>Receipt</th><th class="num">Received</th><th class="num">Qty allocated</th><th class="num">Shipped to job</th><th class="num">SL amount</th></tr></thead><tbody>
+  {% for c in commit_lines %}{% if c.is_phantom %}<tr><td class="muted">{{ c.task_id }}</td><td class="muted">{{ c.sl_acct }}</td><td class="mono">{{ c.item_id }}</td><td class="mono">{{ c.po_number }}</td><td class="mono muted">{{ c.receipt_number }}/{{ c.receipt_line }}</td><td class="num muted">{{ c.receipt_date|date:"Y-m-d" }}</td><td class="num">{{ c.units|num:1 }}</td><td class="num">{{ c.qty_shipped_to_project|num:1 }}</td><td class="num muted">{{ c.amount|money:2 }}</td></tr>{% endif %}{% endfor %}
+  </tbody></table></details>
+  {% endif %}
+</div>
+{% endif %}
+
+{% include "bids/_project_bid_card.html" %}
+{% include "planning/_project_production.html" %}
+{% include "documents/_project_documents.html" %}
+
+{% if materials.has_data %}{% with M=materials T=materials.totals X=materials.extras %}
+<div class="card" id="materials" style="margin-bottom:14px">
+  <h2>Materials on the job <small title="Every SL document that names this project along the material path: sales-order lines (what the job asked for from stock), purchase orders (what was bought, from whom, by whom), warehouse receipts, shippers (what left for the site, when, by whom) and the AP vouchers on those POs — plus the ChannelOnline document behind each sales order, so quoted cost can be compared with what SL actually paid. Documents since {{ M.since|date:"M Y" }}; older jobs show only the ledger totals above.">{{ T.n_items }} item{{ T.n_items|pluralize }} · {{ T.n_pos }} PO{{ T.n_pos|pluralize }}{% if T.n_open_pos %} ({{ T.n_open_pos }} open){% endif %} · {{ T.n_sos }} sales order{{ T.n_sos|pluralize }} · {{ T.n_shippers }} shipment{{ T.n_shippers|pluralize }} to the job{% if M.cnet_docs %} · quoted in ChannelOnline {% for d in M.cnet_docs %}<a href="{% url 'dashboard:sales010_orders' %}?q={{ d.document_number }}" title="ChannelOnline {{ d.doc_type|nice }} {{ d.document_number }}{% if d.salesperson_name %} · {{ d.salesperson_name }}{% endif %}">#{{ d.document_number }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %} · SL documents since {{ M.since|date:"M Y" }}</small></h2>
+
+  <div class="row" style="gap:8px;flex-wrap:wrap;align-items:stretch;margin:4px 0 10px">
+    {% if acc.margins %}
+    {% if T.quoted_cost != None %}<div class="wip-chip" title="Σ item cost on the ChannelOnline document(s) linked to this job's sales orders (SOHeader.User2) — the cost the quote was built on."><div class="label">Quoted cost (ChannelOnline)</div><div class="val">{{ T.quoted_cost|money }}</div><div class="sub muted">quoted price {{ T.quoted_price|money }}{% if T.quote_delta != None %} · <span title="Σ over items with a ChannelOnline line for the same part: (bought unit cost − quoted unit cost) × quantity the job ordered. Bought = the PO price (SL's stock cost when the job raised no PO). Negative = bought below the quote.">bought vs quote <span class="{{ T.quote_delta|posneg_inv }}">{{ T.quote_delta|signed_money }}</span> on {{ T.quote_matched_items }} matched item{{ T.quote_matched_items|pluralize }}</span>{% endif %}</div></div>{% endif %}
+    <div class="wip-chip" title="Σ extended cost of every non-cancelled PO line tied to this job (SL ProjectID on the line, or deduced from sales-order demand — see the PO table)."><div class="label">Ordered on POs</div><div class="val">{{ T.po_ordered|money }}</div><div class="sub muted">{{ T.n_pos }} PO{{ T.n_pos|pluralize }}{% if T.n_open_pos %} · <b>{{ T.n_open_pos }} still open</b>{% endif %}{% if T.n_cancelled_pos %} · {{ T.n_cancelled_pos }} cancelled{% endif %} · vendors billed {{ T.po_vouchered|money }}</div></div>
+    <div class="wip-chip" title="Σ PO receipt lines for this job (POTran R) — stock that reached the warehouse, or the site for drop-ships."><div class="label">Received</div><div class="val">{{ T.po_received|money }}</div><div class="sub muted">{{ T.n_receipts }} receipt{{ T.n_receipts|pluralize }}{% if T.last_rcpt %} · last {{ T.last_rcpt|date:"M j, Y" }}{% endif %}</div></div>
+    <div class="wip-chip" title="Σ shipper-line cost for this job — the stock that left the warehouse for the site. The shipper's invoice is what posts MATERIALS (OM/IN) to the project."><div class="label">Shipped to job</div><div class="val">{{ T.shipped_cost|money }}</div><div class="sub muted">{{ T.n_shippers }} shipment{{ T.n_shippers|pluralize }} · {{ T.so_qty_ship|num }} of {{ T.so_qty|num }} units{% if T.so_qty_bo %} · <b class="warn-ink">{{ T.so_qty_bo|num }} back-ordered</b>{% endif %}{% if T.last_ship %} · last {{ T.last_ship|date:"M j, Y" }}{% endif %}</div></div>
+    <div class="wip-chip" title="SL MATERIALS actuals on the project (the number in Budget vs actual), purchase variance shown separately."><div class="label">Posted to MATERIALS</div><div class="val">{{ T.posted_material|money }}</div><div class="sub muted">budget {{ T.budget_material|money }} · purchase variance <span class="{{ T.purchase_variance|posneg_inv }}">{{ T.purchase_variance|signed_money }}</span></div></div>
+    <div class="wip-chip" title="Freight the vendors billed on this job's POs (AP voucher FreightAmt) vs the freight postings that actually landed on the job (ODC/MATERIALS rows whose description says freight/shipping). PO-header freight estimates and shipper freight are in the details below."><div class="label">Freight</div><div class="val">{{ X.voucher_freight|money }}</div><div class="sub muted">billed by vendors on these POs · {{ X.freight.total|money }} posted to the job{% if X.ship_freight_cost %} · {{ X.ship_freight_cost|money }} on shippers{% endif %}</div></div>
+    {% endif %}
+    <div class="wip-chip" title="Where each item stands, from the PM's point of view."><div class="label">Item status</div><div class="val" style="font-size:13px;line-height:1.9">{% for k, label, cls, n in M.status_counts %}<span class="tag {{ cls }}" style="margin-right:4px">{{ n }} {{ label }}</span>{% endfor %}</div></div>
+  </div>
+
+  <div class="row" style="gap:10px;align-items:center;margin-bottom:6px"><b style="font-size:13px">Items</b> <span class="muted" style="font-size:12px">one row per SL item across every document · sorted by cost{% if acc.margins %} · prices read quoted → bought → vendor-billed → sale, each as the unit price over × quantity = total{% endif %}</span><input id="matfilter" type="search" placeholder="filter items…" style="margin-left:auto;max-width:240px"></div>
+  <div class="table-wrap freeze" style="max-height:60vh">
+  <table class="data dense freeze" id="mattable"><thead><tr>
+    <th class="fz fz1">Item</th><th title="No PO = on a sales order for the job but no purchase order found · On order = PO placed, nothing received · At warehouse = fully received · Shipped to job = the job's full quantity left the warehouse.">Status</th>
+    <th class="num" title="Quantity ordered for the job on sales orders (returns netted out).">For job</th><th class="num" title="Quantity shipped from the warehouse to the job.">Shipped</th>
+    <th class="num" title="Purchase-order quantity ordered / received (cancelled POs excluded).">PO qty ord / rcvd</th><th title="Purchase orders carrying the item; letter = PO status (O open, P placed, M complete, X cancelled). ≈ = tie deduced from sales-order demand, not an SL fact.">PO(s)</th>
+    <th title="Vendor(s) on the item's POs and, beneath, the SL login that entered the PO (PurchOrd.Crtd_User — Buyer is rarely filled in). 'SO by' = who put the item on the job's sales order when there is no PO.">Vendor · ordered by</th>
+    {% if acc.margins %}<th class="num" title="Unit cost on the ChannelOnline document the job's sales order came from — the cost the estimate was built on. Beneath: quoted quantity × unit = the quote's extended cost. Blank = no ChannelOnline line for this part.">Quoted<span class="sub2 muted">unit · × qty = total</span></th>
+    <th class="num" title="Actual purchase price: unit cost on the job's purchase-order lines (cancelled POs excluded). Beneath: PO quantity × unit = extended PO cost. 'stock' = the job raised no PO — the item came out of inventory at SL's cost on the sales order.">Bought<span class="sub2 muted">unit · × qty = total</span></th>
+    <th class="num" title="What the vendor's invoice actually charged for those PO lines (SL matches AP vouchers to the PO line: CostVouched ÷ QtyVouched). Beneath: vouched quantity × unit = amount billed, and the difference from the PO price — SL's purchase variance for the item. 'not billed' = no vendor invoice matched yet.">Vendor billed<span class="sub2 muted">unit · × qty = total</span></th>
+    {% if T.items_sale_ext %}<th class="num" title="Sale price on the job's sales order (SL SlsPrice): unit, and quantity × unit = extended.">Sale<span class="sub2 muted">unit · × qty = total</span></th>{% endif %}
+    <th class="num" title="Bought − quoted: per unit and as % of the quoted unit cost, then on the quantity the job ordered. Negative (green) = bought below the quote. Notes flag an earlier cancelled PO, a quantity that differs from the quote, or a PO quantity that differs from the job's. 'no quote' = no ChannelOnline line for this part.">Drift vs quote<span class="sub2 muted">unit · % · on job qty</span></th>{% endif %}
+  </tr></thead><tbody>
+  {% for it in M.items %}<tr class="mat-item">
+    <td class="fz fz1 trunc" title="{{ it.item_id }} {{ it.descr }}"><span class="mono">{{ it.item_id|default:"—" }}</span>{% if it.dropship %} <span class="tag" title="Drop-shipped straight to the site — receipt = delivery.">drop-ship</span>{% endif %}<br><span class="muted" style="font-size:12px">{{ it.descr }}</span></td>
+    <td><span class="tag {{ it.status_cls }}">{{ it.status_label }}</span>{% if it.no_so %} <span class="muted" title="Bought on a PO for this job but never put on a sales order — the stock is not booked to the job yet.">no SO</span>{% endif %}{% if it.qty_bo %} <span class="muted">BO {{ it.qty_bo|num }}</span>{% endif %}<div class="muted" style="font-size:11px">{% if it.last_ship %}shipped {{ it.last_ship|date:"M j" }}{% elif it.last_rcpt %}received {{ it.last_rcpt|date:"M j" }}{% endif %}</div></td>
+    <td class="num">{{ it.net_qty_ord|num }}{% if it.qty_returned %} <span class="muted" title="{{ it.qty_returned|num }} returned">↩{{ it.qty_returned|num }}</span>{% endif %}</td><td class="num">{{ it.qty_ship|num }}</td>
+    <td class="num muted">{% if it.po_qty_ord %}{{ it.po_qty_ord|num }} / {{ it.po_qty_rcvd|num }}{% endif %}</td>
+    <td class="mono" style="font-size:12px;max-width:150px">{% for po in M.pos %}{% if po.po_nbr in it.po_nbrs %}<span title="{{ po.vendor_name }} · {{ po.status_label }} · {{ po.po_date|date:'M j, Y' }}">{% if po.tie == 'deduced' %}≈{% endif %}{{ po.po_nbr }}<span class="muted">{{ po.status }}</span></span> {% endif %}{% endfor %}</td>
+    <td class="trunc fluid" style="width:14%;min-width:130px" title="{{ it.vendors|join:', ' }}{% if it.ordered_by %} · PO entered by {{ it.ordered_by|join:', ' }}{% endif %}{% if it.so_entered_by %} · sales order by {{ it.so_entered_by|join:', ' }}{% endif %}">{{ it.vendors|join:", " }}{% if it.ordered_by %}<span class="sub2 muted">by {{ it.ordered_by|join:", " }}</span>{% elif it.so_entered_by %}<span class="sub2 muted">SO by {{ it.so_entered_by|join:", " }}</span>{% endif %}</td>
+    {% if acc.margins %}<td class="num nowrap">{% if it.cnet_unit_cost != None %}{{ it.cnet_unit_cost|money_auto }}<span class="sub2 muted">× {{ it.cnet_qty|num }} = {{ it.cnet_ext_cost|money }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num nowrap">{% if it.buy_unit != None %}{{ it.buy_unit|money_auto }}{% if it.buy_basis == 'stock' %} <span class="tag" title="No purchase order for this job — the item came out of inventory at SL's cost on the sales order.">stock</span>{% endif %}<span class="sub2 muted">× {{ it.buy_qty|num }} = {{ it.buy_ext|money }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num nowrap">{% if it.vendor_unit_cost != None %}{{ it.vendor_unit_cost|money_auto }}<span class="sub2 muted">× {{ it.po_qty_vouched|num }} = {{ it.po_cost_vouched|money }}</span>{% if it.vendor_vs_po %}<span class="sub2 {{ it.vendor_vs_po|posneg_inv }}" title="Vendor invoice vs the PO price on the vouched quantity — SL's purchase variance for this item.">{{ it.vendor_vs_po|signed_money_auto }} vs PO</span>{% endif %}{% elif it.po_qty_ord %}<span class="muted" title="No vendor invoice matched to these PO lines yet.">not billed</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+    {% if T.items_sale_ext %}<td class="num nowrap muted">{% if it.sale_unit %}{{ it.sale_unit|money_auto }}<span class="sub2">× {{ it.net_qty_ord|num }} = {{ it.so_tot_ord|money }}</span>{% else %}—{% endif %}</td>{% endif %}
+    <td class="num nowrap">{% if it.drift_unit != None and not it.drift_unit %}<span class="muted" title="Bought at exactly the quoted unit cost.">at quote</span>{% elif it.drift_unit != None %}<span class="{{ it.drift_unit|posneg_inv }}">{{ it.drift_unit|signed_money_auto }}{% if it.drift_pct != None %} · {% if it.drift_pct > 0 %}+{% endif %}{{ it.drift_pct|pct:1 }}{% endif %}</span><span class="sub2 {{ it.delta_vs_quote|posneg_inv }}">{{ it.delta_vs_quote|signed_money }} on {{ it.drift_qty|num }}</span>{% else %}<span class="muted" title="No ChannelOnline line for this part to compare with.">no quote</span>{% endif %}{% if it.drift_notes %}<span class="sub2 muted" style="white-space:normal;max-width:150px;margin-left:auto">{{ it.drift_notes|join:" · " }}</span>{% endif %}</td>{% endif %}
+  </tr>{% endfor %}
+  </tbody>{% if acc.margins and M.items %}<tfoot><tr><td class="fz fz1">Total · {{ T.n_items }} item{{ T.n_items|pluralize }}</td><td colspan="6"></td>
+    <td class="num muted" title="Σ the quote's extended cost over the items that have a ChannelOnline line (the quote's own quantities).">{% if T.items_quoted_ext != None %}{{ T.items_quoted_ext|money }}<span class="sub2 muted">{{ T.quote_matched_items }} of {{ T.n_items }} items quoted</span>{% endif %}</td>
+    <td class="num" title="Σ extended PO cost (stock cost for items with no PO).">{{ T.items_bought_ext|money }}</td>
+    <td class="num" title="Σ vendor invoices matched to the job's PO lines.">{{ T.items_vendor_ext|money }}</td>
+    {% if T.items_sale_ext %}<td class="num muted" title="Σ extended sale price on the sales orders.">{{ T.items_sale_ext|money }}</td>{% endif %}
+    <td class="num {{ T.quote_delta|posneg_inv }}" title="Σ (bought − quoted) × job quantity over the matched items.">{% if T.quote_delta != None %}{{ T.quote_delta|signed_money }}<span class="sub2 muted">on the {{ T.quote_matched_items }} quoted</span>{% endif %}</td>
+  </tr></tfoot>{% endif %}</table></div>
+
+  <details data-remember="pos" style="margin-top:10px"{% if T.n_open_pos %} open{% endif %}><summary><b>Purchase orders</b> <span class="muted">{{ T.n_pos }} PO{{ T.n_pos|pluralize }}{% if T.n_open_pos %} · {{ T.n_open_pos }} open{% endif %}{% if T.n_deduced_pos %} · {{ T.n_deduced_pos }} tied by deduction (≈){% endif %} — click a PO for its lines, receipts and vendor invoices</span></summary>
+  <div class="table-wrap freeze" style="max-height:60vh;margin-top:6px"><table class="data dense pay-table"><thead><tr>
+    <th>PO</th><th class="num">Date</th><th>Vendor</th><th title="SL login that entered the PO.">Ordered by</th><th>Status</th><th class="num">Lines</th><th class="num" title="Quantity ordered / received across the PO's lines for this job.">Qty ord / rcvd</th>
+    {% if acc.margins %}<th class="num" title="Σ extended cost of the PO lines for this job.">PO cost</th><th class="num" title="AP vouchers referencing this PO (VO + AC − AD; voided excluded). Covers the whole PO, which can include other jobs' lines.">Vendor billed</th><th class="num" title="Freight the vendor charged on those vouchers · PO-header freight estimate in parentheses when different.">Freight</th>{% endif %}
+    <th class="num" title="Latest vendor promise date on the lines · last receipt date on the PO.">Promise · last rcpt</th>
+  </tr></thead><tbody>
+  {% for po in M.pos %}<tr class="pay-group mat-group" data-k="po-{{ po.po_nbr }}" title="click to expand">
+    <td class="mono nowrap"><span class="pay-caret">▸</span>{% if po.tie == 'deduced' %}<span title="No project on the PO line in SL — tied to this job from sales-order demand for the same item ({{ po.deduce_basis }}).">≈</span>{% endif %}{{ po.po_nbr }}{% if po.dropship %} <span class="tag">drop-ship</span>{% endif %}</td>
+    <td class="num muted">{{ po.po_date|date:"Y-m-d" }}</td><td class="trunc" style="max-width:200px">{{ po.vendor_name|default:po.vendor_id }}</td><td class="nowrap">{{ po.ordered_by|default:po.buyer|default:"—" }}</td>
+    <td><span class="tag {{ po.status_cls }}">{{ po.status_label }}</span></td><td class="num muted">{{ po.n_lines }}</td><td class="num">{{ po.qty_ord|num }} / {{ po.qty_rcvd|num }}</td>
+    {% if acc.margins %}<td class="num">{{ po.ext_cost|money }}</td><td class="num muted">{% if po.n_vouchers %}{{ po.vouchered|money }} <span class="muted">({{ po.n_vouchers }})</span>{% endif %}</td>
+    <td class="num muted">{% if po.voucher_freight %}{{ po.voucher_freight|money }}{% endif %}{% if po.po_freight and po.po_freight != po.voucher_freight %} <span class="muted">({{ po.po_freight|money }})</span>{% endif %}</td>{% endif %}
+    <td class="num muted nowrap">{% if po.prom_date %}{{ po.prom_date|date:"M j" }}{% endif %}{% if po.last_rcpt_date %} · {{ po.last_rcpt_date|date:"M j, Y" }}{% endif %}</td>
+  </tr>
+  <tr class="pay-hidden mat-sub" data-k="po-{{ po.po_nbr }}"><td colspan="{% if acc.margins %}11{% else %}8{% endif %}" class="pay-indent" style="padding-top:6px;padding-bottom:10px">
+    <table class="data dense" style="margin-bottom:6px"><thead><tr><th>Line</th><th>Item</th><th>Description</th><th class="num">Qty ord</th><th class="num">Rcvd</th>{% if acc.margins %}<th class="num">Unit cost</th><th class="num">Ext cost</th><th class="num" title="What the vendor invoiced for the line (PurOrdDet.CostVouched over QtyVouched) — differs from Ext cost by SL's purchase variance.">Billed</th>{% endif %}<th class="num">Promise</th><th>Received?</th></tr></thead><tbody>
+    {% for l in po.lines %}<tr><td class="mono muted">{{ l.line_ref }}</td><td class="mono">{{ l.item_id }}</td><td class="trunc" style="max-width:360px" title="{{ l.descr }}">{{ l.descr }}</td><td class="num">{{ l.qty_ord|num }}</td><td class="num">{{ l.qty_rcvd|num }}</td>{% if acc.margins %}<td class="num muted">{{ l.unit_cost|money:2 }}</td><td class="num">{{ l.ext_cost|money }}</td><td class="num muted">{% if l.qty_vouched %}{{ l.cost_vouched|money }}{% if l.qty_vouched != l.qty_ord %} <span class="muted">({{ l.qty_vouched|num }})</span>{% endif %}{% endif %}</td>{% endif %}<td class="num muted">{{ l.prom_date|date:"M j"|default:"" }}</td><td><span class="tag {% if l.rcvd_label == 'received' %}low{% elif l.rcvd_label == 'partial' %}moderate{% elif l.rcvd_label == 'cancelled' %}canceled{% else %}awarded_not_started{% endif %}">{{ l.rcvd_label }}</span></td></tr>{% endfor %}
+    </tbody></table>
+    {% if po.receipts %}<div class="muted" style="font-size:12px;margin:4px 0"><b>Receipts</b>: {% regroup po.receipts by rcpt_nbr as rg %}{% for grp in rg %}<span class="nowrap" title="{% for r in grp.list %}{{ r.item_id }} × {{ r.qty|num }}{% if not forloop.last %} · {% endif %}{% endfor %}">{{ grp.grouper }} {{ grp.list.0.rcpt_date|date:"M j, Y" }} by {{ grp.list.0.crtd_user|default:"?" }}{% if grp.list.0.vend_invc_nbr %} (vendor inv {{ grp.list.0.vend_invc_nbr }}){% endif %}</span>{% if not forloop.last %} · {% endif %}{% endfor %}</div>{% endif %}
+    {% if po.vouchers and acc.margins %}<div class="muted" style="font-size:12px"><b>Vendor invoices (AP)</b>: {% for vch in po.vouchers %}<span class="nowrap">{{ vch.doc_type }} {{ vch.ref_nbr }} {{ vch.doc_date|date:"M j, Y" }} {{ vch.amount|money }}{% if vch.freight_amt %} <span title="freight on this voucher">+ frt {{ vch.freight_amt|money }}</span>{% endif %} <span class="muted">by {{ vch.crtd_user }}</span></span>{% if not forloop.last %} · {% endif %}{% endfor %}</div>{% endif %}
+  </td></tr>{% endfor %}
+  </tbody></table></div></details>
+
+  <details data-remember="sos" style="margin-top:10px"><summary><b>Sales orders &amp; shipments to the job</b> <span class="muted">{{ T.n_sos }} order{{ T.n_sos|pluralize }} · {{ T.n_shippers }} shipment{{ T.n_shippers|pluralize }} — click an order for its shippers</span></summary>
+  <div class="table-wrap freeze" style="max-height:60vh;margin-top:6px"><table class="data dense pay-table"><thead><tr>
+    <th>Order</th><th class="num">Date</th><th>Type</th><th>Status</th><th title="ChannelOnline document number carried in SOHeader.User2.">ChannelOnline</th><th title="SYSADMIN = imported from ChannelOnline; the CNET creator is shown when known.">Entered by</th><th>Sales</th><th>Cust PO</th><th class="num">Lines</th><th class="num">Qty ord / shipped / BO</th>
+    {% if acc.margins %}<th class="num">Cost</th><th class="num">Price</th>{% endif %}
+  </tr></thead><tbody>
+  {% for so in M.sos %}<tr class="pay-group mat-group" data-k="so-{{ so.so_nbr }}" title="click to expand">
+    <td class="mono nowrap"><span class="pay-caret">▸</span>{{ so.so_nbr }}</td><td class="num muted">{{ so.ord_date|date:"Y-m-d" }}</td><td class="muted">{{ so.so_type }}{% if so.is_return %} <span class="tag canceled">return</span>{% endif %}</td>
+    <td><span class="tag {{ so.status_cls }}">{{ so.status_label }}</span></td><td class="mono">{% if so.cnet_quote %}<a href="{% url 'dashboard:sales010_orders' %}?q={{ so.cnet_quote }}">{{ so.cnet_quote }}</a>{% endif %}</td>
+    <td class="nowrap">{{ so.entered_by_label }}</td><td class="muted">{{ so.slsper_id }}</td><td class="muted trunc" style="max-width:140px">{{ so.cust_ord_nbr }}</td><td class="num muted">{{ so.n_lines }}</td>
+    <td class="num">{{ so.qty_ord|num }} / {{ so.qty_ship|num }} / {% if so.qty_bo %}<b class="warn-ink">{{ so.qty_bo|num }}</b>{% else %}0{% endif %}</td>
+    {% if acc.margins %}<td class="num">{{ so.tot_cost|money }}</td><td class="num muted">{{ so.tot_ord|money }}</td>{% endif %}
+  </tr>
+  <tr class="pay-hidden mat-sub" data-k="so-{{ so.so_nbr }}"><td colspan="{% if acc.margins %}12{% else %}10{% endif %}" class="pay-indent" style="padding-top:6px;padding-bottom:10px">
+    {% if so.shippers %}<table class="data dense"><thead><tr><th>Shipper</th><th class="num">Shipped</th><th>Shipped by</th><th>Invoice</th><th>Via · tracking</th><th class="num">Lines</th><th class="num">Qty</th>{% if acc.margins %}<th class="num">Cost</th><th class="num">Invoiced</th><th class="num">Freight cost</th>{% endif %}</tr></thead><tbody>
+    {% for sh in so.shippers %}<tr><td class="mono">{{ sh.shipper_id }}</td><td class="num muted">{{ sh.ship_date|date:"Y-m-d"|default:"not shipped" }}</td><td>{{ sh.shipped_by }}</td><td class="mono muted">{{ sh.invc_nbr }}{% if sh.invc_date %} <span class="muted">{{ sh.invc_date|date:"M j" }}</span>{% endif %}</td><td class="muted">{{ sh.ship_via }}{% if sh.tracking_nbr %} {{ sh.tracking_nbr }}{% endif %}</td><td class="num muted">{{ sh.n_lines }}</td><td class="num">{{ sh.qty|num }}</td>{% if acc.margins %}<td class="num">{{ sh.tot_cost|money }}</td><td class="num muted">{{ sh.tot_invc|money }}</td><td class="num muted">{% if sh.tot_frt_cost %}{{ sh.tot_frt_cost|money }}{% endif %}</td>{% endif %}</tr>{% endfor %}
+    </tbody></table>{% else %}<div class="muted" style="font-size:12px">Nothing has shipped on this order yet.</div>{% endif %}
+  </td></tr>{% endfor %}
+  </tbody></table></div></details>
+
+  {% if acc.margins %}
+  <details data-remember="extra" style="margin-top:10px"><summary><b>Extra material costs in the ledger</b> <span class="muted">freight {{ X.freight.total|money }} · purchase variance {{ X.variance.total|signed_money }} · credits {{ X.credits.total|signed_money }} · adjustments {{ X.adjustments.total|signed_money }}</span></summary>
+  <div class="note" style="margin:6px 0">Freight rows are ODC / MATERIALS postings whose description says freight or shipping (vendor freight billed on this job's POs: {{ X.voucher_freight|money }}{% if X.po_freight %}; PO-header estimates {{ X.po_freight|money }}{% endif %}). Purchase variance is the difference between PO price and the vendor's invoice (negative = paid less). Credits are OM credit memos (returns); adjustments are GL journal corrections on MATERIALS.</div>
+  <table class="data dense"><thead><tr><th>Kind</th><th class="num">Date</th><th>Module</th><th>Vendor</th><th>Ref</th><th>Description</th><th class="num">Amount</th></tr></thead><tbody>
+  {% for t in X.freight.rows %}<tr><td>Freight</td><td class="num muted">{{ t.transaction_date|date:"Y-m-d" }}</td><td class="muted">{{ t.system_cd }}/{{ t.batch_type }}</td><td class="muted">{{ t.vendor_num }}</td><td class="mono muted">{{ t.voucher_num }}</td><td>{{ t.comment }}</td><td class="num">{{ t.amount|money:2 }}</td></tr>{% endfor %}
+  {% for t in X.variance.rows %}<tr><td>Purchase variance</td><td class="num muted">{{ t.transaction_date|date:"Y-m-d" }}</td><td class="muted">{{ t.system_cd }}/{{ t.batch_type }}</td><td class="muted">{{ t.vendor_num }}</td><td class="mono muted">{{ t.voucher_num }}</td><td>{{ t.comment }}</td><td class="num {{ t.amount|posneg_inv }}">{{ t.amount|money:2 }}</td></tr>{% endfor %}
+  {% for t in X.credits.rows %}<tr><td>Credit / return</td><td class="num muted">{{ t.transaction_date|date:"Y-m-d" }}</td><td class="muted">{{ t.system_cd }}/{{ t.batch_type }}</td><td class="muted">{{ t.vendor_num }}</td><td class="mono muted">{{ t.voucher_num }}</td><td>{{ t.comment }}</td><td class="num">{{ t.amount|money:2 }}</td></tr>{% endfor %}
+  {% for t in X.adjustments.rows %}<tr><td>Adjustment</td><td class="num muted">{{ t.transaction_date|date:"Y-m-d" }}</td><td class="muted">{{ t.system_cd }}/{{ t.batch_type }}</td><td class="muted">{{ t.vendor_num }}</td><td class="mono muted">{{ t.voucher_num }}</td><td>{{ t.comment }}</td><td class="num">{{ t.amount|money:2 }}</td></tr>{% endfor %}
+  {% if not X.freight.n and not X.variance.n and not X.credits.n and not X.adjustments.n %}<tr><td colspan="7" class="empty">No freight, variance, credit or adjustment postings on this job.</td></tr>{% endif %}
+  </tbody></table></details>
+  {% endif %}
+</div>
+{% endwith %}{% endif %}
+
+<div class="grid two" style="margin-bottom:14px">
+  <div class="card">
+    <h2>Crew <small>PTT hours per person · SL loaded labor cost where posted · click a person for their entries</small></h2>
+    <div class="table-wrap" style="max-height:60vh">
+    <table class="data" id="crewtable"><thead><tr><th>Employee</th><th>Union</th><th class="num">Hours</th><th class="num">Share</th>{% if acc.rates_field %}<th class="num" title="Loaded labor cost from SL: wages + employer payroll tax charged to this project for the person, plus their pro-rata share of the project's union fringe vouchers (allocated by share of union wages). Shown only for field-hourly employees.">SL labor $</th><th class="num" title="Loaded cost ÷ PTT hours.">$/h</th>{% endif %}<th class="num">First</th><th class="num">Last</th></tr></thead><tbody>
+    {% for c in crew %}<tr class="crew-row" data-emp="{{ c.employee_key }}" data-name="{{ c.canonical_name }}" title="Click for this person's PTT entries on the job — dates, hours and notes.">
+      <td><span class="pay-caret">▸</span><a href="{% url 'dashboard:person_detail' c.employee_key %}" onclick="event.stopPropagation()">{{ c.canonical_name }}</a>{% if c.lead %} <span class="tag" title="submitted time for others">lead</span>{% endif %}</td>
+      <td class="muted">{{ c.union_code|default:c.ptt_employee_type }} {{ c.labor_class }}</td>
+      <td class="num">{{ c.actual_hours|num:1 }}</td><td class="num muted">{{ c.share_of_project_hours|pct:0 }}</td>
+      {% if acc.rates_field %}<td class="num">{% if c.rate_ok %}{{ c.actual_labor_cost|money }}{% else %}<span class="muted" title="Compensation hidden for non-field-hourly staff">—</span>{% endif %}</td>
+      <td class="num muted">{% if c.rate_ok and c.actual_labor_cost and c.actual_hours %}{% widthratio c.actual_labor_cost c.actual_hours 1 %}{% else %}—{% endif %}</td>{% endif %}
+      <td class="num muted">{{ c.first_date|date:"M j y" }}</td><td class="num muted">{{ c.last_date|date:"M j y" }}</td></tr>
+    {% empty %}<tr><td colspan="8" class="empty">No PTT hours on this project.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </div>
+  {% if acc.margins %}<div class="card">
+    <h2>Monthly postings <small>SL transactions by category (revenue positive, cost positive)</small></h2>
+    <div class="chart tall"><canvas id="c_monthly"></canvas></div>
+  </div>{% endif %}
+</div>
+
+{% if acc.margins %}
+<div class="card" style="margin-bottom:14px">
+  <h2>Transaction ledger <small>{{ ledger.n }} SL postings in {{ tran_groups|length }} category / module groups · every posting is below — search, filter and sort it</small></h2>
+  <details data-remember="groups" open><summary>By category / module <span class="muted">· click a row to filter the ledger to that group</span></summary>
+  <table class="data" style="margin:8px 0"><thead><tr><th>Category</th><th>Sub-tag</th><th>Module</th><th class="num">Rows</th><th class="num">Amount</th><th class="num">Units</th><th class="num">First</th><th class="num">Last</th></tr></thead><tbody>
+  {% for g in tran_groups %}<tr class="ledger-group" data-cat="{{ g.category }}" data-tag="{{ g.sub_tag|default:'-' }}" data-mod="{{ g.system_cd }}/{{ g.batch_type }}" title="Show only these postings in the ledger below"><td>{{ g.category|nice }}</td><td class="muted">{{ g.sub_tag }}</td><td class="muted">{{ g.system_cd }}/{{ g.batch_type }}</td><td class="num">{{ g.n }}</td><td class="num">{{ g.amt|money:2 }}</td><td class="num muted">{{ g.units|num:1 }}</td><td class="num muted">{{ g.first_d|date:"Y-m-d" }}</td><td class="num muted">{{ g.last_d|date:"Y-m-d" }}</td></tr>{% endfor %}
+  </tbody></table></details>
+  <details data-remember="ledger" open id="ledger"><summary>All transactions <span class="muted" id="ledger-sum"></span></summary>
+  <div class="ledger-bar">
+    <input type="search" id="ledger-q" placeholder="search comment, employee, vendor, voucher, GL account, task, period or an exact amount…" title="Matches any of: comment, employee name or key, vendor number or name, voucher, batch, GL account, task, account, period, tag, category. A number finds postings of exactly that amount.">
+    <label title="Transaction date on or after">From <input type="date" id="ledger-from"></label>
+    <label title="Transaction date on or before">To <input type="date" id="ledger-to"></label>
+    <a href="#" id="ledger-clear" class="btn small" hidden>clear filters</a>
+    <a href="#" id="ledger-sort-reset" class="btn small" hidden title="Back to newest first">reset sort</a>
+  </div>
+  <div class="ledger-chips" id="ledger-chips"></div>
+  <div class="table-wrap freeze ledger-wrap" id="ledger-wrap">
+    <table class="data dense ledger-table" id="ledger-table"><thead><tr>
+      <th class="num sortable" data-sort="date" title="Transaction date · click to sort, click again to flip, a third time to remove">Date</th>
+      <th class="sortable" data-sort="period" title="Fiscal period · click to sort">Period</th>
+      <th title="SL task">Task</th>
+      <th class="sortable" data-sort="cat" title="Category and sub-tag · click to sort by category">Category</th>
+      <th class="sortable" data-sort="acct" title="SL project account · click to sort">Acct</th>
+      <th title="SL module / batch type">Module</th>
+      <th class="num sortable" data-sort="amount" title="Posted amount · click to sort (largest first)">Amount</th>
+      <th class="num sortable" data-sort="units" title="Hours or quantity · click to sort">Units</th>
+      <th title="Employee on labor rows (links to the person), otherwise the vendor">Employee / vendor</th>
+      <th title="GL account">GL</th>
+      <th title="Voucher number, or the SL batch (muted) when the row has no voucher">Ref</th>
+      <th class="fluid" style="width:30%;min-width:160px" title="SL transaction comment (full text on hover)">Comment</th>
+      <th class="num sortable" data-sort="created" title="When the row was entered in SL · click to sort">Created</th>
+    </tr></thead><tbody id="ledger-body"></tbody></table>
+    <div id="ledger-more" class="empty" style="padding:8px"></div>
+  </div>
+  <div class="note" style="margin-top:6px">Click a column heading to sort; click more headings to add secondary sorts (a heading's number is its rank; click again to flip, a third time to remove). The table keeps to ten rows and scrolls on its own — more rows load as you scroll.</div>
+  </details>
+</div>
+{{ ledger.facets|json_script:"ledgerfacets" }}
+{% endif %}
+
+<div class="card" style="margin-bottom:14px">
+  <h2>Work log <small>PTT Job Report entries · <span id="wl-count">{% if entries_more %}latest {{ entries|length }} of {{ entries_total }}{% else %}all {{ entries_total }}{% endif %}</span></small></h2>
+  <div class="table-wrap" style="max-height:60vh">
+  <table class="data" id="worklog"><thead><tr><th class="num">Date</th><th>Employee</th><th>System</th><th>Work type</th><th class="num">On</th><th class="num">OT</th><th class="num">Off</th><th>Task</th><th>Activity</th><th>Open issues</th><th>Done</th><th>Submitted by</th></tr></thead><tbody>
+  {% for e in entries %}<tr><td class="num">{{ e.work_date|date:"Y-m-d" }}</td><td>{% if e.employee %}<a href="{% url 'dashboard:person_detail' e.employee.employee_key %}">{{ e.employee.canonical_name }}</a>{% endif %}</td><td class="muted">{{ e.system_choice }}</td><td class="muted">{{ e.work_type_choice }}</td><td class="num">{{ e.hours_onsite|numdash:1 }}</td><td class="num muted">{{ e.hours_ot|numdash:1 }}</td><td class="num muted">{{ e.hours_offsite|numdash:1 }}</td><td class="muted">{{ e.task_id_text }}</td><td style="width:35%;white-space:normal"{% if e.activity_note %} title="{{ e.activity_note }}"{% endif %}><div class="clamp2">{{ e.activity_note }}</div></td><td class="muted" style="width:20%;white-space:normal"{% if e.open_issues_note %} title="{{ e.open_issues_note }}"{% endif %}><div class="clamp2">{{ e.open_issues_note }}</div></td><td class="muted">{% if e.completed_flag %}✓{% endif %}</td><td class="muted">{% if e.submitted_by and e.submitted_by_id != e.employee_id %}{{ e.submitted_by.canonical_name }}{% endif %}</td></tr>{% endfor %}
+  </tbody></table>{% if entries_more %}<div class="wl-more" id="wl-more"><button class="btn small" id="wl-more-btn" title="Load the remaining entries onto this page.">Show all {{ entries_total }} entries · {{ entries_more }} more</button></div>{% endif %}</div>
+</div>
+
+<div class="card" style="margin-bottom:14px" id="revisions">
+  <h2>PM remaining-hours revisions <small>{{ rev_summary.n }} revision{{ rev_summary.n|pluralize }} from PTT history{% if rev_summary.span_days %} over {{ rev_summary.span_days }} days{% endif %} · spent = PTT Job Report hours logged up to each revision · projected = spent + PM remaining · budget = current SL labor budget hours (LABOR = non-union, LABORUNION = union) · hover any figure for its definition</small></h2>
+  <div class="grid kpi" style="margin-bottom:12px">
+    <div class="kpi rev-tile" title="Current SL labor budget hours: LABOR (non-union) + LABORUNION (union). SL keeps no original budget, so this is the budget as it stands today."><div class="label">SL budget hours</div>
+      <div class="value sm">{{ rev_summary.bud.tot|hours }}</div><div class="sub">non-union {{ rev_summary.bud.nu|num:0 }} · union {{ rev_summary.bud.u|num:0 }}</div></div>
+    <div class="kpi rev-tile" title="PTT Job Report hours logged to date, by the employee's PTT type. Red = already past the budget."><div class="label">Spent to date (PTT)</div>
+      <div class="value sm {% if rev_summary.bud.tot != None and rev_summary.spent.tot > rev_summary.bud.tot %}neg{% endif %}">{{ rev_summary.spent.tot|hours }}</div>
+      <div class="sub">non-union <span class="{% if rev_summary.bud.nu != None and rev_summary.spent.nu > rev_summary.bud.nu %}neg{% endif %}">{{ rev_summary.spent.nu|num:0 }}</span> · union <span class="{% if rev_summary.bud.u != None and rev_summary.spent.u > rev_summary.bud.u %}neg{% endif %}">{{ rev_summary.spent.u|num:0 }}</span>{% if rev_summary.untyped %} · {{ rev_summary.untyped|num:0 }} untyped{% endif %}{% if rev_summary.since_last %} · <span class="warn-ink" title="Hours logged after the PM last revised the estimate — the remaining figure has not been re-checked against this work.">{{ rev_summary.since_last|num:0 }} h since last revision</span>{% endif %}</div></div>
+    <div class="kpi rev-tile" title="The PM's current remaining-hours estimate in PTT, by type, and when it was last set."><div class="label">PM remaining</div>
+      <div class="value sm">{{ rev_summary.rem.tot|hours }}</div>
+      <div class="sub">non-union {{ rev_summary.rem.nu|num:0 }} · union {{ rev_summary.rem.u|num:0 }}{% if rev_summary.last_at %} · set {{ rev_summary.last_at|date:"M j, Y" }}{% if rev_summary.last_by %} by {{ rev_summary.last_by }}{% endif %}{% if not rev_summary.closed and rev_summary.last_age != None %} · <span class="{% if rev_summary.rem.tot %}{% if rev_summary.last_age > 45 %}neg{% elif rev_summary.last_age > 30 %}warn-ink{% endif %}{% endif %}" title="Age of the current estimate{% if rev_summary.rem.tot %} — amber over 30 days, red over 45 while hours remain{% endif %}.">{{ rev_summary.last_age }}d ago</span>{% endif %}{% else %} · never set{% endif %}</div></div>
+    <div class="kpi rev-tile" title="Spent + remaining: where the job lands on hours if the PM estimate holds."><div class="label">Projected at completion</div>
+      <div class="value sm">{{ rev_summary.proj.tot|hours }}</div><div class="sub">non-union {{ rev_summary.proj.nu|num:0 }} · union {{ rev_summary.proj.u|num:0 }}{% if rev_summary.pct != None %} · {{ rev_summary.pct|pct:0 }} of it spent{% endif %}</div></div>
+    <div class="kpi rev-tile" title="Projected minus the current SL budget, in hours and as a share of the budget. Red = over, green = under."><div class="label">vs budget</div>
+      <div class="value sm {% if rev_summary.over.tot != None %}{% if rev_summary.over.tot > 0 %}neg{% elif rev_summary.over.tot < 0 %}pos{% endif %}{% endif %}">{% if rev_summary.over.tot == None %}—{% elif rev_summary.over.tot > 0 %}{{ rev_summary.over.tot|num:0 }} h over{% elif rev_summary.over.tot < 0 %}{{ rev_summary.over.tot|absolute|num:0 }} h under{% else %}on budget{% endif %}</div>
+      <div class="sub">{% if rev_summary.over_pct != None %}{{ rev_summary.over_pct|absolute|pct:0 }} of budget · {% endif %}non-union <span class="{% if rev_summary.over.nu != None %}{% if rev_summary.over.nu > 0 %}neg{% elif rev_summary.over.nu < 0 %}pos{% endif %}{% endif %}">{% if rev_summary.over.nu == None %}—{% elif rev_summary.over.nu > 0 %}+{{ rev_summary.over.nu|num:0 }}{% else %}−{{ rev_summary.over.nu|absolute|num:0 }}{% endif %}</span> · union <span class="{% if rev_summary.over.u != None %}{% if rev_summary.over.u > 0 %}neg{% elif rev_summary.over.u < 0 %}pos{% endif %}{% endif %}">{% if rev_summary.over.u == None %}—{% elif rev_summary.over.u > 0 %}+{{ rev_summary.over.u|num:0 }}{% else %}−{{ rev_summary.over.u|absolute|num:0 }}{% endif %}</span></div></div>
+  </div>
+  <div class="table-wrap tall"><table class="data dense" id="revtable"><thead>
+    <tr class="bands"><th class="band band-empty" colspan="3"></th>
+      <th class="band bs" colspan="3" title="PTT Job Report hours logged up to the day of the revision, by the employee's PTT type (non-union techs / union). Red = past that type's budget.">Spent to date · PTT hours</th>
+      <th class="band bs" colspan="3" title="The PM's remaining-hours estimate as saved in PTT. Small figure = change vs the previous revision (amber when it went up).">PM remaining</th>
+      <th class="band bs" colspan="3" title="Spent + remaining at that revision — the completion the PM was forecasting. Green = under the budget for that type, red = over. Small figure = change vs the previous revision.">Projected at completion</th>
+      <th class="band bs" colspan="2" title="Projected total minus the current SL labor budget ({{ rev_summary.bud.tot|num:0 }} h).">vs budget</th></tr>
+    <tr><th class="num" title="US-Central time.">When</th><th>By</th><th class="num" title="Days since the previous revision, and PTT hours logged in between.">Since prev</th>
+      <th class="num bs">Non-union</th><th class="num">Union</th><th class="num">Total</th>
+      <th class="num bs">Non-union</th><th class="num">Union</th><th class="num">Total</th>
+      <th class="num bs">Non-union</th><th class="num">Union</th><th class="num">Total</th>
+      <th class="num bs">Hours</th><th class="num" title="Spent ÷ projected — the % complete the estimate implies.">Implied %</th></tr>
+  </thead><tbody>
+    <tr class="rowleft" title="Current SL labor budget hours by type — the yardstick for the Projected columns.">
+      <td colspan="3"><b>SL labor budget (current)</b></td><td class="bs" colspan="3"></td><td class="bs" colspan="3"></td>
+      {% for k in "nu,u,tot"|split %}<td class="num {% if k == 'nu' %}bs{% endif %}"><b>{{ rev_summary.bud|getitem:k|num:1 }}</b></td>{% endfor %}<td class="bs" colspan="2"></td></tr>
+    {% if rev_now %}{% with r=rev_now %}<tr class="rev-now" title="Hours were logged after the last revision — this is where the job stands today against the estimate PTT still holds.">
+      <td class="num" style="white-space:nowrap"><b>Now</b> <span class="muted">{{ rev_today|date:"M j, Y" }}</span></td><td class="muted">today's hours + the current estimate</td>
+      <td class="num muted" style="white-space:nowrap">{{ r.gap_days }}d · {{ r.burn|num:0 }} h logged</td>
+      {% for k in "nu,u,tot"|split %}{% with v=r.spent|getitem:k b=rev_summary.bud|getitem:k %}<td class="num {% if k == 'nu' %}bs{% endif %} {% if b != None and v != None and v > b %}neg{% endif %}"{% if b != None and v != None and v > b %} title="Already past the {{ b|num:0 }} h budget for this type."{% endif %}>{{ v|num:1 }}</td>{% endwith %}{% endfor %}
+      {% for k in "nu,u,tot"|split %}{% with v=r.rem|getitem:k d=r.d_rem|getitem:k %}<td class="num {% if k == 'nu' %}bs{% endif %}">{{ v|num:1 }}{% if d %} <small class="{% if d > 0 %}warn-ink{% else %}muted{% endif %}" title="Remaining moved {% if d > 0 %}up{% else %}down{% endif %} {{ d|absolute|num:0 }} h vs the previous revision{% if d > 0 %} — scope grew or the earlier estimate was light{% endif %}.">{% if d > 0 %}+{% else %}−{% endif %}{{ d|absolute|num:0 }}</small>{% endif %}</td>{% endwith %}{% endfor %}
+      {% for k in "nu,u,tot"|split %}{% with v=r.proj|getitem:k b=rev_summary.bud|getitem:k d=r.d_proj|getitem:k %}<td class="num {% if k == 'nu' %}bs{% endif %} {% if b != None and v != None %}{% if v > b %}neg{% elif v < b %}pos{% endif %}{% endif %}"{% if b != None %} title="Budget {{ b|num:0 }} h for this type."{% endif %}><b>{{ v|num:1 }}</b>{% if d %} <small class="{% if d > 0 %}neg{% else %}pos{% endif %}" title="Projection moved {% if d > 0 %}up{% else %}down{% endif %} {{ d|absolute|num:0 }} h vs the previous revision.">{% if d > 0 %}+{% else %}−{% endif %}{{ d|absolute|num:0 }}</small>{% endif %}</td>{% endwith %}{% endfor %}
+      <td class="num bs" style="white-space:nowrap">{% with o=r.over.tot %}{% if o == None %}<span class="muted">—</span>{% elif o > 0 %}<span class="neg">{{ o|num:0 }} h over · {{ r.over_pct|pct:0 }}</span>{% elif o < 0 %}<span class="pos">{{ o|absolute|num:0 }} h under · {{ r.over_pct|absolute|pct:0 }}</span>{% else %}<span class="muted">on budget</span>{% endif %}{% endwith %}</td>
+      <td class="num muted" title="Spent ÷ projected — the % complete this estimate implies.">{{ r.pct|pct:0 }}</td></tr>{% endwith %}{% endif %}
+    {% for r in rev_rows %}<tr {% if r.is_current %}class="rev-current"{% endif %}>
+      <td class="num" style="white-space:nowrap">{{ r.when|date:"M j, Y" }} <span class="muted">{{ r.when|date:"H:i" }}</span></td>
+      <td style="white-space:nowrap">{{ r.by }}{% if r.is_current %} <span class="tag" title="The estimate PTT holds today.">current</span>{% endif %}</td>
+      <td class="num muted" style="white-space:nowrap">{% if r.gap_days != None %}{{ r.gap_days }}d{% if r.burn %} · {{ r.burn|num:0 }} h logged{% endif %}{% else %}first estimate{% endif %}</td>
+      {% for k in "nu,u,tot"|split %}{% with v=r.spent|getitem:k b=rev_summary.bud|getitem:k %}<td class="num {% if k == 'nu' %}bs{% endif %} {% if b != None and v != None and v > b %}neg{% endif %}"{% if b != None and v != None and v > b %} title="Already past the {{ b|num:0 }} h budget for this type."{% endif %}>{{ v|num:1 }}</td>{% endwith %}{% endfor %}
+      {% for k in "nu,u,tot"|split %}{% with v=r.rem|getitem:k d=r.d_rem|getitem:k %}<td class="num {% if k == 'nu' %}bs{% endif %}">{{ v|num:1 }}{% if d %} <small class="{% if d > 0 %}warn-ink{% else %}muted{% endif %}" title="Remaining moved {% if d > 0 %}up{% else %}down{% endif %} {{ d|absolute|num:0 }} h vs the previous revision{% if d > 0 %} — scope grew or the earlier estimate was light{% endif %}.">{% if d > 0 %}+{% else %}−{% endif %}{{ d|absolute|num:0 }}</small>{% endif %}</td>{% endwith %}{% endfor %}
+      {% for k in "nu,u,tot"|split %}{% with v=r.proj|getitem:k b=rev_summary.bud|getitem:k d=r.d_proj|getitem:k %}<td class="num {% if k == 'nu' %}bs{% endif %} {% if b != None and v != None %}{% if v > b %}neg{% elif v < b %}pos{% endif %}{% endif %}"{% if b != None %} title="Budget {{ b|num:0 }} h for this type."{% endif %}><b>{{ v|num:1 }}</b>{% if d %} <small class="{% if d > 0 %}neg{% else %}pos{% endif %}" title="Projection moved {% if d > 0 %}up{% else %}down{% endif %} {{ d|absolute|num:0 }} h vs the previous revision.">{% if d > 0 %}+{% else %}−{% endif %}{{ d|absolute|num:0 }}</small>{% endif %}</td>{% endwith %}{% endfor %}
+      <td class="num bs" style="white-space:nowrap">{% with o=r.over.tot %}{% if o == None %}<span class="muted">—</span>{% elif o > 0 %}<span class="neg">{{ o|num:0 }} h over · {{ r.over_pct|pct:0 }}</span>{% elif o < 0 %}<span class="pos">{{ o|absolute|num:0 }} h under · {{ r.over_pct|absolute|pct:0 }}</span>{% else %}<span class="muted">on budget</span>{% endif %}{% endwith %}</td>
+      <td class="num muted" title="Spent ÷ projected — the % complete this estimate implies.">{{ r.pct|pct:0 }}</td></tr>
+    {% empty %}<tr><td colspan="14" class="empty">No remaining-hours revisions recorded in PTT for this project.</td></tr>{% endfor %}
+  </tbody></table></div>
+  <div class="note" style="margin-top:8px">Reading the table: each row is the PM's estimate on that day next to the hours already logged, so <b>Projected</b> is what the job would finish at if the estimate held; a projection that climbs revision after revision (red small figures) means work is being done without the remaining estimate coming down to match. The <b>Now</b> row appears when hours were logged after the last revision.{% if rev_summary.sl_nu != None or rev_summary.sl_u != None %} SL has posted <b>{{ rev_summary.sl_nu|num:0 }}</b> non-union and <b>{{ rev_summary.sl_u|num:0 }}</b> union labor hours to the job (payroll basis, lags PTT by days to weeks and can include time PTT never saw).{% endif %}</div>
+</div>
+
+<div class="card" style="margin-bottom:14px">
+    <h2>Identity, dates &amp; local history</h2>
+    <dl class="kv">
+      <dt>SL key</dt><dd class="mono">{{ p.sl_project_key_raw }}</dd>
+      <dt>PTT id</dt><dd class="mono">{{ p.ptt_project_id_raw }} (pk {{ p.ptt_project_pk }})</dd>
+      <dt>Numbering</dt><dd>{{ p.numbering_style }} · sub-account {{ p.sl_subaccount }} · {{ p.task_count }} task{{ p.task_count|pluralize }}</dd>
+      <dt>Contract type / PO</dt><dd>{{ p.contract_type }} · {{ p.customer_po|default:"—" }} · ref {{ p.quote_reference|default:"—" }}</dd>
+      <dt>SL created</dt><dd>{{ p.sl_created_at|date:"M j, Y" }} · last edit {{ p.sl_last_updated_at|date:"M j, Y" }}</dd>
+      <dt>Planned (setup)</dt><dd>{{ p.sl_planned_start|date:"M j, Y"|default:"—" }} → {{ p.sl_planned_end|date:"M j, Y"|default:"—" }}</dd>
+      <dt>Close date</dt><dd>{{ p.close_date|date:"M j, Y"|default:"—" }} <span class="muted">{{ p.close_date_method|nice }}</span></dd>
+      <dt>Last SL posting</dt><dd>{{ p.last_transaction_date|date:"M j, Y"|default:"—" }} <span class="muted">(created {{ p.last_transaction_created_at|date:"M j, Y" }})</span></dd>
+      <dt>Lifecycle evidence</dt><dd class="mono" style="white-space:normal">{{ p.lifecycle_evidence }}</dd>
+    </dl>
+    {% if acc.margins %}<div class="note" style="margin-top:10px">Budget and contract changes: see <b>Change orders &amp; budget history</b> above (local before/after history since {{ first_snapshot|date:"M j, Y" }}; task-level change orders back to 2013).</div>{% endif %}
+    {% if issues %}<h3 style="margin-top:12px">Open data-quality issues</h3><ul class="mini-list">{% for i in issues %}<li><span class="k"><span class="tag {{ i.severity }}">{{ i.severity }}</span> {{ i.code|nice }}</span><span class="v muted">{{ i.details }}</span></li>{% endfor %}</ul>{% endif %}
+    {% if acc.ratings and ratings %}<h3 style="margin-top:12px" title="Context-adjusted effects from the current ratings run. Business entities: GP points vs expected. Field crew: hours saved per 1,000 budget hours on jobs they work. Full tables under Ratings.">Context ratings</h3><ul class="mini-list">{% for r in ratings %}<li><span class="k">{{ r.label|nice }}: {% if r.url %}<a href="{% url 'dashboard:person_detail' r.url %}">{{ r.name }}</a>{% else %}{{ r.name|nice }}{% endif %}</span><span class="v {{ r.effect|posneg }}">{{ r.effect|effect:r.unit }} <span class="tag {{ r.status }}">{{ r.status }}</span></span></li>{% endfor %}</ul>{% endif %}
+</div>
+<div class="fin-modal" id="acctmodal" onclick="if(event.target===this)this.style.display='none'">
+  <div class="fin-modal-box" style="max-width:1150px">
+    <div class="fin-modal-head"><h2 id="accttitle">…</h2><span id="acctsum" class="muted"></span>
+      <input id="acctsearch" type="search" placeholder="filter rows…" style="margin-left:auto;max-width:220px" oninput="window.__acctFilter && window.__acctFilter(this.value)">
+      <a href="#" onclick="document.getElementById('acctmodal').style.display='none';return false" class="fin-modal-close">✕</a></div>
+    <div id="acctgroups" class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:8px"></div>
+    <div class="table-wrap" style="max-height:60vh"><div id="acctbody" class="empty">loading…</div></div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+{{ charts|json_script:"charts" }}
+<script>
+const C = JSON.parse(document.getElementById('charts').textContent);
+// ---- materials: PO / SO rows expand to their lines, receipts, vouchers, shippers; item filter ----
+document.querySelectorAll('tr.mat-group').forEach(tr => tr.addEventListener('click', e => {
+  if (e.target.closest('a')) return;
+  const open = tr.classList.toggle('open');
+  tr.querySelector('.pay-caret').textContent = open ? '▾' : '▸';
+  document.querySelectorAll('tr.mat-sub[data-k="' + tr.dataset.k + '"]').forEach(r => r.classList.toggle('pay-hidden', !open));
+}));
+const matFilter = document.getElementById('matfilter');
+if (matFilter) matFilter.addEventListener('input', () => { const q = matFilter.value.trim().toLowerCase();
+  document.querySelectorAll('#mattable tbody tr.mat-item').forEach(tr => { tr.style.display = !q || tr.textContent.toLowerCase().includes(q) ? '' : 'none'; }); });
+// ---- transaction ledger: every SL posting, server-filtered / multi-key sorted / paged (views.project_transactions) ----
+(function () {
+  const body = document.getElementById('ledger-body');
+  if (!body) return;   // margins not visible to this viewer
+  const L = {url: '{% url "dashboard:project_transactions" p.canonical_project_number %}', person: '{% url "dashboard:person_detail" "KEY" %}',
+             n: {{ ledger.n|default:0 }}, facets: JSON.parse(document.getElementById('ledgerfacets').textContent)};
+  const wrap = document.getElementById('ledger-wrap'), more = document.getElementById('ledger-more'), sum = document.getElementById('ledger-sum');
+  const esc = t => String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  const fmt$ = v => v == null ? '—' : v.toLocaleString('en-US', {style: 'currency', currency: 'USD', maximumFractionDigits: 2});
+  const nice = s => String(s || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).replace(/^Tm /, 'T&M ').replace(/\bCogs\b/, 'COGS').replace(/\bPo\b/, 'PO').replace(/\bAp\b/, 'AP').replace(/\bPr\b/, 'PR').replace(/\bGl\b/, 'GL');
+  const DIMS = [['cat', 'Category'], ['tag', 'Tag'], ['mod', 'Module'], ['acct', 'Account']];
+  const DEFAULT_SORT = [{k: 'date', d: -1}, {k: 'created', d: -1}];
+  const DESC_FIRST = new Set(['date', 'created', 'amount', 'units', 'period']);   // newest / biggest first on the first click
+  const S = {q: '', from: '', to: '', dims: {cat: new Set(), tag: new Set(), mod: new Set(), acct: new Set()}, sort: [], offset: 0, more: true, loading: false, seq: 0};
+  const hasFilter = () => !!(S.q || S.from || S.to || DIMS.some(([d]) => S.dims[d].size));
+
+  const row = r => '<tr><td class="num">' + r.date + '</td><td class="muted">' + r.period + '</td><td class="mono">' + esc(r.task) + '</td>' +
+    '<td>' + esc(nice(r.cat)) + (r.tag ? ' <span class="muted">' + esc(nice(r.tag)) + '</span>' : '') + '</td><td class="muted">' + esc(r.acct) + '</td><td class="muted">' + esc(r.module) + '</td>' +
+    '<td class="num">' + (r.amt == null ? '<span class="muted" title="Compensation hidden for non-field-hourly staff">—</span>' : fmt$(r.amt)) + '</td>' +
+    '<td class="num muted">' + (r.units ? r.units.toLocaleString('en-US', {maximumFractionDigits: 1}) : '') + '</td>' +
+    '<td>' + (r.emp ? '<a href="' + L.person.replace('KEY', encodeURIComponent(r.emp)) + '">' + esc(r.who) + '</a>' : esc(r.who)) + '</td>' +
+    '<td class="muted">' + esc(r.gl) + '</td><td class="mono">' + esc(r.ref) + '</td><td class="muted trunc fluid" style="width:30%;min-width:160px" title="' + esc(r.comment) + '">' + esc(r.comment) + '</td>' +
+    '<td class="num muted">' + r.created + '</td></tr>';
+
+  function params() {
+    const q = new URLSearchParams();
+    if (S.q) q.set('q', S.q);
+    if (S.from) q.set('date_from', S.from);
+    if (S.to) q.set('date_to', S.to);
+    for (const [d] of DIMS) if (S.dims[d].size) q.set(d, [...S.dims[d]].join(','));
+    q.set('sort', (S.sort.length ? S.sort : DEFAULT_SORT).map(s => (s.d < 0 ? '-' : '') + s.k).join(','));
+    q.set('offset', S.offset);
+    return q;
+  }
+  function load(reset) {
+    if (reset) { S.offset = 0; S.more = true; S.loading = false; body.innerHTML = ''; wrap.scrollTop = 0; }
+    if (S.loading || !S.more) return;
+    S.loading = true;
+    const seq = ++S.seq;
+    more.textContent = 'loading…';
+    fetch(L.url + '?' + params().toString()).then(r => r.json()).then(res => {
+      if (seq !== S.seq) return;   // superseded by a newer filter / sort
+      S.loading = false; S.offset = res.offset + res.rows.length; S.more = res.has_more;
+      if (!res.n) body.innerHTML = '<tr><td colspan="13" class="empty" style="padding:14px">no postings match</td></tr>';
+      else body.insertAdjacentHTML('beforeend', res.rows.map(row).join(''));
+      sum.textContent = '· ' + res.n.toLocaleString() + (res.n !== L.n ? ' of ' + L.n.toLocaleString() : '') + ' postings · ' + fmt$(res.total) +
+        (res.hidden_n ? ' (' + res.hidden_n.toLocaleString() + ' labor amount' + (res.hidden_n > 1 ? 's' : '') + ' hidden)' : '') +
+        (res.units ? ' · ' + res.units.toLocaleString('en-US', {maximumFractionDigits: 1}) + ' units' : '');
+      more.textContent = S.more ? 'scroll for more · ' + (res.n - S.offset).toLocaleString() + ' remaining' : (res.n ? 'all ' + res.n.toLocaleString() + ' rows shown' : '');
+      if (S.more && wrap.scrollHeight <= wrap.clientHeight + 4) load(false);   // first page did not fill the area
+    }).catch(() => { if (seq === S.seq) { S.loading = false; more.textContent = 'failed to load'; } });
+  }
+  wrap.addEventListener('scroll', () => { if (wrap.scrollTop + wrap.clientHeight >= wrap.scrollHeight - 160) load(false); });
+
+  function renderChips() {
+    let html = '';
+    for (const [d, label] of DIMS) {
+      const items = L.facets[d] || [];
+      if (!items.length) continue;
+      html += '<span class="dim">' + label + ':</span>' + items.map(f => '<span class="lchip' + (S.dims[d].has(f.v) ? ' on' : '') + '" data-dim="' + d + '" data-v="' + esc(f.v) +
+        '" title="' + f.n.toLocaleString() + ' posting' + (f.n > 1 ? 's' : '') + ' · click to toggle">' + esc(f.label || f.v) + '<small>' + f.n.toLocaleString() + '</small></span>').join('');
+    }
+    document.getElementById('ledger-chips').innerHTML = html;
+    document.getElementById('ledger-clear').hidden = !hasFilter();
+  }
+  document.getElementById('ledger-chips').addEventListener('click', e => {
+    const c = e.target.closest('.lchip');
+    if (!c) return;
+    const set = S.dims[c.dataset.dim];
+    set.has(c.dataset.v) ? set.delete(c.dataset.v) : set.add(c.dataset.v);
+    renderChips(); load(true);
+  });
+  document.querySelectorAll('tr.ledger-group').forEach(tr => tr.addEventListener('click', () => {
+    for (const [d] of DIMS) S.dims[d].clear();
+    S.dims.cat.add(tr.dataset.cat); S.dims.tag.add(tr.dataset.tag); S.dims.mod.add(tr.dataset.mod);
+    document.getElementById('ledger').open = true;
+    renderChips(); load(true);
+    document.getElementById('ledger').scrollIntoView({behavior: 'smooth', block: 'start'});
+  }));
+  let timer = null;
+  document.getElementById('ledger-q').addEventListener('input', e => { clearTimeout(timer); timer = setTimeout(() => { S.q = e.target.value.trim(); renderChips(); load(true); }, 250); });
+  document.getElementById('ledger-from').addEventListener('change', e => { S.from = e.target.value; renderChips(); load(true); });
+  document.getElementById('ledger-to').addEventListener('change', e => { S.to = e.target.value; renderChips(); load(true); });
+  document.getElementById('ledger-clear').addEventListener('click', e => {
+    e.preventDefault();
+    S.q = S.from = S.to = ''; for (const [d] of DIMS) S.dims[d].clear();
+    document.getElementById('ledger-q').value = ''; document.getElementById('ledger-from').value = ''; document.getElementById('ledger-to').value = '';
+    renderChips(); load(true);
+  });
+
+  function renderSort() {
+    const eff = S.sort.length ? S.sort : DEFAULT_SORT;
+    document.querySelectorAll('#ledger-table th.sortable').forEach(th => {
+      const i = eff.findIndex(s => s.k === th.dataset.sort);
+      th.querySelectorAll('.sortn').forEach(n => n.remove());
+      th.classList.toggle('sorted', i >= 0);
+      if (i >= 0) th.insertAdjacentHTML('beforeend', '<span class="sortn' + (S.sort.length ? '' : ' dflt') + '">' + (eff.length > 1 ? (i + 1) : '') + (eff[i].d < 0 ? '▾' : '▴') + '</span>');
+    });
+    document.getElementById('ledger-sort-reset').hidden = !S.sort.length;
+  }
+  document.querySelectorAll('#ledger-table th.sortable').forEach(th => th.addEventListener('click', () => {
+    const k = th.dataset.sort, i = S.sort.findIndex(s => s.k === k);
+    if (i < 0) S.sort.push({k, d: DESC_FIRST.has(k) ? -1 : 1, flipped: false});
+    else if (!S.sort[i].flipped) { S.sort[i].d = -S.sort[i].d; S.sort[i].flipped = true; }
+    else S.sort.splice(i, 1);
+    renderSort(); load(true);
+  }));
+  document.getElementById('ledger-sort-reset').addEventListener('click', e => { e.preventDefault(); S.sort = []; renderSort(); load(true); });
+
+  renderChips(); renderSort(); load(true);
+})();
+// ---- account drill: every posting behind a Budget-vs-actual amount ----
+document.querySelectorAll('.acct-drill').forEach(el => el.addEventListener('click', e => {
+  e.preventDefault();
+  const acct = el.dataset.acct, modal = document.getElementById('acctmodal');
+  document.getElementById('accttitle').textContent = acct + ' — SL postings';
+  document.getElementById('acctsum').textContent = ''; document.getElementById('acctgroups').innerHTML = '';
+  document.getElementById('acctbody').innerHTML = '<div class="empty">loading…</div>';
+  const sb = document.getElementById('acctsearch'); sb.value = '';
+  modal.style.display = 'flex'; setTimeout(() => sb.focus(), 50);
+  const fmt$ = v => v == null ? '—' : v.toLocaleString('en-US', {style: 'currency', currency: 'USD', maximumFractionDigits: 2});
+  const esc = t => String(t == null ? '' : t).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+  fetch('{% url "dashboard:project_account_drill" p.canonical_project_number %}?acct=' + encodeURIComponent(acct)).then(r => r.json()).then(res => {
+    document.getElementById('acctsum').textContent = res.n + ' postings · ' + fmt$(res.total) + (res.units ? ' · ' + res.units.toLocaleString() + ' units' : '');
+    document.getElementById('acctgroups').innerHTML = res.groups.slice(0, 12).map(g =>
+      '<span class="pill" title="' + g.n + ' posting(s)">' + esc(g.who) + ' <b>' + fmt$(g.amt) + '</b></span>').join('') + (res.groups.length > 12 ? '<span class="muted">+' + (res.groups.length - 12) + ' more</span>' : '');
+    let html = '<table class="data dense"><thead><tr><th>Date</th><th>Period</th><th>Task</th><th>Module</th><th>' + res.who_label + '</th><th>Voucher</th><th>Item / comment</th><th class="num">Units</th><th class="num">Amount</th></tr></thead><tbody>';
+    res.rows.forEach(r => { html += '<tr><td class="muted">' + r.date + '</td><td class="muted">' + r.period + '</td><td class="mono">' + esc(r.task) + '</td><td class="muted">' + esc(r.module) + '</td><td>' + esc(r.who) + '</td><td class="mono">' + esc(r.ref) + '</td><td>' + esc(r.comment) + '</td><td class="num muted">' + (r.units ? r.units.toLocaleString() : '') + '</td><td class="num">' + fmt$(r.amt) + '</td></tr>'; });
+    document.getElementById('acctbody').innerHTML = html + '</tbody></table>';
+    window.__acctFilter = q => { q = q.trim().toLowerCase(); document.querySelectorAll('#acctbody tbody tr').forEach(tr => { tr.style.display = !q || tr.textContent.toLowerCase().includes(q) ? '' : 'none'; }); };
+  }).catch(() => document.getElementById('acctbody').innerHTML = '<div class="empty">failed to load</div>');
+}));
+// ---- PTT entries: Used union / non-union hours → modal; Crew row → inline entries; Work log → "Show all" ----
+(function () {
+  const URL = '{% url "dashboard:project_entries" p.canonical_project_number %}';
+  const PERSON = '{% url "dashboard:person_detail" "KEY" %}';
+  const esc = t => String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  const nd = v => (v == null || v === 0) ? '–' : v.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const hrs = v => (v == null ? 0 : v).toLocaleString('en-US', { maximumFractionDigits: 1 }) + ' h';
+  const personLink = r => r.key ? '<a href="' + PERSON.replace('KEY', encodeURIComponent(r.key)) + '">' + esc(r.emp) + '</a>' : esc(r.emp);
+  const cells = (r, withEmp) => '<td class="num">' + r.d + '</td>' + (withEmp ? '<td>' + personLink(r) + '</td>' : '') +
+    '<td class="muted">' + esc(r.sys) + '</td><td class="muted">' + esc(r.wt) + '</td><td class="num">' + nd(r.on) + '</td><td class="num muted">' + nd(r.ot) + '</td><td class="num muted">' + nd(r.off) + '</td>' +
+    '<td class="muted">' + esc(r.task) + '</td><td style="width:35%;white-space:normal"' + (r.act ? ' title="' + esc(r.act) + '"' : '') + '><div class="clamp2">' + esc(r.act) + '</div></td>' +
+    '<td class="muted" style="width:20%;white-space:normal"' + (r.iss ? ' title="' + esc(r.iss) + '"' : '') + '><div class="clamp2">' + esc(r.iss) + '</div></td>' +
+    '<td class="muted">' + (r.done ? '✓' : '') + '</td><td class="muted">' + esc(r.by) + '</td>';
+  const head = withEmp => '<thead><tr><th class="num">Date</th>' + (withEmp ? '<th>Employee</th>' : '') + '<th>System</th><th>Work type</th><th class="num">On</th><th class="num">OT</th><th class="num">Off</th><th>Task</th><th>Activity</th><th>Open issues</th><th>Done</th><th>Submitted by</th></tr></thead>';
+  const load = q => fetch(URL + '?' + q).then(r => r.json());
+  const count = (n, one, many) => n + ' ' + (n === 1 ? one : many);
+
+  // 1. the Used hours figure → every entry of that employee type, with per-person pills that filter the table
+  document.querySelectorAll('.hours-drill').forEach(el => el.addEventListener('click', e => {
+    e.preventDefault();
+    const modal = document.getElementById('acctmodal'), body = document.getElementById('acctbody'), sb = document.getElementById('acctsearch');
+    document.getElementById('accttitle').textContent = el.dataset.label + ' — PTT entries';
+    document.getElementById('acctsum').textContent = ''; document.getElementById('acctgroups').innerHTML = ''; body.innerHTML = '<div class="empty">loading…</div>'; sb.value = '';
+    modal.style.display = 'flex'; setTimeout(() => sb.focus(), 50);
+    load('type=' + encodeURIComponent(el.dataset.type)).then(res => {
+      document.getElementById('acctsum').textContent = hrs(res.hours) + ' · ' + count(res.n, 'entry', 'entries') + ' · ' + count(res.groups.length, 'person', 'people');
+      document.getElementById('acctgroups').innerHTML = res.groups.slice(0, 14).map(g =>
+        '<a href="#" class="pill" data-who="' + esc(g.who) + '" title="' + count(g.n, 'entry', 'entries') + ' — click to filter the table to this person">' + esc(g.who) + ' <b>' + hrs(g.h) + '</b></a>').join('') +
+        (res.groups.length > 14 ? '<span class="muted">+' + (res.groups.length - 14) + ' more</span>' : '');
+      body.innerHTML = '<table class="data dense">' + head(true) + '<tbody>' + (res.rows.map(r => '<tr>' + cells(r, true) + '</tr>').join('') || '<tr><td colspan="12" class="empty">No entries.</td></tr>') + '</tbody></table>';
+      window.__acctFilter = q => { q = q.trim().toLowerCase(); body.querySelectorAll('tbody tr').forEach(tr => { tr.style.display = !q || tr.textContent.toLowerCase().includes(q) ? '' : 'none'; }); };
+      document.querySelectorAll('#acctgroups .pill').forEach(pl => pl.addEventListener('click', ev => { ev.preventDefault(); sb.value = sb.value === pl.dataset.who ? '' : pl.dataset.who; window.__acctFilter(sb.value); }));
+    }).catch(() => body.innerHTML = '<div class="empty">failed to load</div>');
+  }));
+
+  // 2. a Crew row → that person's entries on this job, inline under the row (fetched once, then toggled)
+  document.querySelectorAll('tr.crew-row').forEach(tr => tr.addEventListener('click', e => {
+    if (e.target.closest('a')) return;
+    const caret = tr.querySelector('.pay-caret');
+    let log = tr.nextElementSibling;
+    if (log && log.classList.contains('crew-log')) { log.hidden = !log.hidden; caret.textContent = log.hidden ? '▸' : '▾'; return; }
+    log = document.createElement('tr'); log.className = 'crew-log';
+    log.innerHTML = '<td colspan="' + tr.cells.length + '"><div class="empty">loading…</div></td>';
+    tr.after(log); caret.textContent = '▾';
+    load('emp=' + encodeURIComponent(tr.dataset.emp)).then(res => {
+      log.firstElementChild.innerHTML = '<div class="muted" style="margin:2px 0 6px;font-size:12px">' + esc(tr.dataset.name) + ' · ' + hrs(res.hours) + ' over ' + count(res.n, 'entry', 'entries') + '</div>' +
+        '<table class="data dense">' + head(false) + '<tbody>' + (res.rows.map(r => '<tr>' + cells(r, false) + '</tr>').join('') || '<tr><td colspan="11" class="empty">No entries.</td></tr>') + '</tbody></table>';
+    }).catch(() => log.firstElementChild.innerHTML = '<div class="empty">failed to load</div>');
+  }));
+
+  // 3. Work log → "Show all" appends every remaining entry in place
+  const more = document.getElementById('wl-more-btn');
+  if (more) more.addEventListener('click', () => {
+    more.disabled = true; more.textContent = 'loading…';
+    const tbody = document.querySelector('#worklog tbody');
+    load('offset=' + tbody.rows.length).then(res => {
+      tbody.insertAdjacentHTML('beforeend', res.rows.map(r => '<tr>' + cells(r, true) + '</tr>').join(''));
+      document.getElementById('wl-count').textContent = 'all ' + res.n;
+      document.getElementById('wl-more').remove();
+    }).catch(() => { more.disabled = false; more.textContent = 'failed to load — try again'; });
+  });
+})();
+document.addEventListener('keydown', e => { if (e.key === 'Escape') document.getElementById('acctmodal').style.display = 'none'; });
+{% if acc.margins %}
+new Chart(document.getElementById('c_bva'), { type: 'bar',
+  data: { labels: C.budget_vs_actual.map(r => r.k), datasets: [
+    { label: 'Budget', data: C.budget_vs_actual.map(r => r.b), backgroundColor: 'rgba(31,94,255,.35)', borderRadius: 3 },
+    { label: 'Actual', data: C.budget_vs_actual.map(r => r.a), backgroundColor: 'rgba(31,94,255,.9)', borderRadius: 3 } ] },
+  options: { responsive: true, maintainAspectRatio: false, scales: { y: { ticks: { callback: v => PCA.money(v) }, grid: { color: '#eef2f7' } }, x: { grid: { display: false } } }, plugins: { legend: { position: 'bottom' }, tooltip: { callbacks: { label: c => c.dataset.label + ': ' + PCA.money(c.raw) } } } } });
+{% endif %}
+// change-order / budget-change markers: dashed vertical line per event date + a hoverable point carrying the detail
+const markers = C.markers || [];
+const markerColor = k => k === 'change_order' ? '#c62828' : (k === 'scope_added' ? '#6a3ff0' : '#9a6b00');
+const markerPlugin = { id: 'coMarkers', afterDatasetsDraw(chart, args, opts) {
+  const key = opts.key || 'd', { ctx, chartArea: { top, bottom }, scales: { x } } = chart;
+  markers.forEach(m => { const i = chart.data.labels.indexOf(m[key]); if (i < 0) return; const px = x.getPixelForValue(i);
+    ctx.save(); ctx.strokeStyle = markerColor(m.kind); ctx.setLineDash([4, 3]); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(px, top); ctx.lineTo(px, bottom); ctx.stroke(); ctx.restore(); }); } };
+const markerTexts = (key, label) => markers.filter(m => m[key] === label).map(m => m.text);
+// hours: cumulative worked, EAC at each revision, budget line
+const cum = C.cum, rev = C.rev;
+const BS = C.budget_steps || {steps: []};
+const labels = [...new Set([...cum.map(r => r.d), ...rev.map(r => r.d), ...markers.map(m => m.d), ...BS.steps.map(s => s.d), ...(BS.start ? [BS.start] : [])])].sort();
+// budget hours in effect on each date: initial value until the first change, then each change's "after" value (staircase)
+const budgetAt = labels.map(d => { let v = BS.initial, c = BS.initial_certain; BS.steps.forEach(s => { if (s.d <= d) { v = s.after; c = s.certain; } }); return {v, c}; });
+const cumMap = Object.fromEntries(cum.map(r => [r.d, r.h]));
+let last = 0; const cumSeries = labels.map(d => { if (cumMap[d] != null) last = cumMap[d]; return last; });
+const revMap = {}; rev.forEach(r => revMap[r.d] = r);
+new Chart(document.getElementById('c_hours'), {
+  data: { labels, datasets: [
+    { type: 'line', label: 'PTT hours worked (cumulative)', data: cumSeries, borderColor: '#1f5eff', backgroundColor: 'rgba(31,94,255,.12)', fill: true, pointRadius: 0, tension: .1 },
+    { type: 'line', label: 'PM forecast total (worked + remaining) at revision', data: labels.map(d => revMap[d] ? revMap[d].eac : null), borderColor: '#b7791f', backgroundColor: '#b7791f', pointRadius: 4, showLine: true, spanGaps: true, borderDash: [4,3] },
+    { type: 'line', label: 'Budget hours (steps at each change)', data: budgetAt.map(b => b.v), borderColor: '#c62828', stepped: true, pointRadius: 0, borderWidth: 2,
+      segment: { borderDash: ctx => (budgetAt[ctx.p0DataIndex].c && budgetAt[ctx.p1DataIndex].c) ? [6,4] : [2,3], borderColor: ctx => (budgetAt[ctx.p0DataIndex].c && budgetAt[ctx.p1DataIndex].c) ? '#c62828' : 'rgba(198,40,40,.45)' } },
+    { type: 'line', label: 'Change orders / budget changes', data: labels.map(d => markers.some(m => m.d === d) ? Math.max(C.budget_hours || 0, ...cumSeries, ...rev.map(r => r.eac || 0)) : null),
+      showLine: false, pointStyle: 'triangle', pointRadius: 7, pointHoverRadius: 9, pointBackgroundColor: labels.map(d => markerColor((markers.find(m => m.d === d) || {}).kind)), borderColor: '#c62828' } ] },
+  options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+    scales: { x: { ticks: { maxTicksLimit: 10 }, grid: { display: false } }, y: { title: { display: true, text: 'hours' }, grid: { color: '#eef2f7' } } },
+    plugins: { coMarkers: { key: 'd' }, legend: { position: 'bottom' }, tooltip: { filter: item => !(item.datasetIndex === 3 && item.raw == null), callbacks: {
+      label: c => c.datasetIndex === 3 ? markerTexts('d', labels[c.dataIndex]) : ((c.datasetIndex === 2 ? 'Budget hours' : c.dataset.label) + ': ' + (c.raw == null ? '—' : Math.round(c.raw).toLocaleString() + ' h') + (c.datasetIndex === 2 && !budgetAt[c.dataIndex].c ? ' (≈ assumes an unknown-prior edit changed nothing)' : '')),
+      afterLabel: c => (c.datasetIndex === 1 && revMap[labels[c.dataIndex]]) ? 'remaining ' + revMap[labels[c.dataIndex]].rem + ' h · by ' + revMap[labels[c.dataIndex]].by : '' } } } },
+  plugins: [markerPlugin] });
+{% if acc.margins %}
+// monthly by category
+const cats = ['revenue','labor_wage','labor_burden','material','subcontract','other_direct'];
+const months = [...new Set([...C.monthly.map(r => r.m), ...markers.map(m => m.m + '-01')])].sort();
+const catColor = { revenue: '#178a52', labor_wage: '#1f5eff', labor_burden: '#6b8cff', material: '#b7791f', subcontract: '#6a3ff0', other_direct: '#8d6e63' };
+new Chart(document.getElementById('c_monthly'), { type: 'bar',
+  data: { labels: months.map(m => m.slice(0,7)), datasets: cats.map(c => ({ label: c.replace('_',' '), data: months.map(m => { const r = C.monthly.find(x => x.m === m && x.c === c); return r ? (c === 'revenue' ? r.amt : -r.amt) : 0; }), backgroundColor: catColor[c], stack: c === 'revenue' ? 'rev' : 'cost', borderRadius: 2 })) },
+  options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, ticks: { callback: v => PCA.money(v) }, grid: { color: '#eef2f7' } } },
+    plugins: { coMarkers: { key: 'mlabel' }, legend: { position: 'bottom' }, tooltip: { callbacks: { label: c => c.dataset.label + ': ' + PCA.money(Math.abs(c.raw)), afterBody: items => markerTexts('m', items.length ? months[items[0].dataIndex].slice(0, 7) : '') } } } },
+  plugins: [markerPlugin] });
+markers.forEach(m => m.mlabel = m.m);
+{% endif %}
+</script>
+{% endblock %}

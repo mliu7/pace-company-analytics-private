@@ -1,0 +1,554 @@
+{
+ "_about": "SharePoint spec Appendix A parity status. Maintained by hand as phases land; tests/unit/test_parity_matrix.py checks every id in the spec is here and every status is allowed.",
+ "_allowed": [
+  "built",
+  "partial",
+  "pending",
+  "dropped"
+ ],
+ "items": {
+  "RT-01": {
+   "verdict": "Better",
+   "status": "built",
+   "capability": "Load the list from the canonical store, change detection, status pill"
+  },
+  "RT-02": {
+   "verdict": "Drop",
+   "status": "dropped",
+   "capability": "Ad-hoc `.xlsx` import with alias mapping"
+  },
+  "RT-03": {
+   "verdict": "Better",
+   "status": "partial",
+   "capability": "Planner / status enrichment by 6-digit job with ambiguity refusal",
+   "note": "partial: SL enrichment built; Planner labels on the bid page arrive with the Phase D/I integration"
+  },
+  "RT-04": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Derived margin (1 − Budget ÷ Value)"
+  },
+  "RT-05": {
+   "verdict": "Better",
+   "status": "built",
+   "capability": "% Report universe = Submitted + Quoting; facets Bidder / Status / Close % / Ball; search"
+  },
+  "RT-06": {
+   "verdict": "Better",
+   "status": "built",
+   "capability": "Header stats Projects / Bidders / Submitted / Pipeline (Σ submitted) / Wtd Forecast"
+  },
+  "RT-07": {
+   "verdict": "Better",
+   "status": "built",
+   "capability": "KPI tiles: All Projects, Avg Project Value, Submitted, Weighted Forecast (+ % of pipeline), Avg Close % (+ N scored)"
+  },
+  "RT-08": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Bidder pipeline bars (top 8, other-filter-aware, click = filter)"
+  },
+  "RT-09": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Close-probability bars (thresholds 70 / 40, click = filter)"
+  },
+  "RT-10": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Ball-in-court bars (top 8, \"N active\", click = filter)"
+  },
+  "RT-11": {
+   "verdict": "Better",
+   "status": "built",
+   "capability": "Projects table with status fill, tag filters, sort pills + header sort, row → panel; 300-row cap"
+  },
+  "RT-12": {
+   "verdict": "Better",
+   "status": "partial",
+   "capability": "PM Quoting: PM list (count + value, search), status / priority chips, project search, chip bar, clear",
+   "note": "partial: quoting pivot by estimator/rep/division/client; the PM-quoting priority chips are the board's overdue / due-soon edges"
+  },
+  "RT-13": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Priority rule Past due / ≤ 14 days / On track / No date from Bid Due"
+  },
+  "RT-14": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Preview cards (Current PM, Submitted, Quoting, Priority) as filters"
+  },
+  "RT-15": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Expandable pivot Status → Year → Month → Client → Project → Close % with Σ value, grand total, row → list, resizable"
+  },
+  "RT-16": {
+   "verdict": "Better",
+   "status": "built",
+   "capability": "Detail table (ID, Project, Status, Priority, Close %, Value, Ball); 80-row cap"
+  },
+  "RT-17": {
+   "verdict": "Better",
+   "status": "built",
+   "capability": "Awarded set = status Awarded or Date Awarded; KPIs Awarded Projects / Value / Avg Margin / BOM Complete"
+  },
+  "RT-18": {
+   "verdict": "Better",
+   "status": "built",
+   "capability": "Awarded table: search, BOM select, sort Awarded / Value / Margin; 400-row cap"
+  },
+  "RT-19": {
+   "verdict": "Better",
+   "status": "built",
+   "capability": "Detail slide-over: info, financials with margin bar, timeline; Esc / overlay close"
+  },
+  "RT-20": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Deep link to the list with match-and-highlight"
+  },
+  "PL-01": {
+   "verdict": "Better",
+   "status": "built",
+   "capability": "Editable list of the 20 columns, configurable visible columns and order, sticky header, live count"
+  },
+  "PL-02": {
+   "verdict": "Better",
+   "status": "built",
+   "capability": "Header menu: sort A–Z / Z–A, filter by, group by, column settings, totals, colours"
+  },
+  "PL-03": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Multi-value column filter panel with counts from the other filters, value search, select-all, clear; chips"
+  },
+  "PL-04": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Global search across all columns"
+  },
+  "PL-05": {
+   "verdict": "Drop",
+   "status": "dropped",
+   "capability": "Grid edit with windowing; cell / range selection"
+  },
+  "PL-06": {
+   "verdict": "Drop",
+   "status": "dropped",
+   "capability": "Detail / new-item form with typed controls; required Client + Project Name"
+  },
+  "PL-07": {
+   "verdict": "Drop",
+   "status": "dropped",
+   "capability": "+ New with auto Project ID, Created = today; Ctrl+N / Ctrl+S / Esc"
+  },
+  "PL-08": {
+   "verdict": "Drop",
+   "status": "dropped",
+   "capability": "Undo / redo 25 deep"
+  },
+  "PL-09": {
+   "verdict": "Drop",
+   "status": "dropped",
+   "capability": "Delete → recycle bin, restore, delete forever"
+  },
+  "PL-10": {
+   "verdict": "Drop",
+   "status": "dropped",
+   "capability": "Import Excel / CSV replacing the list; % OF CLOSE normalisation"
+  },
+  "PL-11": {
+   "verdict": "Better",
+   "status": "built",
+   "capability": "Export Excel / CSV (whole list, ignoring filters)"
+  },
+  "PL-12": {
+   "verdict": "Drop",
+   "status": "dropped",
+   "capability": "Reset to original seed"
+  },
+  "PL-13": {
+   "verdict": "Drop",
+   "status": "dropped",
+   "capability": "Choice-option registry with colours"
+  },
+  "PL-14": {
+   "verdict": "Better",
+   "status": "partial",
+   "capability": "Locked Bidder list; lookup dropdowns",
+   "note": "partial: bidder list = the alias editor on Data Quality"
+  },
+  "PL-15": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Home: Total projects, Clients, Data issues, Due next 14, Submitted value, Awarded value; status board; needs attention; "
+  },
+  "PL-16": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Issue tracker rules (missing bidder / PM / due date, awarded no job #, submitted no value, BOM needed, past due); top-re"
+  },
+  "PL-17": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Archive (Completed / Lost / Did Not Bid): counts, value, list, cleanup counters"
+  },
+  "PL-18": {
+   "verdict": "Better",
+   "status": "built",
+   "capability": "Client list with rollups (projects, quoting, submitted, awarded, lost, value) and drill-through; import / export"
+  },
+  "PL-19": {
+   "verdict": "Better",
+   "status": "built",
+   "capability": "Calendar month grid (Bid Due / Submitted / Awarded), prev / next / today, type filter, persisted, event → project"
+  },
+  "PL-20": {
+   "verdict": "Better",
+   "status": "built",
+   "capability": "Notebook, follow-ups, risks, conversations"
+  },
+  "PL-21": {
+   "verdict": "Better",
+   "status": "partial",
+   "capability": "Edit / admin page: navigation, column tools, list health, bidder list",
+   "note": "partial: list health = Data Quality codes + alias editor; no column tools (read-only mirror)"
+  },
+  "PL-22": {
+   "verdict": "Drop",
+   "status": "dropped",
+   "capability": "Classic links page"
+  },
+  "PL-23": {
+   "verdict": "Drop",
+   "status": "dropped",
+   "capability": "Autosave with change detection, verification, back-off, pull-before-write, 5-second multi-user refresh, hub broadcast"
+  },
+  "PL-24": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Deep-link handoff with match-and-highlight"
+  },
+  "BA-01": {
+   "verdict": "Better",
+   "status": "built",
+   "capability": "Request record: project name / number, BOM | Labor, requester, approver, needed-by, department, notes, attachments"
+  },
+  "BA-02": {
+   "verdict": "Better",
+   "status": "built",
+   "capability": "States Pending ↔ Approved with approver + timestamps; reopen; delete"
+  },
+  "BA-03": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Summary cards as filters; search; status / type selects; chips and approver names as filters"
+  },
+  "BA-04": {
+   "verdict": "Better",
+   "status": "built",
+   "capability": "Table newest-first with attachment downloads and inline actions"
+  },
+  "BA-05": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Create / edit dialog with attachment add / remove; required fields"
+  },
+  "BA-06": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "CSV export of the filtered view"
+  },
+  "BA-07": {
+   "verdict": "Drop",
+   "status": "dropped",
+   "capability": "Shared storage with 5-second refresh; local backup; Refresh"
+  },
+  "BA-08": {
+   "verdict": "New",
+   "status": "built",
+   "capability": "Real approver identity / roles; overdue on Needed By (gaps the inventory flagged)"
+  },
+  "HB-01": {
+   "verdict": "Better",
+   "status": "built",
+   "capability": "Launcher with a card per tool",
+   "note": "sidebar group + Production › Today counters"
+  },
+  "HB-02": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Consistent Home from every page"
+  },
+  "RS-01": {
+   "verdict": "Better",
+   "status": "built",
+   "capability": "Roster: name + trade, role Union / Subcontracted Union / Non-Union, max hrs / week, divisions, PTO ranges, OT flag; add "
+  },
+  "RS-02": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Projects: name, PM, division, on-site window, access times, days-needed toggles, union / non-union totals, colour, short"
+  },
+  "RS-03": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Phase trade rule and fixed phase colours"
+  },
+  "RS-04": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Crew-plan maths (`ceil(h/8)` front-loaded), per-day shortfall text, phase / day completion by slots"
+  },
+  "RS-05": {
+   "verdict": "Keep",
+   "status": "partial",
+   "capability": "Week board: Mon–Fri + conditional weekend columns, day free hours, projects lane with phase tags, person rows with utili",
+   "note": "drag-and-drop within a person's row only (phase_E.md)"
+  },
+  "RS-06": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Week summary: union (and non-union) hours not utilised, booked / cap, % utilised (PTO-adjusted)"
+  },
+  "RS-07": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Needs Staffing rail: division tabs, Needs Resources / Needs Dates, per-project got / need, per-phase plan, per-day \"stil"
+  },
+  "RS-08": {
+   "verdict": "Keep",
+   "status": "partial",
+   "capability": "Projects view: Gantt (today line, ticks, division filter) + cards (allocation bars, phase chips, people count, completed",
+   "note": "native horizontal scrollbar instead of the hand-rolled track (phase_E.md)"
+  },
+  "RS-09": {
+   "verdict": "Better",
+   "status": "built",
+   "capability": "Person-day assignment modal (project active that day, phase for the trade, hours 0–24 step .5, note, cap check)"
+  },
+  "RS-10": {
+   "verdict": "Keep",
+   "status": "partial",
+   "capability": "Project staffing modal per day / whole project: phase summary, crew options, allocation-met chips, Assign resources (sea",
+   "note": "crew options as a per-phase line, not the radio list (phase_E.md)"
+  },
+  "RS-11": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Completed Early: date + scope, releases later allocations only, gates coverage / need / staffing / colouring, badge, rev"
+  },
+  "RS-12": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Scheduling assistant in the editor (free hours per person, Covered / Short, day chips, roll-up, overlap note)"
+  },
+  "RS-13": {
+   "verdict": "Better",
+   "status": "partial",
+   "capability": "Exports: full JSON, week CSV, per-resource weekly HTML / print; JSON import (replace all); Reset; Save / Refresh to P-dr",
+   "note": "JSON export / import-replace / reset / save-to-P-drive dropped: the database is the record (phase_E.md)"
+  },
+  "RS-14": {
+   "verdict": "New",
+   "status": "built",
+   "capability": "Receiver for the planner handoff"
+  },
+  "RS-15": {
+   "verdict": "New",
+   "status": "built",
+   "capability": "Planned vs worked (PTT) per person per week; SL labor budget vs plan"
+  },
+  "PS-01": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Active / Completed tabs with counts; division tabs; global search"
+  },
+  "PS-02": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "13-column editable grid; column resize / auto-fit persisted; zoom / fit; height; reset"
+  },
+  "PS-03": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "21-value status vocabulary with Planner colours and misspelling aliases; both pills; no enforced transitions"
+  },
+  "PS-04": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Inline edits stamp Last Updated; drawer edit form; new / duplicate / delete"
+  },
+  "PS-05": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Manual-only completion, reversible, immune to imports; Completed per division"
+  },
+  "PS-06": {
+   "verdict": "Keep",
+   "status": "partial",
+   "capability": "Excel / CSV Master Schedule import with alias mapping and merge rules",
+   "note": "Excel / CSV import page + command with alias mapping, merge rules, mapping step; no confidence score"
+  },
+  "PS-07": {
+   "verdict": "Better",
+   "status": "built",
+   "capability": "Send to Scheduler payload + \"sent\" flag + acknowledgement"
+  },
+  "PS-08": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Deep link from Active tasks with fuzzy match, pulse, fallback search"
+  },
+  "PS-09": {
+   "verdict": "Drop",
+   "status": "dropped",
+   "capability": "Triple persistence with verify / backoff / autosave-off guard; Save Now; hub broadcast; `job_key`"
+  },
+  "PS-10": {
+   "verdict": "New",
+   "status": "partial",
+   "capability": "SL / PTT enrichment columns; history per row; Planner label sync",
+   "note": "enrichment columns + hover card, history per row; Planner sync guarded until Phase I"
+  },
+  "AT-01": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Division tabs with active-task badges; JSON poll; Refresh"
+  },
+  "AT-02": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Priority buckets and starting-soon rule"
+  },
+  "AT-03": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "KPI tiles (active, union hrs, starting soon, past critical stop, missing stop date, urgent union hrs)"
+  },
+  "AT-04": {
+   "verdict": "Better",
+   "status": "built",
+   "capability": "Sidebar filters: search, PM (global, hours meter), priority, status ∪ status V2 (distinct projects), reset"
+  },
+  "AT-05": {
+   "verdict": "Better",
+   "status": "built",
+   "capability": "Charts with click-to-filter: union hours by PM (top 12), by critical-stop month, tasks by priority, by status (doughnut)"
+  },
+  "AT-06": {
+   "verdict": "Better",
+   "status": "built",
+   "capability": "Active tasks table: dot, name + provenance, PM1 / PM2 chips, start, critical stop badge, union hrs (red > 99), done bar,"
+  },
+  "AT-07": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "PM focus bar; Print PM report; Export PM report (4-sheet styled xlsx with logo, formulas, autofilter, freeze)"
+  },
+  "AT-08": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Project detail overlay merging a job across divisions; Open in status board"
+  },
+  "AT-09": {
+   "verdict": "Drop",
+   "status": "dropped",
+   "capability": "Drag-and-drop Master Schedule import; dormant AI mapping; dormant Add task"
+  },
+  "PU-01": {
+   "verdict": "Better",
+   "status": "built",
+   "capability": "Division switcher with isolated data, PM rosters and colours"
+  },
+  "PU-02": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Projects seeded / refreshed from the status board, matched on project, never deleting items"
+  },
+  "PU-03": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Project: code, editable title, PM (Unassigned triage), status chips; add / delete; drawer"
+  },
+  "PU-04": {
+   "verdict": "Keep",
+   "status": "partial",
+   "capability": "Punch item fields (Active, entered, description, BIC, critical 1–5, due, completed, assigned, sign-off, verified); add /",
+   "note": "all ten item fields, add / delete, inline edit, critical popover; attachments model only"
+  },
+  "PU-05": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Derived status rules; counts per project / PM / division; % complete"
+  },
+  "PU-06": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Views: PM overview → PM detail with peekable sections; All Projects grid with chips / filter / sort / search; drawer; Ov"
+  },
+  "PU-07": {
+   "verdict": "Better",
+   "status": "built",
+   "capability": "Export Excel (sheet per project) with CSV fallback; JSON backup / restore; reset to seed; theme"
+  },
+  "PU-08": {
+   "verdict": "Drop",
+   "status": "dropped",
+   "capability": "Shared JSON autosave + 5-second pull; in-page dialogs and toasts"
+  },
+  "PI-01": {
+   "verdict": "Better",
+   "status": "built",
+   "capability": "Catalog search with the scoring ladder, brand / has-cost filters, sorts, 400 cap"
+  },
+  "PI-02": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Selected-product card: cost, MSRP, MAP, source date, margin, confidence"
+  },
+  "PI-03": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Compare up to 6 with best-cost / best-margin"
+  },
+  "PI-04": {
+   "verdict": "Better",
+   "status": "built",
+   "capability": "Estimate builder: rooms, lines, qty, cost, markup ↔ sell (1.265), 11 labor-hour columns at the rate card, per-line / roo"
+  },
+  "PI-05": {
+   "verdict": "Better",
+   "status": "built",
+   "capability": "Labor rate card with defaults and reset; Estimator Notes policy text"
+  },
+  "PI-06": {
+   "verdict": "Better",
+   "status": "built",
+   "capability": "Saved estimates: save / update / open / duplicate / delete / new; restore banner; meta auto-save"
+  },
+  "PI-07": {
+   "verdict": "Better",
+   "status": "built",
+   "capability": "Estimate import from Excel; vendor catalog import (multi-file, aliasing, dedupe, modes, pre-2023 skip, history, template"
+  },
+  "PI-08": {
+   "verdict": "Keep",
+   "status": "built",
+   "capability": "Catalog hygiene (alias cleanup, duplicate collapse, version archiving, pre-2023 removal) with counts"
+  },
+  "PI-09": {
+   "verdict": "Keep",
+   "status": "partial",
+   "capability": "Exports: multi-room xlsx, PACE BOM template (dead code today), detail CSV, clipboard; Data Files view",
+   "note": "xlsx / detail CSV / clipboard built; the PACE BOM template export skipped as dead code (phase_G.md GAP-G1)"
+  },
+  "PI-10": {
+   "verdict": "Better",
+   "status": "built",
+   "capability": "Browser-only persistence; no sharing; no approval bridge"
+  }
+ }
+}

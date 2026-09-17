@@ -1,0 +1,43 @@
+{% extends "dashboard/base.html" %}{% load humanize pca %}
+{% block title %}Bank Reconciliation · Pace Company Analytics{% endblock %}
+{% block content %}
+<div class="topbar">
+  <div class="title"><h1>Bank reconciliation</h1>
+    <small>Each uploaded monthly BMO statement PDF is parsed, checked against the bank's own totals, and reconciled line by line against SL's cash GL: checks by number (the bank prints them without the leading digit), ACH settlements rebuilt from SL's EFT payments, lump deposits rebuilt from AR receipt batches, payroll compared by week, and a bank-to-book bridge with every reconciling item. SL is read only.</small></div>
+  {% if acc.finance_write %}<div class="row">
+    <form method="post" action="{% url 'dashboard:finance_bank_reconcile' %}" style="display:inline">{% csrf_token %}
+      <button class="btn small primary" {% if running %}disabled{% endif %} title="Import any new PDFs from the folder and reconcile them (~30 s).">Scan folder &amp; reconcile</button></form>
+    <form method="post" action="{% url 'dashboard:finance_bank_reconcile' %}" style="display:inline">{% csrf_token %}<input type="hidden" name="all" value="1">
+      <button class="btn small" {% if running %}disabled{% endif %} title="Re-run every statement against current SL data (use after SL clears or voids something).">Re-reconcile all</button></form>
+  </div>{% endif %}
+</div>
+{% if acc.finance_write and not PRIVATE_MODE %}
+<div class="card" style="margin-bottom:18px"><h2>Upload bank statements</h2><p>Drop PDF statements here or choose files. Original PDFs stay on the server and are available below. Maximum 30 MB each.</p>
+<form method="post" action="{% url 'dashboard:finance_bank_upload' %}" enctype="multipart/form-data" id="bank-upload">{% csrf_token %}
+<label id="bank-drop" style="display:block;border:2px dashed #b5c8dd;border-radius:12px;padding:28px;background:#f5f9fd;cursor:pointer"><input required type="file" name="statements" accept="application/pdf,.pdf" multiple id="bank-files"> <span id="bank-file-count">Choose files or drop PDFs</span></label><p><button class="btn">Upload statements</button></p></form></div>
+<script>(()=>{const d=document.getElementById('bank-drop'),f=document.getElementById('bank-files'),n=document.getElementById('bank-file-count');const show=()=>n.textContent=f.files.length+' file(s) selected';f.addEventListener('change',show);d.addEventListener('dragover',e=>{e.preventDefault();d.style.borderColor='#276cc7'});d.addEventListener('dragleave',()=>d.style.borderColor='');d.addEventListener('drop',e=>{e.preventDefault();f.files=e.dataTransfer.files;show();d.style.borderColor=''});document.getElementById('bank-upload').addEventListener('submit',e=>{const b=e.target.querySelector('button');b.disabled=true;b.textContent='Uploading…'});})();</script>
+{% endif %}
+{% if uploads %}<div class="card" style="margin-bottom:18px"><h2>Statement library</h2><table class="data"><thead><tr><th>File</th><th>Uploaded</th><th>Status</th><th></th></tr></thead><tbody>{% for upload in uploads %}<tr><td><a target="_blank" rel="noopener" href="{% url 'dashboard:finance_bank_file' upload.pk %}">{{ upload.original_name }}</a></td><td>{{ upload.uploaded_at|date:"M j, Y" }}</td><td>{% if upload.statement_id %}<a href="{% url 'dashboard:finance_bank_detail' upload.statement_id %}">View reconciliation</a>{% else %}Saved · needs parser review{% endif %}</td><td><a href="{% url 'dashboard:finance_bank_file' upload.pk %}?download=1">Download PDF</a></td></tr>{% endfor %}</tbody></table></div>{% endif %}
+{% if not stmts %}
+<div class="card empty">No statements imported yet. Upload a BMO statement PDF above to get started.</div>
+{% else %}
+<div class="card">
+  <table class="data"><thead><tr>
+    <th>Period</th><th>Account</th><th class="num" title="Ending balance per the bank.">Bank ending</th><th class="num" title="GL book balance at period end (AcctHist).">Book</th>
+    <th class="num" title="Adjusted bank − book after all reconciling items. Green = to the penny.">Residual</th>
+    <th class="num" title="Checks in SL not yet presented at period end.">Outstanding checks</th><th>Flags</th><th>Parsed</th><th>Reconciled</th></tr></thead><tbody>
+  {% for s in stmts %}<tr>
+    <td><a href="{% url 'dashboard:finance_bank_detail' s.pk %}"><b>{{ s.period_end|date:"F Y" }}</b></a> <span class="muted">{{ s.period_start|date:"M j" }}–{{ s.period_end|date:"M j" }}</span></td>
+    <td>{{ s.gl_account }} <span class="muted">{{ s.account_title|default:s.bank_account }}</span></td>
+    <td class="num">{{ s.ending_balance|money:2 }}</td>
+    <td class="num">{% if s.book_balance != None %}{{ s.book_balance|money:2 }}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num {{ s.res_css }}"><b>{% if s.residual != None %}{{ s.residual|signed_money }}{% else %}—{% endif %}</b></td>
+    <td class="num muted">{% if s.outstanding %}{{ s.outstanding.n }} · {{ s.outstanding.total|money }}{% else %}—{% endif %}</td>
+    <td>{% if s.n_flags.critical %}<span class="tag critical">{{ s.n_flags.critical }} critical</span> {% endif %}{% if s.n_flags.high %}<span class="tag high">{{ s.n_flags.high }} high</span> {% endif %}{% if s.n_flags.moderate %}<span class="tag moderate">{{ s.n_flags.moderate }} review</span> {% endif %}{% if s.n_flags.low %}<span class="tag low">{{ s.n_flags.low }} info</span>{% endif %}</td>
+    <td>{% if s.parse_ok %}<span class="tag low" title="Parsed totals agree with the bank's summary block.">ok</span>{% else %}<span class="tag critical" title="{{ s.parse_notes|join:'; ' }}">parse issue</span>{% endif %}</td>
+    <td class="muted">{% if s.reconciled_at %}{{ s.reconciled_at|date:"M j, g:i A" }}{% else %}pending{% endif %}</td></tr>
+  {% endfor %}
+  </tbody></table>
+</div>
+{% endif %}
+{% endblock %}

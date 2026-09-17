@@ -1,0 +1,18 @@
+{% extends "dashboard/base.html" %}{% load pca %}
+{% block title %}New account · Pace Company Analytics{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="{% url 'access:console_people' %}">People &amp; access</a> › new</div>
+<div class="card" style="max-width:560px">
+<h2>Create an account</h2>
+<form method="post">{% csrf_token %}
+  <dl class="kv" style="grid-template-columns:140px 1fr;align-items:center">
+    <dt>Microsoft email</dt><dd><input name="email" type="email" required placeholder="person@example.invalid" style="width:100%"></dd>
+    <dt>Display name</dt><dd><input name="display_name" required style="width:100%"></dd>
+    <dt>Employee link</dt><dd><select name="employee_id" style="width:100%"><option value="">— none —</option>
+      {% for e in employees %}<option value="{{ e.pk }}">{{ e.canonical_name }} ({{ e.employee_key }})</option>{% endfor %}</select></dd>
+  </dl>
+  <button class="btn primary" style="margin-top:10px">Create</button>
+</form>
+<div class="note" style="margin-top:10px">The person signs in with their Pace Microsoft account (MFA enforced). No password to manage here.</div>
+</div>
+{% endblock %}

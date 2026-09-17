@@ -1,0 +1,10 @@
+{# one decision cell: key, dec (status/note/by/at), anchor #}
+<form method="post" action="{% url 'access:permissions_update' %}" style="display:inline">{% csrf_token %}<input type="hidden" name="anchor" value="{{ anchor }}"><input type="hidden" name="key" value="{{ key }}">
+  {% if dec.status == 'confirmed' %}<input type="hidden" name="action" value="unconfirm"><span class="perm-check on" title="Confirmed{% if dec.by %} by {{ dec.by }}{% endif %}{% if dec.at %} on {{ dec.at|date:'M j, Y' }}{% endif %}.">✓ Confirmed</span><button class="perm-undo" title="Reopen this decision." style="border:0;background:none;cursor:pointer">undo</button>
+  {% elif dec.status == 'stale' %}<input type="hidden" name="action" value="confirm"><button class="perm-check stale" title="You confirmed an earlier version of this rule{% if dec.at %} on {{ dec.at|date:'M j, Y' }}{% endif %}; it has changed since. Click to confirm the rule as it stands now.">↻ Changed — confirm again</button>
+  {% else %}<input type="hidden" name="action" value="confirm"><button class="perm-check" title="I agree with this rule as it stands.">✓ Confirm</button>{% endif %}
+</form>
+<details class="perm-note"{% if dec.note %} open{% endif %}><summary>{% if dec.note %}<span class="has">{{ dec.note|truncatechars:70 }}</span>{% else %}+ note{% endif %}</summary>
+  <form method="post" action="{% url 'access:permissions_update' %}">{% csrf_token %}<input type="hidden" name="action" value="note"><input type="hidden" name="key" value="{{ key }}"><input type="hidden" name="anchor" value="{{ anchor }}">
+    <textarea name="note" placeholder="Context for this decision — why, who asked, what to revisit…">{{ dec.note }}</textarea>
+    <button class="btn small">Save note</button></form></details>

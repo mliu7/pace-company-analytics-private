@@ -1,0 +1,30 @@
+{% extends "dashboard/base.html" %}{% load humanize pca static %}
+{% block title %}Estimates · Pace Company Analytics{% endblock %}
+{% block extra_css %}@import url("{% static 'estimating/estimating.css' %}");{% endblock %}
+{% block content %}
+<div class="topbar">
+  <div class="title"><h1>Estimates</h1><small>Saved estimates live here — shared, versioned on every save, linked to bids. Totals are as of the last save (the builder reprices labor at today's rate card). <a href="{% url 'estimating:estimating_home' %}">Catalog search</a> · <a href="{% url 'estimating:estimating_import' %}">Import a BOM workbook</a></small></div>
+  {% if can_write %}<form method="post" action="{% url 'estimating:estimate_save' %}" class="row" style="gap:6px">{% csrf_token %}<input type="hidden" name="action" value="create"><input name="title" placeholder="title" style="font:inherit;padding:6px 9px;border:1px solid var(--line-strong);border-radius:8px"><input name="client_name" placeholder="client" style="font:inherit;padding:6px 9px;border:1px solid var(--line-strong);border-radius:8px"><button class="btn primary" type="submit" title="Start a blank estimate with one room">+ New estimate</button></form>{% endif %}
+</div>
+<div class="grid kpi" style="margin-bottom:12px">
+  <div class="card kpi"><div class="label" title="Estimates in the current list">Estimates</div><div class="value sm">{{ kp.n }}</div><div class="sub">{{ kp.draft }} draft · {{ kp.submitted }} submitted · {{ kp.approved }} approved</div></div>
+  <div class="card kpi"><div class="label" title="Σ total sell (equipment sell × qty + labor hours × sell rate) as of each estimate's last save">Total sell</div><div class="value sm">{{ kp.sell|money }}</div><div class="sub">cost {{ kp.cost|money_k }}</div></div>
+  <div class="card kpi"><div class="label" title="(sell − cost) ÷ sell across the list">Margin</div><div class="value sm">{% if kp.margin != None %}{{ kp.margin|floatformat:1 }}%{% else %}—{% endif %}</div><div class="sub">{{ kp.hours|floatformat:1 }} labor hours</div></div>
+</div>
+<form method="get" class="card tight" style="margin-bottom:12px"><div class="row">
+  <b>Show</b><a class="btn small {% if who == 'mine' %}primary{% endif %}" href="?who=mine&status={{ status }}&q={{ q|urlencode }}" title="Estimates you own">Mine <small>{{ mine_n }}</small></a><a class="btn small {% if who == 'all' %}primary{% endif %}" href="?who=all&status={{ status }}&q={{ q|urlencode }}" title="Everyone's estimates">All <small>{{ all_n }}</small></a>
+  <input type="hidden" name="who" value="{{ who }}">
+  <select name="status" onchange="this.form.submit()" title="Status"><option value="">any status</option>{% for k, l in statuses %}<option value="{{ k }}" {% if status == k %}selected{% endif %}>{{ l }}</option>{% endfor %}</select>
+  <input type="search" name="q" value="{{ q }}" placeholder="title, client, notes…" style="font:inherit;padding:5px 9px;border:1px solid var(--line-strong);border-radius:8px;min-width:240px"><button class="btn small" type="submit">Apply</button>
+</div></form>
+<div class="card tight">
+{% if rows %}
+<div class="table-wrap tall"><table class="data dense"><thead><tr><th>Title</th><th>Client</th><th>Status</th><th class="num" title="Rooms">Rooms</th><th class="num" title="Lines">Lines</th><th class="num" title="Total cost as saved">Cost</th><th class="num" title="Total sell as saved">Sell</th><th class="num" title="Sell − cost">Profit</th><th class="num" title="Profit ÷ sell">Margin</th><th class="num" title="Labor hours (all types)">Hours</th><th title="Attached bid">Bid</th><th>Owner</th><th title="Last save">Updated</th><th></th></tr></thead><tbody>
+{% for e in rows %}<tr data-hl="{{ e.id }}"><td><a href="{% url 'estimating:estimate_detail' e.id %}"><b>{{ e }}</b></a>{% if e.source_file %} <span class="tag" title="Imported from {{ e.source_file }}">imported</span>{% endif %}</td><td>{{ e.client_name }}</td><td><span class="pill {% if e.status == 'approved' %}good{% elif e.status == 'submitted' %}info{% endif %}">{{ e.get_status_display }}</span></td>
+<td class="num">{{ e.room_count }}</td><td class="num">{{ e.line_count }}</td><td class="num">{{ e.total_cost|money }}</td><td class="num">{{ e.total_sell|money }}</td><td class="num {{ e.profit|posneg }}">{{ e.profit|money }}</td><td class="num">{% if e.margin != None %}{{ e.margin|floatformat:1 }}%{% else %}—{% endif %}</td><td class="num">{{ e.labor_hours|floatformat:1 }}</td>
+<td>{% if e.bid_id %}<a href="{% url 'bids:bid_detail' e.bid_id %}" title="{{ e.bid.client_name }} · value {{ e.bid.value|money }}">{{ e.bid.project_name|truncatechars:34 }}</a>{% else %}<span class="muted">—</span>{% endif %}</td><td>{{ e.owner.display_name|default:"—" }}</td><td title="v{{ e.version_no }} by {{ e.updated_by.display_name|default:'—' }}">{{ e.updated_at|date:"M j, g:i A" }}</td>
+<td style="white-space:nowrap"><a class="btn small" href="{% url 'estimating:estimate_detail' e.id %}">Open</a> {% if can_write %}<form method="post" action="{% url 'estimating:estimate_save' %}" style="display:inline">{% csrf_token %}<input type="hidden" name="action" value="duplicate"><input type="hidden" name="id" value="{{ e.id }}"><button class="btn small" title="Copy this estimate (title + Copy)">Duplicate</button></form> <form method="post" action="{% url 'estimating:estimate_save' %}" style="display:inline" onsubmit="return confirm('Delete estimate {{ e|escapejs }}? Its versions go with it.')">{% csrf_token %}<input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="{{ e.id }}"><button class="btn small" title="Delete (audited)">Delete</button></form>{% endif %}</td></tr>{% endfor %}
+</tbody></table></div>
+{% else %}<div class="empty">No estimates{% if who == 'mine' %} of yours{% endif %} yet{% if q or status %} match these filters{% endif %}.{% if can_write %} Start one above, add items from the <a href="{% url 'estimating:estimating_home' %}">catalog search</a>, or <a href="{% url 'estimating:estimating_import' %}">import a BOM workbook</a>.{% endif %}</div>{% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,29 @@
+{% extends "dashboard/base.html" %}{% load humanize pca %}
+{% block title %}010 Hygiene · Pace Company Analytics{% endblock %}
+{% block content %}
+<div class="topbar"><div class="title"><h1>010 data hygiene</h1>
+  <small>CNET ↔ SL reconciliation issues for Jackie / Liz. Background housekeeping — nothing here changes the money pages, but fixing these keeps the numbers exact.</small></div></div>
+<div class="grid two" style="margin-bottom:14px">
+  <div class="card"><h2>In SL but not in CNET <small>{{ counts.sl_missing|intcomma }} open — newest {{ sl_missing|length }} shown. SO1 orders (since 2015) whose User2 doesn't match any CNET document — a typo in SL's User2, or history not yet backfilled</small></h2>
+    <table class="data dense"><thead><tr><th>SL User2</th><th>SL order</th><th class="num">Date</th><th>Customer</th><th class="num">Total</th></tr></thead><tbody>
+    {% for r in sl_missing %}<tr><td class="mono">{{ r.cnet_number }}</td><td class="mono">{{ r.ord_nbr }}</td><td class="num muted">{{ r.ord_date|date:"Y-m-d" }}</td><td>{{ r.cust_id }}</td><td class="num">{{ r.tot_ord|money }}</td></tr>
+    {% empty %}<tr><td colspan="5" class="empty">clean ✓</td></tr>{% endfor %}</tbody></table></div>
+  <div class="card"><h2>In CNET but not in SL <small>{{ cnet_missing|length }} ordered 3+ days ago, never imported to SL</small></h2>
+    <table class="data dense"><thead><tr><th>CNET #</th><th class="num">Ordered</th><th>Customer</th><th class="num">Total</th><th>Created by</th></tr></thead><tbody>
+    {% for r in cnet_missing %}<tr><td><a href="{% url 'dashboard:sales010_order_detail' r.document_number %}">{{ r.document_number }}</a></td><td class="num muted">{{ r.ordered_at|date:"Y-m-d" }}</td><td class="trunc fluid" style="width:45%" title="{{ r.customer_company }}">{{ r.customer_company }}</td><td class="num">{{ r.total|money }}</td><td class="muted">{{ r.created_by_name }}</td></tr>
+    {% empty %}<tr><td colspan="5" class="empty">clean ✓</td></tr>{% endfor %}</tbody></table></div>
+</div>
+<div class="grid two" style="margin-bottom:14px">
+  <div class="card"><h2>Totals disagree <small>{{ counts.mismatch|intcomma }} open — largest {{ mismatch|length }} shown. CNET and SL differ by &gt; $1 (revisions not re-imported, manual SL edits)</small></h2>
+    <table class="data dense"><thead><tr><th>CNET #</th><th>SL order</th><th class="num">CNET total</th><th class="num">SL total</th><th class="num">Δ</th><th>Customer</th></tr></thead><tbody>
+    {% for r in mismatch %}<tr><td><a href="{% url 'dashboard:sales010_order_detail' r.document_number %}">{{ r.document_number }}</a></td><td class="mono">{{ r.sl_ord_nbr }}</td><td class="num">{{ r.cnet_total|money }}</td><td class="num">{{ r.sl_total|money }}</td><td class="num {{ r.delta|posneg }}">{{ r.delta|signed_money }}</td><td class="trunc fluid" style="width:40%" title="{{ r.customer_company }}">{{ r.customer_company }}</td></tr>
+    {% empty %}<tr><td colspan="6" class="empty">clean ✓</td></tr>{% endfor %}</tbody></table></div>
+  <div class="card"><h2>Stale open orders <small>{{ stale|length }} still Submitted/Partial/BackOrder after 90+ days</small></h2>
+    <table class="data dense"><thead><tr><th>CNET #</th><th>Status</th><th class="num">Ordered</th><th>Customer</th><th>Rep</th><th class="num">Total</th><th class="num">Invoiced</th></tr></thead><tbody>
+    {% for r in stale %}<tr><td><a href="{% url 'dashboard:sales010_order_detail' r.document_number %}">{{ r.document_number }}</a></td><td><span class="tag {% if r.status == 'BackOrder' %}high{% endif %}">{{ r.status }}</span></td><td class="num muted">{{ r.ordered_at|date:"Y-m-d" }}</td><td class="trunc fluid" style="width:35%" title="{{ r.customer_company }}">{{ r.customer_company }}</td><td>{{ r.rep }}</td><td class="num">{{ r.total|money }}</td><td class="num muted">{{ r.realized_revenue|money }}</td></tr>
+    {% empty %}<tr><td colspan="7" class="empty">clean ✓</td></tr>{% endfor %}</tbody></table></div>
+</div>
+<div class="card"><h2>Status vocabulary <small>observed CNET document statuses (the pipeline's terminal-status list is derived from this)</small></h2>
+<table class="data dense"><thead><tr><th>Type</th><th>Status</th><th class="num">Docs</th></tr></thead><tbody>
+{% for v in vocab %}<tr><td class="muted">{{ v.doc_type }}</td><td>{{ v.status|default:"(blank)" }}</td><td class="num">{{ v.n|intcomma }}</td></tr>{% endfor %}</tbody></table></div>
+{% endblock %}

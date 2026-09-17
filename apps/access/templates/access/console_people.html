@@ -1,0 +1,20 @@
+{% extends "dashboard/base.html" %}{% load pca %}
+{% block title %}People & Access · Pace Company Analytics{% endblock %}
+{% block content %}
+<div class="topbar"><div class="title"><h1>People &amp; access</h1>
+  <small>Accounts exist before first sign-in so permissions are ready when people arrive. Roles are defined by the system; assign people to them here.</small></div>
+  <div class="row"><a class="btn primary" href="{% url 'access:console_create' %}">+ New account</a>
+    <a class="btn" href="{% url 'access:console_audit' %}">Change log</a>
+    {% if acc.is_superadmin %}<a class="btn" href="{% url 'access:console_audit_all' %}">Full audit</a><a class="btn" href="{% url 'access:console_usage' %}">Usage</a>{% endif %}</div></div>
+<div class="card">
+<table class="data"><thead><tr><th>Person</th><th>Email</th><th>Employee link</th><th>Roles</th><th>Status</th><th class="num">Last sign-in</th></tr></thead><tbody>
+{% for a in accounts %}<tr>
+  <td><a href="{% url 'access:console_person' a.pk %}"><b>{{ a.display_name }}</b></a>{% if acc.is_superadmin and a.is_superadmin %} <span class="pill bad" title="Superadmin — full access to everything.">superadmin</span>{% endif %}</td>
+  <td class="muted">{{ a.email }}</td>
+  <td class="muted">{{ a.employee.canonical_name|default:"—" }}</td>
+  <td>{% for ra in a.role_assignments.all %}{% if ra.role in visible_roles or acc.is_superadmin %}<span class="tag">{{ ra.role|nice }}{% if ra.division_codes %} {{ ra.division_codes|join:"," }}{% endif %}</span> {% endif %}{% endfor %}</td>
+  <td>{% if a.status == 'active' %}<span class="tag closed_stabilized">active</span>{% else %}<span class="tag critical">disabled</span>{% endif %}</td>
+  <td class="num muted">{% if a.last_login_at %}{{ a.last_login_at|date:"M j, Y" }}{% else %}<span class="tag" title="Account is pre-provisioned; permissions apply on first sign-in.">never</span>{% endif %}</td>
+</tr>{% endfor %}</tbody></table>
+</div>
+{% endblock %}

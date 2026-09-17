@@ -1,0 +1,18 @@
+{% extends "dashboard/base.html" %}{% load pca %}
+{% block title %}Usage · Pace Company Analytics{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="{% url 'access:console_people' %}">People &amp; access</a> › usage</div>
+<div class="grid two">
+<div class="card"><h2>Who is using PCA <small>page views, last 30 days</small></h2>
+<table class="data"><thead><tr><th>Person</th><th class="num">Views</th><th class="num">Last seen</th></tr></thead><tbody>
+{% for r in per_user %}<tr><td>{{ r.actor__display_name|default:"(unknown)" }}</td><td class="num">{{ r.views }}</td><td class="num muted">{{ r.last|date:"M j, H:i" }}</td></tr>
+{% empty %}<tr><td colspan="3" class="empty">no views recorded yet</td></tr>{% endfor %}</tbody></table></div>
+<div class="card"><h2>What gets used <small>by page, last 30 days</small></h2>
+<table class="data"><thead><tr><th>Page</th><th class="num">Views</th><th class="num">People</th></tr></thead><tbody>
+{% for r in per_page %}<tr><td class="mono">{{ r.view_name }}</td><td class="num">{{ r.views }}</td><td class="num">{{ r.users }}</td></tr>{% endfor %}</tbody></table></div>
+<div class="card"><h2>Denied attempts <small>last 30 days — who bumped into walls</small></h2>
+<table class="data"><thead><tr><th>Person</th><th>Path</th><th class="num">Times</th></tr></thead><tbody>
+{% for r in denied %}<tr><td>{{ r.actor__display_name|default:"(anon)" }}</td><td class="mono">{{ r.path }}</td><td class="num">{{ r.n }}</td></tr>
+{% empty %}<tr><td colspan="3" class="empty">none</td></tr>{% endfor %}</tbody></table></div>
+</div>
+{% endblock %}

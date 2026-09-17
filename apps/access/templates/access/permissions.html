@@ -1,0 +1,171 @@
+{% extends "dashboard/base.html" %}{% load pca %}
+{% block title %}Permissions · Pace Company Analytics{% endblock %}
+{% block content %}
+<div class="topbar">
+  <div class="title"><h1>Permissions <span class="pill bad" style="vertical-align:middle;font-size:11px">visible only to you</span></h1>
+    <small>Three kinds of decision, {{ total }} in all: how people <a href="#signin">sign in</a>, what each <a href="#roles">role</a> can do, and what each <a href="#pagerules">area of the app</a> requires. Every line shows the rule <b>as it stands</b> — that is the recommendation — with a check to confirm it, a note for your context, and a way to change it. Changes take effect on the next request and are audited. Rules never name people: people are assigned to roles in <a href="{% url 'access:console_people' %}">People &amp; Access</a>.</small></div>
+  <div class="row">
+    <span class="pill {% if ready %}good{% elif open %}warn{% else %}info{% endif %}" title="Green when every decision is confirmed and every readiness check passes.">{% if ready %}ready to deploy{% else %}{{ open }} decision{{ open|pluralize }} open{% endif %}</span>
+    <a class="btn small" href="{% url 'access:console_people' %}">People &amp; Access</a>
+    <a class="btn small" href="{% url 'access:console_audit_all' %}">Full audit</a>
+  </div>
+</div>
+
+<div class="grid kpi" style="margin-bottom:12px">
+  <div class="card kpi"><div class="label" title="Sign-in items + roles + page rules. Capabilities and in-page gates follow from these and are reference only.">Decisions</div><div class="value">{{ confirmed }}<span class="muted" style="font-size:15px;font-weight:500"> / {{ total }}</span></div><div class="sub">{% if open %}<span class="warn-ink">{{ open }} open</span>{% else %}<span class="pos">all confirmed</span>{% endif %}{% if stale %} · <span class="warn-ink">{{ stale }} changed since</span>{% endif %}</div></div>
+  <div class="card kpi"><div class="label" title="Rules you changed here that differ from the code default.">Changed from default</div><div class="value">{{ changed_n }}</div><div class="sub">{% if changed_n %}overrides in force{% else %}every rule is the default{% endif %}</div></div>
+  <div class="card kpi"><div class="label">Roles</div><div class="value">{{ n_roles }}</div><div class="sub">one decision each</div></div>
+  <div class="card kpi"><div class="label" title="Every URL is registered and default-deny; they are decided by area, not one by one.">Page rules</div><div class="value">{{ areas|length }}</div><div class="sub">areas · {{ n_urls }} URLs</div></div>
+  <div class="card kpi"><div class="label" title="The permission vocabulary. Their meaning is code; who holds them is the role decision; where they apply is the area decision.">Capabilities</div><div class="value">{{ n_caps }}</div><div class="sub">{{ super_caps|length }} superadmin-tier · reference</div></div>
+</div>
+
+<div class="grid two" style="margin-bottom:12px">
+  <div class="card">
+    <h2>How the model works</h2>
+    <div class="perm-explainer">
+      <div class="step"><b>People</b><small>Accounts, pre-created in People &amp; Access. Each person is assigned one or more <i>roles</i>. Nothing else is ever attached to a person — except a superadmin's extra grants.</small></div>
+      <div class="step"><b>Roles</b><small>Named bundles of capabilities: Executive, Division Manager, Finance, Project Manager, Estimator, Sales, Permission Admin. What each holds is <a href="#roles">decision 2</a>.</small></div>
+      <div class="step"><b>Areas</b><small>Projects, Finance, Bids… Every page in an area requires that area's capabilities; the few exceptions are spelled out. What each area requires is <a href="#pagerules">decision 3</a>.</small></div>
+      <div class="step"><b>Concealment</b><small>Superadmin-tier capabilities are yours alone: their pages answer 404 to everyone else and their names never render. Nothing to decide — it is the rule you confirmed under sign-in.</small></div>
+    </div>
+    <div class="note" style="margin-top:10px">The superadmin flag (you) holds every capability. Roles can never carry a superadmin-tier capability; a person can be given one with an extra grant on their console page.</div>
+  </div>
+  <div class="card">
+    <h2>Ready to deploy? <small>the checks a deployment needs</small></h2>
+    <div class="perm-ready">
+      {% for c in checks %}<div class="chk {% if c.ok == None %}na{% elif c.ok %}ok{% elif c.soft %}soft{% else %}no{% endif %}"><span class="ic">{% if c.ok == None %}▸{% elif c.ok %}✓{% elif c.soft %}!{% else %}✕{% endif %}</span><span><b>{{ c.label }}</b> <small>· {{ c.detail }}</small></span></div>{% endfor %}
+    </div>
+  </div>
+</div>
+
+<div class="perm-toc" id="perm-toc">
+  <span class="muted" style="font-size:12px;font-weight:600;align-self:center">Jump to:</span>
+  <a href="#signin">1 · Sign-in &amp; accounts <span class="n {% if items_open %}open{% endif %}">{{ items_open }}/{{ items|length }} open</span></a>
+  <a href="#roles">2 · Roles <span class="n {% if roles_open %}open{% endif %}">{{ roles_open }}/{{ roles|length }} open</span></a>
+  <a href="#pagerules">3 · Page rules by area <span class="n {% if areas_open %}open{% endif %}">{{ areas_open }}/{{ areas|length }} open</span></a>
+  <a href="#reference">Reference <span class="n">no decisions</span></a>
+  <span style="margin-left:auto" class="ledger-chips"><span class="dim">Show:</span><span class="lchip perm-show on" data-show="all">All</span><span class="lchip perm-show" data-show="open">Open only</span><span class="lchip perm-show" data-show="changed">Changed only</span><span class="lchip perm-show" data-show="noted" title="Only the lines you left a note on.">Noted{% if noted %} ({{ noted }}){% endif %}</span></span>
+</div>
+
+{# ------------------------------------------------------------------ 1 · sign-in & accounts #}
+<div class="card perm-section" id="signin" style="margin-bottom:12px">
+  <h2>1 · Sign-in &amp; accounts <small>how people get in, who administers, what a refusal looks like</small>
+    {% if items_open %}<span class="actions"><form method="post" action="{% url 'access:permissions_update' %}">{% csrf_token %}<input type="hidden" name="action" value="confirm_many"><input type="hidden" name="anchor" value="signin">{% for it in items %}{% if it.dec.status != 'confirmed' %}<input type="hidden" name="keys" value="item:{{ it.key }}">{% endif %}{% endfor %}<button class="btn small" title="Confirm every open item in this section.">✓ Confirm all {{ items_open }} open</button></form></span>{% endif %}</h2>
+  <table class="data dense perm"><thead><tr><th style="width:17%">Item</th><th style="width:43%">Recommendation (in force)</th><th>Current state</th><th class="decide">Your decision</th></tr></thead><tbody>
+  {% for it in items %}<tr id="item-{{ it.key }}" data-st="{{ it.dec.status }}" data-ch="0" data-nt="{% if it.dec.note %}1{% else %}0{% endif %}"><td><b>{{ it.title }}</b></td><td style="white-space:normal">{{ it.rec }}</td><td style="white-space:normal" class="muted">{{ it.cur }}{% if not it.ok %} <span class="tag moderate" title="Worth a look before go-live.">check</span>{% endif %}</td>
+    <td class="decide">{% include "access/_perm_decide.html" with key="item:"|add:it.key dec=it.dec anchor="item-"|add:it.key %}</td></tr>{% endfor %}
+  </tbody></table>
+</div>
+
+{# ------------------------------------------------------------------ 2 · roles #}
+<div class="card perm-section" id="roles" style="margin-bottom:12px">
+  <h2>2 · Roles — who can do what <small>read a column top to bottom: that is the role. Confirming a role confirms its column.</small>
+    {% if roles_open %}<span class="actions"><form method="post" action="{% url 'access:permissions_update' %}">{% csrf_token %}<input type="hidden" name="action" value="confirm_many"><input type="hidden" name="anchor" value="roles">{% for r in roles %}{% if r.dec.status != 'confirmed' %}<input type="hidden" name="keys" value="role:{{ r.role }}">{% endif %}{% endfor %}<button class="btn small">✓ Confirm all {{ roles_open }} open</button></form></span>{% endif %}</h2>
+  <div class="table-wrap" style="margin-bottom:12px"><table class="data dense perm-grid"><thead><tr><th style="min-width:150px">Area</th>{% for r in roles %}<th class="role" title="{{ r.role }}{% if r.members %} · {{ r.members|join:', ' }}{% endif %}">{{ r.label }}{% if r.scoped %}<div class="muted" style="font-weight:400;font-size:10.5px">own divisions</div>{% endif %}</th>{% endfor %}<th class="role" style="color:#c62828">Superadmin<div class="muted" style="font-weight:400;font-size:10.5px">you</div></th></tr></thead><tbody>
+  {% for m in matrix %}<tr><td><b>{{ m.label }}</b><div class="muted perm-rule" style="font-size:10.5px">{% for c, short in m.caps %}{{ c }}{% if not forloop.last %} · {% endif %}{% endfor %}</div></td>
+    {% for cell in m.cells %}<td class="cell {% if not cell.labels %}none{% endif %}" title="{{ cell.label }} · {{ m.label }}: {% if cell.caps %}{{ cell.caps|join:', ' }}{% else %}nothing{% endif %}">{% for l in cell.labels %}<span class="lbl {% if not forloop.first %}more{% endif %}">{{ l }}</span>{% empty %}—{% endfor %}</td>{% endfor %}
+    <td class="cell sup"><span class="lbl">everything</span></td></tr>{% endfor %}
+  </tbody></table></div>
+  <table class="data dense perm"><thead><tr><th style="width:15%">Role</th><th style="width:47%">What it can do</th><th>People</th><th class="decide">Your decision</th></tr></thead><tbody>
+  {% for r in roles %}<tr id="role-{{ r.role }}" data-st="{{ r.dec.status }}" data-ch="{% if r.changed %}1{% else %}0{% endif %}" data-nt="{% if r.dec.note %}1{% else %}0{% endif %}">
+    <td><b>{{ r.label }}</b>{% if r.changed %}<span class="perm-changed" title="Differs from the code default.">changed</span>{% endif %}
+      <div class="muted" style="font-size:11px">{{ r.role }}{% if r.scoped %} · scoped to own divisions{% endif %}{% if r.superadmin_assigned %} · only you can grant it{% endif %}</div></td>
+    <td style="white-space:normal">
+      <div class="perm-area-sum">{% for l, held in r.by_area %}<span><b>{{ l }}</b>: {{ held|join:" · " }}</span>{% empty %}<span class="muted">nothing</span>{% endfor %}</div>
+      {% if r.cannot %}<div class="muted" style="font-size:11.5px;margin-top:3px">Cannot open: {{ r.cannot|join:", " }}.</div>{% endif %}
+      {% if r.added %}<div class="muted" style="font-size:11.5px">added here: {{ r.added|join:", " }}</div>{% endif %}{% if r.removed %}<div class="muted" style="font-size:11.5px">removed here: {{ r.removed|join:", " }}</div>{% endif %}
+      <details class="perm-edit"><summary>Change what this role holds ▾</summary><div class="panel">
+        <form method="post" action="{% url 'access:permissions_update' %}">{% csrf_token %}<input type="hidden" name="action" value="set_role"><input type="hidden" name="role" value="{{ r.role }}"><input type="hidden" name="anchor" value="role-{{ r.role }}">
+          {% for m in matrix %}{% if m.key != 'superadmin' %}<div style="margin:4px 0"><b style="font-size:12px">{{ m.label }}</b><div class="caps" style="margin:2px 0 4px">{% for c, short in m.caps %}<label><input type="checkbox" name="caps" value="{{ c }}" {% if c in r.caps %}checked{% endif %}>{{ short }} <span class="muted perm-rule" style="font-size:10.5px">{{ c }}</span></label>{% endfor %}</div></div>{% endif %}{% endfor %}
+          <div class="muted" style="font-size:11.5px;margin-bottom:6px">Superadmin-tier capabilities cannot be given to a role — use an extra grant on a person's console page.</div>
+          <input type="text" name="reason" placeholder="why (kept with the change)"> <button class="btn small primary">Save</button></form>
+        {% if r.changed %}<form method="post" action="{% url 'access:permissions_update' %}" style="margin-top:6px">{% csrf_token %}<input type="hidden" name="action" value="reset_role"><input type="hidden" name="role" value="{{ r.role }}"><input type="hidden" name="anchor" value="role-{{ r.role }}"><button class="btn small">Reset to the code default</button></form>{% endif %}
+      </div></details></td>
+    <td style="white-space:normal">{% if r.members %}{{ r.members|length }}: <span class="muted">{{ r.members|join:", " }}</span>{% else %}<span class="muted">nobody yet</span>{% endif %}</td>
+    <td class="decide">{% include "access/_perm_decide.html" with key="role:"|add:r.role dec=r.dec anchor="role-"|add:r.role %}</td></tr>{% endfor %}
+  </tbody></table>
+</div>
+
+{# ------------------------------------------------------------------ 3 · page rules by area #}
+<div class="card perm-section" id="pagerules" style="margin-bottom:12px">
+  <h2>3 · Page rules by area <small>every URL is registered and default-deny; one decision per area covers all of its pages, data endpoints and actions</small>
+    {% if areas_open %}<span class="actions"><form method="post" action="{% url 'access:permissions_update' %}">{% csrf_token %}<input type="hidden" name="action" value="confirm_many"><input type="hidden" name="anchor" value="pagerules">{% for a in areas %}{% if a.dec.status != 'confirmed' %}<input type="hidden" name="keys" value="area:{{ a.key }}">{% endif %}{% endfor %}<button class="btn small">✓ Confirm all {{ areas_open }} open</button></form></span>{% endif %}</h2>
+  <table class="data dense perm"><thead><tr><th style="width:17%">Area</th><th style="width:58%">Rules (in force)</th><th class="decide">Your decision</th></tr></thead><tbody>
+  {% for a in areas %}<tr id="area-{{ a.key }}" data-st="{{ a.dec.status }}" data-ch="{% if a.changed %}1{% else %}0{% endif %}" data-nt="{% if a.dec.note %}1{% else %}0{% endif %}">
+    <td style="white-space:normal"><b>{{ a.label }}</b>{% if a.changed %}<span class="perm-changed" title="One or more pages here differ from the code default.">changed</span>{% endif %}<div class="muted" style="font-size:11.5px">{{ a.blurb }}</div><div class="muted" style="font-size:11px;margin-top:2px">{{ a.n }} URL{{ a.n|pluralize }}</div></td>
+    <td style="white-space:normal">
+      <ul class="perm-rules">{% for g in a.rules %}<li><span class="n">{{ g.n }}</span> {% if g.n_actions == g.n %}action{{ g.n|pluralize }}{% elif g.n_pages == g.n %}page{{ g.n|pluralize }}{% else %}URL{{ g.n|pluralize }}{% endif %}
+        {% if g.everyone %}open to <b>{{ g.text|lower }}</b>{% else %}require <span class="perm-rule">{% for c in g.caps %}<span class="cap {% if c in super_caps %}super{% endif %}">{{ c }}</span>{% endfor %}</span>{% if g.conceal %} <span class="pill bad" style="font-size:10.5px;padding:1px 7px" title="Anyone without the capability gets a 404 — the page does not exist for them.">concealed · 404</span>{% endif %}
+        <span class="who">— {% if g.super %}you only{% elif g.roles %}{% for r in g.roles %}{{ role_labels|getitem:r }}{% if not forloop.last %}, {% endif %}{% endfor %}{% else %}no role: you, or an extra grant{% endif %}</span>{% endif %}
+        <div class="muted" style="font-size:11px">{% for u in g.rows %}{{ u.label }}{% if not forloop.last %} · {% endif %}{% endfor %}</div></li>{% endfor %}</ul>
+      <details class="perm-edit" style="margin-top:4px"><summary>All {{ a.n }} URLs — change one ▾</summary><div class="panel" style="padding:0;border:0">
+      <table class="data dense perm"><thead><tr><th style="width:44%">Page / endpoint</th><th title="Capabilities the viewer must hold. Concealed = 404 for anyone else.">Requires</th><th title="Roles whose current definition can open it; superadmin always can.">Opens for</th></tr></thead><tbody>
+      {% for u in a.rows %}<tr id="v-{{ u.name }}">
+        <td style="white-space:normal"><b>{{ u.label }}</b><span class="perm-kind {{ u.kind }}" title="{% if u.kind == 'page' %}A page people open.{% elif u.kind == 'data' %}Data behind a page (JSON, export, preview) — same rule as its page.{% else %}An action that changes something (POST).{% endif %}">{{ u.kind }}</span>{% if u.changed %}<span class="perm-changed" title="Differs from the code default ({{ u.base_text }}).">changed</span>{% endif %}
+          <div class="muted perm-rule" style="font-size:11px">{{ u.name }} · {{ u.path }}</div>{% if u.desc %}<div class="muted" style="font-size:11.5px;margin-top:2px">{{ u.desc }}</div>{% endif %}</td>
+        <td style="white-space:normal"><span class="perm-rule">{% if u.everyone %}{{ u.rule_text }}{% else %}{% for c in u.caps %}<span class="cap {% if c in super_caps %}super{% endif %}">{{ c }}</span>{% endfor %}{% endif %}</span>
+          {% if u.rule.conceal %}<div><span class="pill bad" style="font-size:10.5px;padding:1px 7px">concealed · 404</span></div>{% elif not u.everyone %}<div class="muted" style="font-size:11px">403 page to others</div>{% endif %}
+          {% if not u.fixed %}<details class="perm-edit"><summary>Change ▾</summary><div class="panel">
+            <form method="post" action="{% url 'access:permissions_update' %}">{% csrf_token %}<input type="hidden" name="action" value="set_view"><input type="hidden" name="view" value="{{ u.name }}"><input type="hidden" name="anchor" value="area-{{ a.key }}">
+              <div class="caps">{% for c in normal_caps %}<label><input type="checkbox" name="caps" value="{{ c }}" {% if c in u.caps %}checked{% endif %}>{{ c }}</label>{% endfor %}
+              {% for c in super_caps %}<label class="super" title="Superadmin tier: requiring it makes the page concealed (404) for everyone but you."><input type="checkbox" name="caps" value="{{ c }}" {% if c in u.caps %}checked{% endif %}>{{ c }}</label>{% endfor %}</div>
+              <label style="display:flex;gap:6px;align-items:center;font-size:12px;font-weight:400;margin:4px 0"><input type="checkbox" name="conceal" value="1" {% if u.rule.conceal %}checked{% endif %} style="min-width:0;margin:0"> conceal — answer 404 instead of the 403 page</label>
+              <input type="text" name="reason" placeholder="why (kept with the change)"> <button class="btn small primary">Save</button></form>
+            {% if u.changed %}<form method="post" action="{% url 'access:permissions_update' %}" style="margin-top:6px">{% csrf_token %}<input type="hidden" name="action" value="reset_view"><input type="hidden" name="view" value="{{ u.name }}"><input type="hidden" name="anchor" value="area-{{ a.key }}"><button class="btn small">Reset to the code default ({{ u.base_text }})</button></form>{% endif %}
+          </div></details>{% else %}<div class="muted" style="font-size:11px">fixed</div>{% endif %}</td>
+        <td class="perm-roles" style="white-space:normal">{% if u.rule.public %}<span class="r all">everyone, even signed out</span>{% elif u.rule.auth %}<span class="r all">every signed-in account</span>{% else %}<span class="r sup">superadmin</span>{% for r in u.roles %}<span class="r">{{ role_labels|getitem:r }}</span>{% endfor %}{% endif %}</td></tr>{% endfor %}
+      </tbody></table></div></details>
+    </td>
+    <td class="decide">{% include "access/_perm_decide.html" with key="area:"|add:a.key dec=a.dec anchor="area-"|add:a.key %}</td></tr>{% endfor %}
+  </tbody></table>
+</div>
+
+{# ------------------------------------------------------------------ reference: capabilities and in-page redactions (no decisions) #}
+<div class="card perm-section" id="reference" style="margin-bottom:12px">
+  <h2>Reference <small>nothing to decide here — the vocabulary the decisions above are written in</small></h2>
+  <details class="perm-ref" id="perm-ref-caps" data-remember><summary>Capabilities <span class="muted" style="font-weight:400">· {{ n_caps }} — what each unlocks, where it is required, who holds it</span></summary>
+  <table class="data dense perm" style="margin-top:8px"><thead><tr><th>Capability</th><th style="width:34%">Unlocks</th><th>Area</th><th title="Pages / endpoints that require it, and in-page fragments gated by it.">Used by</th><th title="Roles whose current definition includes it (superadmin always).">Held by</th><th class="decide">Note</th></tr></thead><tbody>
+  {% for c in caps %}<tr id="cap-{{ c.cap }}" data-st="ref" data-ch="0" data-nt="{% if c.dec.note %}1{% else %}0{% endif %}">
+    <td><span class="perm-rule"><span class="cap {% if c.tier == 'superadmin' %}super{% endif %}">{{ c.cap }}</span></span>{% if c.tier == 'superadmin' %}<div><span class="pill bad" style="font-size:10.5px;padding:1px 7px">superadmin tier · concealed</span></div>{% endif %}</td>
+    <td style="white-space:normal">{{ c.desc }}</td>
+    <td class="muted">{{ c.area }}</td>
+    <td style="white-space:normal">{% if c.pages %}<details><summary style="cursor:pointer">{{ c.pages|length }} URL{{ c.pages|length|pluralize }}</summary><div class="muted" style="font-size:11.5px;margin-top:3px">{% for u in c.pages %}{{ u.label }}{% if not forloop.last %} · {% endif %}{% endfor %}</div></details>{% else %}<span class="muted">no page requires it directly</span>{% endif %}{% if c.frags %}<div class="muted" style="font-size:11.5px">{{ c.frags }} in-page fragment{{ c.frags|pluralize }}</div>{% endif %}</td>
+    <td class="perm-roles" style="white-space:normal"><span class="r sup">superadmin</span>{% for r in c.roles %}<span class="r">{{ role_labels|getitem:r }}</span>{% endfor %}</td>
+    <td class="decide">{% include "access/_perm_note.html" with key="cap:"|add:c.cap dec=c.dec anchor="cap-"|add:c.cap %}</td></tr>{% endfor %}
+  </tbody></table></details>
+  <details class="perm-ref" id="perm-ref-frags" data-remember style="margin-top:10px"><summary>In-page redactions <span class="muted" style="font-weight:400">· fragments removed server-side unless the viewer holds the capability — counted from every template</span></summary>
+  <table class="data dense perm" style="margin-top:8px"><thead><tr><th>Gate</th><th style="width:36%">What it hides without the capability</th><th>Where</th><th>Who sees it</th><th class="decide">Note</th></tr></thead><tbody>
+  {% for f in frags %}<tr id="frag-{{ f.prop }}" data-st="ref" data-ch="0" data-nt="{% if f.dec.note %}1{% else %}0{% endif %}">
+    <td><span class="perm-rule">acc.{{ f.prop }}</span>{% if f.cap %}<div class="perm-rule"><span class="cap {% if f.tier == 'superadmin' %}super{% endif %}">{{ f.cap }}</span></div>{% else %}<div><span class="pill bad" style="font-size:10.5px;padding:1px 7px">superadmin flag</span></div>{% endif %}</td>
+    <td style="white-space:normal">{{ f.what }}</td>
+    <td style="white-space:normal">{% if f.count %}<b>{{ f.count }}</b> place{{ f.count|pluralize }}<div class="muted" style="font-size:11px">{{ f.templates|join:", " }}{% if f.templates|length == 8 %} …{% endif %}</div>{% else %}<span class="muted">not used in a template right now</span>{% endif %}</td>
+    <td class="perm-roles" style="white-space:normal"><span class="r sup">superadmin</span>{% for r in f.roles %}<span class="r">{{ role_labels|getitem:r }}</span>{% endfor %}</td>
+    <td class="decide">{% include "access/_perm_note.html" with key="frag:"|add:f.prop dec=f.dec anchor="frag-"|add:f.prop %}</td></tr>{% endfor %}
+  </tbody></table>
+  <div class="note" style="margin-top:8px">Changing what a fragment hides is a code change (the template checks a capability by name); changing <i>who</i> sees it is done in Roles — give or take the capability. The compensation rule (wages only for field-hourly people, never for a field-hourly viewer) is code as well: <span class="perm-rule">rate_visible()</span> and <span class="perm-rule">context._caps_for</span>.</div>
+  </details>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {   // Show: All / Open only / Changed only / Noted — remembered (PCA.pref); sections with nothing left to show fold away
+  const chips = document.querySelectorAll('.perm-show');
+  function apply(mode, save) {
+    chips.forEach(c => c.classList.toggle('on', c.dataset.show === mode));
+    document.querySelectorAll('tr[data-st]').forEach(tr => {
+      const st = tr.dataset.st;
+      const hide = (mode === 'open' && (st === 'confirmed' || st === 'ref')) || (mode === 'changed' && tr.dataset.ch !== '1')
+                || (mode === 'noted' && tr.dataset.nt !== '1');
+      tr.classList.toggle('perm-hidden', hide);
+    });
+    document.querySelectorAll('.perm-section').forEach(sec => {
+      const rows = [...sec.querySelectorAll('tr[data-st]')];
+      sec.classList.toggle('perm-hidden', mode !== 'all' && rows.length > 0 && rows.every(r => r.classList.contains('perm-hidden')));
+    });
+    if (save !== false) PCA.setPref('show', mode);
+  }
+  chips.forEach(c => c.addEventListener('click', () => apply(c.dataset.show)));
+  apply(PCA.pref('show', 'all'), false);
+})();
+</script>
+{% endblock %}

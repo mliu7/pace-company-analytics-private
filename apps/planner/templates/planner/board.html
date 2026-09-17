@@ -1,0 +1,135 @@
+{% extends "dashboard/base.html" %}{% load static humanize pca %}
+{% block title %}Planner boards · Pace Company Analytics{% endblock %}
+{% block main_class %} dense{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{% static 'planner/planner.css' %}?v={{ ASSET_VERSION }}">
+<div class="topbar">
+  <div class="title"><h1>Production <small style="display:inline;font-size:14px">Planner boards</small></h1>
+    <small>Every Microsoft Planner plan the company keeps, mirrored read-only: pick a board, then work it as a kanban, a sortable list or a change log. Cards on jobs carry the SL / PTT figures; every card opens the task in Planner.</small></div>
+  <div class="row">
+    {% if connected %}<span class="pill info" title="When the Planner mirror was last pulled (refresh_all pulls it three times a day; manage.py refresh_planner pulls it now). Planner has no delta feed, so every pull reads each plan and diffs tasks by etag.">{{ picker.n_plans }} plans · synced {% if last_run and last_run.finished_at %}{{ last_run.finished_at|date:"M j, g:i A" }}{% else %}—{% endif %}</span>
+    {% else %}<span class="pill warn" title="No plan has been mirrored yet.">Planner not connected — see Data Quality</span>{% endif %}
+  </div>
+</div>
+
+<div class="tabs" title="Production planning tools">
+  <a href="{% url 'planning:planning_today' %}">Today</a>
+  <a href="{% url 'planning:planning_status' %}">Status board</a>
+  <a href="{% url 'planning:planning_tasks' %}">Active tasks</a>
+  <a href="{% url 'planning:planning_punch' %}">Punch lists</a>
+  <a href="{% url 'planning:planning_approvals' %}">Approvals</a>
+  <a class="active" href="{% url 'planner:planning_planner' %}">Planner boards</a>
+</div>
+
+{% if not connected %}
+<div class="card empty">
+  <p><b>Planner not connected.</b> The mirror is empty — either the Graph app has not been granted <code>Tasks.Read.All</code> + <code>Group.Read.All</code> + <code>User.ReadBasic.All</code> yet, or no pull has run.</p>
+  <p class="note">Run <code>python manage.py refresh_planner</code> (about two minutes) or wait for the next scheduled refresh.{% if last_run and last_run.error_summary %} Last attempt: <code>{{ last_run.error_summary|truncatechars:200 }}</code>{% endif %}</p>
+</div>
+{% else %}
+
+<details class="card tight pl-picker" id="pl-picker" data-remember="planner-picker" open>
+  <summary><span class="pl-picker-title">Boards</span> <span class="muted" id="pl-picker-sub">{{ picker.n_plans }} plans across {{ picker.kinds|length }} kinds — pick one</span></summary>
+  {% if picker.av %}
+  <div class="pl-kind">
+    <h3 title="Derived, not hard-coded: every plan whose title names a stage of the AV production sequence (Install schedule → Line-up → Project tracker → Fabrication / Shipping → Programming / Commissioning → Signal-flow queue → A-card → Sign-off) becomes a column, in sequence order.">AV production sequence <small class="muted">{{ picker.av_stages }} of {{ picker.av_total }} stages have a plan ({{ picker.av|length }} plans)</small></h3>
+    <div class="pl-plans">
+      <a class="pl-plan pl-plan-av" href="?plan=av" data-plan="av" title="The combined board: one column per AV-sequence plan, cards = their tasks.">
+        <div class="pl-plan-name">AV production <span class="chip">combined</span></div>
+        <div class="pl-plan-sub">{% for p in picker.av %}{{ p.av_label }}{% if not forloop.last %} → {% endif %}{% endfor %}</div>
+      </a>
+      {% for p in picker.av %}
+      <a class="pl-plan" href="?plan={{ p.id }}" data-plan="{{ p.id }}">
+        <div class="pl-plan-name">{{ p.av_label }} <span class="muted">· {{ p.title }}</span></div>
+        <div class="pl-plan-sub">{{ p.group }}</div>
+        <div class="pl-plan-counts"><span title="Open tasks (not complete) / all tasks on the plan.">{{ p.open }} open / {{ p.tasks }}</span>{% if p.overdue %} <span class="neg" title="Open tasks whose due date has passed (US Central, live clock at the last sync).">{{ p.overdue }} overdue</span>{% endif %} <span class="muted pl-rel" data-at="{{ p.last_change|default:'' }}" title="Newest tracked change on any task of the plan (title, bucket, %, dates, labels, assignees)."></span></div>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+  {% for k in picker.kinds %}
+  <div class="pl-kind">
+    <h3 title="{{ k.help }}">{{ k.label }} <small class="muted">{{ k.plans|length }} plans · {{ k.open }} open of {{ k.tasks }} tasks</small></h3>
+    <div class="pl-plans">
+      {% for p in k.plans %}
+      <a class="pl-plan" href="?plan={{ p.id }}" data-plan="{{ p.id }}" title="{{ p.group }} › {{ p.title }}{% if p.manual %} (kind set by hand){% endif %}">
+        <div class="pl-plan-name">{{ p.title }}</div>
+        <div class="pl-plan-sub">{{ p.group }}{% if p.av_stage %} · <span class="chip">AV · {{ p.av_label }}</span>{% endif %}</div>
+        <div class="pl-plan-counts"><span title="Open tasks (not complete) / all tasks on the plan.">{{ p.open }} open / {{ p.tasks }}</span>{% if p.overdue %} <span class="neg" title="Open tasks whose due date has passed.">{{ p.overdue }} overdue</span>{% endif %} <span class="muted pl-rel" data-at="{{ p.last_change|default:'' }}" title="Newest tracked change on any task of the plan."></span></div>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+</details>
+
+<div id="pl-board-wrap" hidden>
+  <div class="card tight pl-head">
+    <div class="pl-head-title">
+      <h2 id="pl-plan-title">—</h2>
+      <div class="muted" id="pl-plan-sub"></div>
+    </div>
+    <div class="pl-head-actions row">
+      <span class="pill" id="pl-counts" title="Cards shown after filters / all cards on the board."></span>
+      <a class="btn small" id="pl-open-planner" href="#" target="_blank" rel="noopener" title="Open this plan in Microsoft Planner (new tab).">Open in Planner ↗</a>
+      <button class="btn small" id="pl-change" type="button" title="Back to the board picker.">Change board</button>
+    </div>
+  </div>
+
+  <div class="card tight pl-filters">
+    <div class="filters" id="pl-filters">
+      <div class="pl-views" role="tablist" title="Board = kanban by bucket · List = sortable table · Changes = what moved recently">
+        <button class="btn small pl-view" data-view="board" type="button">Board</button>
+        <button class="btn small pl-view" data-view="list" type="button">List</button>
+        <button class="btn small pl-view" data-view="changes" type="button">Changes</button>
+      </div>
+      <label title="Division of the SL job a card is linked to (cards on unlinked tasks have none).">Division<select id="f-division"><option value="">all</option></select></label>
+      <label title="People assigned to the task in Planner.">Assignee<select id="f-assignee"><option value="">anyone</option></select></label>
+      <label title="Planner labels (the plan's coloured tags).">Label<select id="f-label"><option value="">any</option></select></label>
+      <label title="Task state in Planner: not started (0 %), in progress, complete (100 %).">State<select id="f-state"><option value="">any</option><option value="open">open (not complete)</option><option value="not_started">not started</option><option value="in_progress">in progress</option><option value="complete">complete</option></select></label>
+      <label class="pl-check" title="Only open tasks whose due date is before today (US Central, live clock)."><input type="checkbox" id="f-overdue"> Overdue only</label>
+      <label class="pl-check" title="Only tasks assigned to you (your Planner account, matched by e-mail)."><input type="checkbox" id="f-mine"> My tasks</label>
+      <label class="pl-check" title="Only tasks linked to an SL job number."><input type="checkbox" id="f-linked"> Linked to a job</label>
+      <label>Search<input type="search" id="f-q" placeholder="title, job, bucket, label, person"></label>
+      <button class="btn small" id="f-reset" type="button" title="Clear every filter (the choices are remembered per browser).">Reset</button>
+    </div>
+  </div>
+
+  <div id="pl-view-board" class="pl-board-scroll" hidden><div class="pl-board" id="pl-board"></div></div>
+
+  <div id="pl-view-list" class="card tight" hidden>
+    <div class="note" style="margin-bottom:6px">Click a header to sort; shift-click adds a secondary key. Every task on the board is listed (no cap). The first column stays put while you scroll.</div>
+    <div class="table-wrap freeze pl-list-wrap"><table class="data dense pl-list" id="pl-list"><thead></thead><tbody></tbody></table></div>
+  </div>
+
+  <div id="pl-view-changes" class="card tight" hidden>
+    <div class="row" style="margin-bottom:8px">
+      <h2 style="margin:0">What changed</h2>
+      <label class="muted" title="Changes to titles, buckets, % complete, dates, priority, labels, assignees; creations and deletions. Planner keeps no change log, so the times are when PCA's pull noticed the change (creation and completion carry Planner's own timestamps).">since
+        <select id="f-since">{% for s in since_choices %}<option value="{{ s }}">{{ s }} day{{ s|pluralize }}</option>{% endfor %}</select></label>
+      <span class="muted" id="pl-changes-count"></span>
+    </div>
+    <div class="table-wrap freeze pl-list-wrap"><table class="data dense" id="pl-changes"><thead><tr><th>When</th><th>Task</th><th>Bucket</th><th>What</th><th>From</th><th>To</th></tr></thead><tbody></tbody></table></div>
+  </div>
+</div>
+
+<div class="fin-modal" id="pl-modal" role="dialog" aria-modal="true">
+  <div class="fin-modal-box pl-modal-box">
+    <div class="fin-modal-head"><h2 id="pl-modal-title"></h2><a href="#" class="fin-modal-close" id="pl-modal-close" title="Close (Esc)">✕</a></div>
+    <div id="pl-modal-body"></div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+window.PL_CFG = {
+  data: "{% url 'planner:planning_planner_json' %}",
+  projectBase: "{% url 'dashboard:project_list' %}",
+  planParam: "{{ plan_param|escapejs }}",
+  connected: {% if connected %}true{% else %}false{% endif %}
+};
+</script>
+<script src="{% static 'planner/planner.js' %}?v={{ ASSET_VERSION }}" defer></script>
+{% endblock %}

@@ -1,0 +1,32 @@
+{% extends "dashboard/base.html" %}
+{% load humanize pca static %}
+{% block title %}Production · Punch lists {{ division }} · Pace Company Analytics{% endblock %}
+{% block main_class %} dense{% endblock %}
+{% block extra_css %}@import url("{% static 'planning/planning.css' %}?v={{ PL_VERSION }}");{% endblock %}
+{% block content %}
+<div class="topbar"><div class="title"><h1>Punch lists <span class="muted">{{ division }}</span></h1><small>The PMs' punch workbooks as one list per project: description, ball-in-court, criticality, due and completion dates. Completed = Date Completed set; overdue = open and due before today (live clock); the Active tick is visual only.</small></div>
+  <div class="actions row no-print">
+    {% if can_write %}<button class="btn" id="pu-sync" title="Create a punch project for every active status-board row of this division that has none yet — never deletes or touches existing items">Sync from status board</button>
+    <button class="btn primary" id="pu-addproj" title="Add a project by code (NN-NNNN), title and PM">+ Project</button>{% endif %}
+    <a class="btn" id="pu-xlsx" href="{% url 'planning:planning_punch_export' %}?div={{ division }}&fmt=xlsx" title="One sheet per project: title row, header row, items">Export Excel</a>
+    <a class="btn" id="pu-csv" href="{% url 'planning:planning_punch_export' %}?div={{ division }}&fmt=csv" title="One CSV with PROJECT CODE / TITLE / PM columns">CSV</a>
+  </div></div>
+{% include "planning/_tabs.html" %}
+<div class="pl-toolbar">
+  <div class="seg" title="Division — separate projects, PM roster and colours per division">{% for d in divisions_pl %}<a href="{% url 'planning:planning_punch' %}?div={{ d }}" class="{% if d == division %}active{% endif %}">{{ d }}</a>{% endfor %}</div>
+  <div class="seg" id="pu-nav"><button data-view="pms">PMs</button><button data-view="projects">All projects</button><button data-view="overdue">Overdue items</button></div>
+  <input type="search" id="pu-q" placeholder="Search project, code, or item…" title="Code, title and every item description (switches to All projects)">
+  <span class="spacer"></span><span class="pl-status" id="pu-msg"></span>
+</div>
+<div class="grid kpi" id="pu-stats" style="margin-bottom:12px"></div>
+<div id="pu-view"></div>
+<div class="pl-drawer-bg" id="pu-drawer-bg"></div>
+<aside class="pl-drawer wide" id="pu-drawer" role="dialog"><div class="head" id="pu-drawer-head"></div><div class="body" id="pu-drawer-body"></div><div class="foot" id="pu-drawer-foot"></div></aside>
+{{ dataset|json_script:"pu-data" }}
+{% endblock %}
+{% block scripts %}
+<script src="{% static 'planning/planning.js' %}?v={{ PL_VERSION }}"></script>
+<script>window.PU_CONF = {editUrl: "{% url 'planning:planning_punch_edit' %}", exportUrl: "{% url 'planning:planning_punch_export' %}", statusUrl: "{% url 'planning:planning_status' %}", canWrite: {{ can_write|yesno:"true,false" }}, openPk: {{ open_pk|default:"null" }},
+  init: {view: "{{ request.GET.view|default:''|escapejs }}", status: "{{ request.GET.status|default:''|escapejs }}", pm: "{{ request.GET.pm|default:''|escapejs }}"}};</script>
+<script src="{% static 'planning/punch.js' %}?v={{ PL_VERSION }}"></script>
+{% endblock %}

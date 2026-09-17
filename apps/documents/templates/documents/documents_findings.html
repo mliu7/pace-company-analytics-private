@@ -1,0 +1,36 @@
+{% extends "dashboard/base.html" %}{% load humanize pca documents %}
+{% block title %}Document findings · Pace Company Analytics{% endblock %}
+{% block extra_css %}{% include "documents/_css.html" %}{% endblock %}
+{% block content %}
+<div class="topbar"><div class="title"><h1>Proposal findings</h1>
+  <small><a href="{% url 'documents:documents_page' %}">Documents</a> › rules-only checks on every extracted proposal: template fingerprint, required sections, consistency with the linked bid (client, project name, price ±2 %, dates), exclusions / clarifications / terms against the standard clause set · {{ total|intcomma }} finding{{ total|pluralize }} {% if status == 'open' %}open{% else %}({{ status }}){% endif %}</small></div></div>
+
+{% if not standard.exclusions and not standard.terms %}<div class="note doc-warn" style="margin-bottom:12px"><b>Standard clauses are placeholders.</b> <code>docs/proposal_standard_clauses.md</code> still holds the placeholder lines, so the clause-deviation checks (missing / reworded / extra exclusions, clarifications, terms, payment terms, warranty) do not fire yet. Owner supplies the real clauses; the next refresh re-checks every proposal.{% if not model_review %} Model-assisted review is off (rules only).{% endif %}</div>{% endif %}
+
+<div class="card tight" style="margin-bottom:12px">
+  <div class="doc-facets">
+    <div class="facet"><span class="dim">Status</span><a class="lchip {% if status == 'open' %}on{% endif %}" href="?{% qs_without request 'status' %}&status=open">Open + acknowledged</a><a class="lchip {% if status == 'fixed' %}on{% endif %}" href="?{% qs_without request 'status' %}&status=fixed">Fixed <small>{{ facets.status.fixed|default:0 }}</small></a><a class="lchip {% if status == 'all' %}on{% endif %}" href="?{% qs_without request 'status' %}&status=all">All</a></div>
+    <div class="facet"><span class="dim">Severity</span><a class="lchip {% if sev == 'warn,error' %}on{% endif %}" href="?{% qs_without request 'severity' %}&severity=warn,error">Errors + warnings</a>{% for s in 'error,warn,info'|split %}<a class="lchip {% if sev == s %}on{% endif %}" href="?{% qs_without request 'severity' %}&severity={{ s }}">{{ s }} <small>{{ facets.severity|getitem:s|default:0 }}</small></a>{% endfor %}<a class="lchip {% if sev == 'all' %}on{% endif %}" href="?{% qs_without request 'severity' %}&severity=all">All</a></div>
+    <div class="facet"><span class="dim">Check</span><a class="lchip {% if not check %}on{% endif %}" href="?{% qs_without request 'check' %}">All</a>{% for k, n in facets.check.items %}<a class="lchip {% if check == k %}on{% endif %}" href="?{% qs_without request 'check' %}&check={{ k }}" title="{{ checks|getitem:k|first }}">{{ k|nice }} <small>{{ n }}</small></a>{% endfor %}</div>
+    {% if facets.estimator %}<div class="facet"><span class="dim">Estimator</span><a class="lchip {% if not est %}on{% endif %}" href="?{% qs_without request 'estimator' %}">All</a>{% for k, n in facets.estimator.items %}<a class="lchip {% if est == k %}on{% endif %}" href="?{% qs_without request 'estimator' %}&estimator={{ k|urlencode }}">{{ k }} <small>{{ n }}</small></a>{% endfor %}</div>{% endif %}
+    {% if facets.bid %}<div class="facet"><span class="dim">Bid</span><a class="lchip {% if not bid %}on{% endif %}" href="?{% qs_without request 'bid' %}">All</a>{% for k, n in facets.bid.items %}{% with b=bids|getitem:k %}<a class="lchip {% if bid == k|stringformat:'s' %}on{% endif %}" href="?{% qs_without request 'bid' %}&bid={{ k }}" title="{{ b.client_name }} · {{ b.project_name }}">{{ b.job_number_raw|default:b.project_name|truncatechars:28 }} <small>{{ n }}</small></a>{% endwith %}{% endfor %}</div>{% endif %}
+    {% if fid %}<div class="facet"><span class="dim">File</span><a class="lchip on" href="?{% qs_without request 'file' %}">file #{{ fid }} ✕</a></div>{% endif %}
+  </div></div>
+
+<div class="card"><h2>Findings <small>{{ rows|length }} shown</small></h2>
+{% if rows %}<div class="table-wrap doc-wrap-tall"><table class="data dense"><thead><tr><th>Sev.</th><th>Check</th><th>Finding</th><th>File</th><th>Bid</th><th>Estimator</th><th class="num">Found</th><th>Status</th>{% if can_findings %}<th></th>{% endif %}</tr></thead><tbody>
+{% for x in rows %}<tr data-ref="{{ x.id }}">
+  <td><span class="pill {% if x.severity == 'error' %}bad{% elif x.severity == 'warn' %}warn{% else %}info{% endif %}">{{ x.severity }}</span></td>
+  <td title="{{ checks|getitem:x.check_id|first }}">{{ x.check_id|nice }}</td>
+  <td>{{ x.message }}{% if x.evidence.quote %}<div class="muted" style="font-size:12px">{% if x.evidence.page %}p.{{ x.evidence.page }} · {% endif %}“{{ x.evidence.quote }}”</div>{% elif x.evidence.expected and x.evidence.found %}<div class="muted" style="font-size:12px">expected {{ x.evidence.expected }} · found {{ x.evidence.found }}</div>{% endif %}</td>
+  <td><a href="{% url 'documents:document_preview' x.file.id %}" title="{{ x.file.path }}">{{ x.file.name|truncatechars:48 }}</a><div class="muted" style="font-size:11.5px">{{ x.file.location }}</div></td>
+  <td>{% if x.bid %}<a href="{% url 'bids:bid_detail' x.bid.id %}">{{ x.bid.job_number_raw|default:"bid" }}</a> <span class="muted">{{ x.bid.project_name|truncatechars:36 }}</span>{% elif x.project %}<a href="{% url 'dashboard:project_detail' x.project.canonical_project_number %}">{{ x.project.display_number }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
+  <td class="muted">{% if x.bid and x.bid.estimator %}{{ x.bid.estimator.canonical_name }}{% elif x.bid %}{{ x.bid.bidder_raw }}{% endif %}</td>
+  <td class="num muted">{{ x.created_at|date:"M j" }}</td>
+  <td><span class="tag">{{ x.status }}</span></td>
+  {% if can_findings %}<td class="num" style="white-space:nowrap"><form method="post" style="display:inline">{% csrf_token %}<input type="hidden" name="finding" value="{{ x.id }}"><input type="hidden" name="next" value="{{ next_url }}">
+    {% if x.status == 'open' %}<button class="btn small" name="status" value="acknowledged" title="Seen — keep it but stop counting it as new.">ack</button><button class="btn small" name="status" value="fixed" title="Resolved in the document.">fixed</button>{% else %}<button class="btn small" name="status" value="open" title="Reopen.">reopen</button>{% endif %}</form></td>{% endif %}
+</tr>{% endfor %}</tbody></table></div>
+{% else %}<div class="empty">No findings match these filters.</div>{% endif %}
+<div class="note" style="margin-top:8px">Checks run on every extracted PDF / Word / text file whose name says proposal, quote, bid, pricing or estimate, or that is linked to a bid; a fixed finding reopens if the next version of the file still has it. Price is compared with the bid's Project Value at ±2 %; dates with the bid due date. Evidence quotes the page and the text the rule saw.</div></div>
+{% endblock %}

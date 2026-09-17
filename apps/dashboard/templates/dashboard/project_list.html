@@ -1,0 +1,101 @@
+{% extends "dashboard/base.html" %}{% load humanize pca %}
+{% block title %}Projects · Pace Company Analytics{% endblock %}
+{% block content %}
+<div class="topbar">
+  <div class="title"><h1>Projects <small style="display:inline;font-size:14px">{{ total|intcomma }} in {{ division_label }}</small></h1>
+    <small>Every project with its SL economics, PTT hours, PM progress and forecast. Click a column to sort; click a project for the full trace.</small></div>
+  {% include "dashboard/_division_bar.html" %}
+</div>
+
+<form method="get" class="card tight" style="margin-bottom:12px">
+  <input type="hidden" name="div" value="{{ div_code }}">
+  <input type="hidden" name="sort" value="{{ sort }}">
+  <div class="filters">
+    <label>Search<input type="search" name="q" value="{{ g.q }}" placeholder="number, title, customer"></label>
+    <label>Lifecycle<select name="state">
+      <option value="">any</option>
+      <option value="open" {% if g.state == 'open' %}selected{% endif %}>— all open —</option>
+      <option value="closed" {% if g.state == 'closed' %}selected{% endif %}>— all closed —</option>
+      {% for s in options.states %}<option value="{{ s }}" {% if g.state == s %}selected{% endif %}>{{ s|state_label }}</option>{% endfor %}</select></label>
+    <label>Mode<select name="mode"><option value="">any</option>{% for o in options.modes %}<option value="{{ o.k }}" {% if g.mode == o.k %}selected{% endif %}>{{ o.k|nice }} ({{ o.c }})</option>{% endfor %}</select></label>
+    <label>Solution<select name="solution"><option value="">any</option>{% for o in options.solutions %}<option value="{{ o.k }}" {% if g.solution == o.k %}selected{% endif %}>{{ o.k|nice }} ({{ o.c }})</option>{% endfor %}</select></label>
+    <label>PM<select name="pm"><option value="">any</option>{% for o in options.pms %}<option value="{{ o.k }}" {% if g.pm == o.k %}selected{% endif %}>{{ o.n }} ({{ o.c }})</option>{% endfor %}</select></label>
+    <label>Sector<select name="sector"><option value="">any</option>{% for o in options.sectors %}<option value="{{ o.k }}" {% if g.sector == o.k %}selected{% endif %}>{{ o.k }}</option>{% endfor %}</select></label>
+    <label>Created<select name="year"><option value="">any year</option>{% for o in options.years %}<option value="{{ o.k }}" {% if g.year == o.k|stringformat:"s" %}selected{% endif %}>{{ o.k }} ({{ o.c }})</option>{% endfor %}</select></label>
+    <label>Closed<select name="closed_year"><option value="">any year</option>{% for o in options.years %}<option value="{{ o.k }}" {% if g.closed_year == o.k|stringformat:"s" %}selected{% endif %}>{{ o.k }}</option>{% endfor %}</select></label>
+    {% if acc.margins %}<label>Margin<select name="margin"><option value="">any</option><option value="loss" {% if g.margin == 'loss' %}selected{% endif %}>lost money</option><option value="under10" {% if g.margin == 'under10' %}selected{% endif %}>GP under 10%</option><option value="over40" {% if g.margin == 'over40' %}selected{% endif %}>GP 40%+</option></select></label>
+    <label>Min contract<input type="number" name="min_cv" value="{{ g.min_cv }}" placeholder="$" style="min-width:90px"></label>{% endif %}
+    <label>Risk<select name="risk"><option value="">any</option>{% for r in "low,moderate,high,critical"|split %}<option value="{{ r }}" {% if g.risk == r %}selected{% endif %}>{{ r }}</option>{% endfor %}</select></label>
+    <label style="flex-direction:row;align-items:center;gap:6px;padding-bottom:6px"><input type="checkbox" name="include_internal" value="1" {% if g.include_internal %}checked{% endif %}> include internal/templates</label>
+    <button class="btn primary" type="submit">Apply</button>
+    <a class="btn" href="{% url 'dashboard:project_list' %}?div={{ div_code }}">Reset</a>
+  </div>
+</form>
+
+<div class="card tight" style="margin-bottom:12px">
+  <div class="row" style="font-size:13px">
+    <span><b>{{ total|intcomma }}</b> projects</span>{% if acc.margins %} · <span>contract <b>{{ tot.cv|money_k }}</b></span> · <span>billed <b>{{ tot.billed|money_k }}</b></span> · <span>direct cost <b>{{ tot.cost|money_k }}</b></span> · <span>GP <b class="{{ tot.gp|posneg }}">{{ tot.gp|money_k }}</b> ({{ tot.gp_pct|pct }})</span>{% endif %} · <span>hours <b>{{ tot.hours|hours }}</b></span>
+  </div>
+</div>
+
+<div class="table-wrap tall">
+<table class="data dense">
+  <thead><tr>
+    <th class="{% if 'number' in sort %}sorted{% endif %}">{% sort_link request 'number' 'Project' 'SL project number (12-digit numbers ending -000000 are a separate numbering style, not the same job as the 6-digit one). Click for the full trace of every dollar and hour.' %}</th>
+    <th>{% sort_link request 'title' 'Title' 'Project description from SL (60 characters max in the source).' %}</th>
+    <th>{% sort_link request 'customer' 'Customer' 'Billing customer from SL. General contractors appear here even when the end user is a school or hospital named in the title.' %}</th>
+    <th>{% sort_link request 'state' 'State' 'Derived lifecycle: Awarded (no hours yet) → In Progress → Field Complete → Closed (stabilized after 45 days without a material posting). Dormant = open with remaining hours but no field work for 45+ days.' %}</th>
+    <th>{% sort_link request 'mode' 'Mode' 'Rule-derived work type from the title/PO: Installation, T&M Ticket, T&M Service blanket, Service Agreement, JOC, Warranty, Internal, Template.' %}</th>
+    <th>{% sort_link request 'pm' 'PM' 'Project manager from SL (PJPROJ.manager1).' %}</th>
+    <th class="num">{% sort_link request 'created' 'Created' 'When the project was set up in SL — effectively the award date.' %}</th>
+    <th class="num">{% sort_link request 'closed' 'Closed' 'Close date: when PTT saw the project go inactive (or SL last-edit at the flip).' %}</th>
+    {% if acc.margins %}<th class="num">{% sort_link request 'cv' 'Contract' 'Contract value = the CONTRACT VALUE budget in SL. SL keeps only the current value — it is revised in place, no change-order history exists.' %}</th>
+    <th class="num">{% sort_link request 'sold_pct' 'Sold GP%' 'Sold margin on the current budget: (contract value − budgeted direct cost) ÷ contract value. Current-budget basis; blank when contract value is 0 (common on T&M).' %}</th>
+    <th class="num">{% sort_link request 'billed' 'Billed' 'Billed revenue to date = AR invoices minus credits in SL. SL does not post percent-complete revenue to projects.' %}</th>
+    <th class="num">{% sort_link request 'gp' 'GP $' 'Gross profit to date (final, if closed): billed revenue − direct cost (labor wages + burden + material + subcontract + other direct).' %}</th>
+    <th class="num">{% sort_link request 'gp_pct' 'GP %' 'GP ÷ billed revenue. Matches SL’s own project margin to the cent.' %}</th>{% endif %}
+    <th class="num">{% sort_link request 'hours' 'PTT hrs' 'Field hours logged in PTT (onsite + OT + offsite). Ties to SL payroll hours at 99.98% in aggregate.' %}</th>
+    <th class="num">{% sort_link request 'budget_hours' 'Bud hrs' 'Budgeted labor hours from SL (current budget).' %}</th>
+    <th class="num">{% sort_link request 'remaining' 'Rem hrs' 'PM-entered remaining labor hours from PTT (latest revision).' %}</th>
+    <th class="num">{% sort_link request 'pc' 'PM %' 'PM-entered percent complete from PTT (labor-weighted blend of hours and expense remaining).' %}</th>
+    {% if acc.margins %}<th class="num">{% sort_link request 'eac_pct' 'EAC GP%' 'Forecast margin at completion from the deterministic estimate: posted labor + unposted PTT hours + remaining hours at the observed loaded rate; non-labor at max(actual+commitments, budget); revenue = contract value.' %}</th>
+    {% endif %}{% if acc.margins %}<th>{% sort_link request 'risk' 'Risk' 'Heuristic 0–100 risk of the forecast: projected loss, margin below sold, hours overrun vs budget, dormancy, missing PM estimate. low <25 · moderate <50 · high <75 · critical ≥75 or loss > $50k.' %}</th>{% endif %}
+    <th title="Data-quality flags: e.g. contract value zero, PTT-vs-SL hours mismatch >5%, stale % complete, missing remaining hours. Hover a tag for the exact flag.">Flags</th>
+  </tr></thead>
+  <tbody>
+  {% for r in rows %}
+  <tr>
+    <td class="nowrap"><a href="{% url 'dashboard:project_detail' r.canonical_project_number %}"><b>{{ r.display_number }}</b></a>{% if div_code == 'all' %} <span class="muted">{{ r.division_code }}</span>{% endif %}</td>
+    <td class="trunc fluid" style="width:40%;min-width:160px" title="{{ r.title }}"><a href="{% url 'dashboard:project_detail' r.canonical_project_number %}" style="color:inherit">{{ r.title }}</a></td>
+    <td class="trunc fluid" style="width:25%" title="{{ r.customer_name }}">{% if r.sl_customer_id %}<a href="{% url 'dashboard:customer_detail' r.sl_customer_id %}" style="color:inherit">{{ r.customer_name }}</a>{% else %}—{% endif %}</td>
+    <td><span class="tag {{ r.lifecycle_state }}">{{ r.lifecycle_state|state_label }}</span></td>
+    <td class="muted">{{ r.project_mode_rule|nice }}</td>
+    <td class="nowrap">{% if r.pm_key %}<a href="{% url 'dashboard:person_detail' r.pm_key %}" style="color:inherit">{{ r.pm_name }}</a>{% else %}—{% endif %}</td>
+    <td class="num muted">{{ r.sl_created_at|date:"Y-m-d" }}</td>
+    <td class="num muted">{{ r.close_date|date:"Y-m-d"|default:"—" }}</td>
+    {% if acc.margins %}<td class="num">{{ r.contract_value|money }}{% cv_mark r %}</td>
+    <td class="num muted">{{ r.sold_gp_percent|pct }}</td>
+    <td class="num">{{ r.billed_revenue|money }}</td>
+    <td class="num {{ r.actual_gp_dollars|posneg }}">{{ r.actual_gp_dollars|money }}</td>
+    <td class="num {% if r.actual_gp_percent < 0 %}neg{% endif %}">{{ r.actual_gp_percent|pct }}</td>{% endif %}
+    <td class="num">{{ r.ptt_hours_total|num }}</td>
+    <td class="num muted">{{ r.budget_labor_hours|num }}</td>
+    <td class="num muted">{{ r.pm_remaining_hours|num }}</td>
+    <td class="num muted">{{ r.pm_percent_complete|pct:0 }}</td>
+    {% if acc.margins %}<td class="num">{% if r.eac_gp_percent != None %}<span class="{% if r.eac_gp_percent < 0 %}neg{% endif %}">{{ r.eac_gp_percent|pct }}</span>{% else %}—{% endif %}</td>
+    <td>{% if r.risk_level %}<span class="tag {{ r.risk_level }}">{{ r.risk_level }}</span>{% endif %}</td>{% endif %}
+    <td class="nowrap">{% for f in r.data_quality_flags %}<span class="tag" title="{{ f }}">{{ f|nice }}</span> {% endfor %}</td>
+  </tr>
+  {% empty %}<tr><td colspan="20" class="empty">No projects match these filters.</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+{% if pages > 1 %}
+<div class="pager">
+  {% qs_without request 'page' as base_qs %}
+  {% if page > 1 %}<a class="btn small" href="?{{ base_qs }}&page={{ page|add:'-1' }}">‹ prev</a>{% endif %}
+  <span>page {{ page }} of {{ pages }}</span>
+  {% if page < pages %}<a class="btn small" href="?{{ base_qs }}&page={{ page|add:'1' }}">next ›</a>{% endif %}
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,36 @@
+{% extends "dashboard/base.html" %}{% load humanize pca bids static %}
+{% block title %}Bid analytics · Pace Company Analytics{% endblock %}
+{% block extra_css %}{% include "bids/_css.html" %}{% endblock %}
+{% block content %}
+<div class="bids">
+{% include "bids/_tabs.html" %}
+<div class="note" style="margin-bottom:12px">{{ n|intcomma }} bids under the filters, {{ decided_n|intcomma }} decided (won or lost). Won = portal Awarded or an SL job with billings — SL is the truth for won. Every bar and dot drills to the bids behind it.</div>
+<div class="grid two" style="margin-bottom:14px">
+  <div class="card"><h2>Pipeline over time <small>daily snapshots · open $ by stage · weighted dashed</small></h2><div class="chart" style="height:240px"><canvas id="c_hist"></canvas></div></div>
+  <div class="card"><h2>Win rate by quarter <small>count and by value · click a bar</small></h2><div class="chart" style="height:240px"><canvas id="c_trend"></canvas></div></div>
+  <div class="card"><h2>Probability calibration <small>stated chance vs actual win rate · click a bar</small></h2><div class="chart" style="height:240px"><canvas id="c_calib"></canvas></div>
+    <table class="data dense" style="margin-top:8px"><thead><tr><th>Stated</th><th class="num">Decided</th><th class="num">Won</th><th class="num">Actual</th><th class="num">Gap</th></tr></thead><tbody>{% for c in calib %}<tr class="drill" data-kind="calib" data-bucket="{{ c.bucket }}" data-title="Stated {{ c.bucket }}%"><td>{{ c.bucket }}%</td><td class="num">{{ c.n }}</td><td class="num">{{ c.won }}</td><td class="num">{% if c.actual != None %}{{ c.actual|pct:0 }}{% else %}—{% endif %}</td><td class="num {% if c.gap != None and c.gap > 0.1 %}pos{% elif c.gap != None and c.gap < -0.1 %}neg{% endif %}">{% if c.gap != None %}{{ c.gap|pts:0 }}{% else %}—{% endif %}</td></tr>{% endfor %}</tbody></table></div>
+  <div class="card"><h2>Decision cycle <small>days from submitted to awarded · median {{ cycle_median|floatformat:0|default:'—' }}d · click a bar</small></h2><div class="chart" style="height:240px"><canvas id="c_cycle"></canvas></div></div>
+  <div class="card"><h2>Bid value → SL contract value <small>won bids · dot = bid · click to open</small></h2><div class="chart" style="height:260px"><canvas id="c_drift"></canvas></div></div>
+  <div class="card"><h2>Open bids by stated probability <small>the "% of close" report · click a bar</small></h2><div class="chart" style="height:260px"><canvas id="c_pct"></canvas></div></div>
+</div>
+
+<div class="grid two" style="margin-bottom:14px">
+  {% for title, axis, rows in groups %}<div class="card"><h2>Hit rate by {{ title }} <small>decided bids · click a row</small></h2>
+    <div class="table-wrap" style="max-height:360px"><table class="data dense" data-sortable id="g_{{ axis }}"><thead><tr><th class="fz">{{ title|capfirst }}</th><th class="num" data-numeric>Bids</th><th class="num" data-numeric>Won</th><th class="num" data-numeric>Lost</th><th class="num" data-numeric>Hit</th><th class="num" data-numeric>Σ value</th><th class="num" data-numeric>Margin</th><th class="num" data-numeric>Accuracy</th></tr></thead><tbody>
+    {% for g in rows %}<tr class="drill" data-kind="group" data-axis="{{ axis }}" data-bucket="{{ g.key }}" data-title="{{ title|capfirst }}: {{ g.key }}"><td class="fz">{{ g.key|truncatechars:40 }}</td><td class="num" data-v="{{ g.bids }}">{{ g.bids }}</td><td class="num" data-v="{{ g.won }}">{{ g.won }}</td><td class="num" data-v="{{ g.lost }}">{{ g.lost }}</td><td class="num" data-v="{{ g.hit|default_if_none:'' }}">{% if g.hit != None %}{{ g.hit|pct:0 }}{% else %}—{% endif %}</td><td class="num" data-v="{{ g.value }}">{{ g.value|money_k }}</td><td class="num" data-v="{{ g.margin|default_if_none:'' }}">{% if g.margin != None %}{{ g.margin|pct:1 }}{% else %}—{% endif %}</td><td class="num" data-v="{{ g.accuracy|default_if_none:'' }}">{% if g.accuracy != None %}{{ g.accuracy|pts }}{% else %}—{% endif %}</td></tr>{% endfor %}
+    </tbody></table></div></div>{% endfor %}
+</div>
+
+<div class="card">
+  <h2>Estimator × sales rep <small>won / decided · who wins with whom</small></h2>
+  <div class="table-wrap"><table class="data dense"><thead><tr><th class="fz">Estimator</th>{% for r in reps %}<th class="num">{{ r|truncatechars:16 }}</th>{% endfor %}</tr></thead><tbody>
+  {% for e in ests %}<tr><td class="fz">{{ e }}</td>{% for r in reps %}{% with c=matrix|getitem:e|getitem:r %}<td class="num {% if not c %}muted{% endif %}">{% if c %}{{ c.won }}/{{ c.won|add:c.lost }}{% else %}·{% endif %}</td>{% endwith %}{% endfor %}</tr>{% endfor %}
+  </tbody></table></div>
+</div>
+</div>
+{% include "dashboard/_fin_drill_modal.html" %}
+<script id="bids-charts" type="application/json">{{ charts_json|safe }}</script>
+<script id="bids-filters-json" type="application/json">{{ filters_json|safe }}</script>
+{% endblock %}
+{% block scripts %}<script src="{% static 'dashboard/finance_modals.js' %}"></script><script src="{% static 'bids/tables.js' %}"></script><script src="{% static 'bids/bids.js' %}"></script><script>PCABids.analytics("{% url 'bids:bids_analytics_json' %}");</script>{% endblock %}

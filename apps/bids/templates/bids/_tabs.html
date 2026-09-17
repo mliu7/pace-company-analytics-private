@@ -1,0 +1,33 @@
+{# Bids section header: tabs + filter bar shared by overview / board / calendar / list / analytics. Expects f, opts, tab. #}
+{% load pca %}
+<div class="topbar">
+  <div class="title"><h1>Bids</h1><small>Every quote in the Project Portal, live, linked to SL for the truth about "won". Filters stick across the tabs.</small></div>
+  <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
+    {% if acc.bids_refresh %}<form method="post" action="{% url 'bids:bids_refresh' %}" style="margin:0">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="btn" title="Re-read the Project List from SharePoint and re-link to SL right now (≈20 s). The scheduled refresh does this three times a day.">↻ Refresh from Portal</button></form>{% endif %}
+    <a class="btn" href="{% url 'bids:bids_export' %}?{{ request.GET.urlencode }}&fmt=csv" title="CSV of the rows under the current filters">⇩ CSV</a>
+    <a class="btn" href="{% url 'bids:bids_export' %}?{{ request.GET.urlencode }}&fmt=xlsx" title="Excel of the rows under the current filters">⇩ Excel</a>
+  </div>
+</div>
+<div class="tabs bids-tabs">
+  <a href="{% url 'bids:bids_overview' %}?{{ request.GET.urlencode }}" class="{% if tab == 'overview' %}active{% endif %}">Overview</a>
+  <a href="{% url 'bids:bids_snapshot' %}" class="">Pipeline Snapshot ↗</a>
+  <a href="{% url 'bids:bids_board' %}?{{ request.GET.urlencode }}" class="{% if tab == 'board' %}active{% endif %}">Board</a>
+  <a href="{% url 'bids:bids_calendar' %}?{{ request.GET.urlencode }}" class="{% if tab == 'calendar' %}active{% endif %}">Calendar</a>
+  <a href="{% url 'bids:bids_list' %}?{{ request.GET.urlencode }}" class="{% if tab == 'list' %}active{% endif %}">List</a>
+  <a href="{% url 'bids:bids_analytics' %}?{{ request.GET.urlencode }}" class="{% if tab == 'analytics' %}active{% endif %}">Analytics</a>
+  <a href="{% url 'bids:estimators' %}" class="">Estimators ↗</a>
+</div>
+<form method="get" class="bids-filters" id="bidfilters">
+  <input type="search" name="q" value="{{ f.q }}" placeholder="project, client, job #, comment…" title="Matches project name, client, job #, portal ID and comments.">
+  <select name="div" title="Division: the SL job's when linked, else the estimator's."><option value="">All divisions</option>{% for d in opts.divisions %}<option value="{{ d.code }}" {% if f.div == d.code %}selected{% endif %}>{{ d.code }} {{ d.name }}</option>{% endfor %}</select>
+  <select name="est" title="Estimator of record (the portal's Bidder)."><option value="">Any estimator</option>{% for e in opts.estimators %}<option value="{{ e.id }}" {% if f.est == e.id|stringformat:'s' %}selected{% endif %}>{{ e.name }} ({{ e.n }})</option>{% endfor %}</select>
+  <select name="rep" title="Sales rep. House = OT / no commissioned rep."><option value="">Any rep</option><option value="" disabled>──</option>{% for e in opts.reps %}<option value="{{ e.id }}" {% if f.rep == e.id|stringformat:'s' %}selected{% endif %}>{{ e.name }} ({{ e.n }})</option>{% endfor %}</select>
+  <select name="client" title="Resolved SL customer."><option value="">Any client</option>{% for c in opts.clients %}<option value="{{ c.id }}" {% if f.client == c.id|stringformat:'s' %}selected{% endif %}>{{ c.name|truncatechars:40 }} ({{ c.n }})</option>{% endfor %}</select>
+  <select name="year" title="Year of bid due date (else submitted, else created)."><option value="">Any year</option>{% for y in opts.years %}<option value="{{ y }}" {% if f.year == y|stringformat:'s' %}selected{% endif %}>{{ y }}</option>{% endfor %}</select>
+  <select name="house" title="House accounts have no commissioned rep (portal rep OT / Other)."><option value="">Rep + house</option><option value="0" {% if f.house == '0' %}selected{% endif %}>Rep accounts</option><option value="1" {% if f.house == '1' %}selected{% endif %}>House accounts</option></select>
+  <select name="src" title="Project List (live) or Project Archive (older rows moved out of the list)."><option value="">List + archive</option><option value="list" {% if f.src == 'list' %}selected{% endif %}>Project List</option><option value="archive" {% if f.src == 'archive' %}selected{% endif %}>Archive</option></select>
+  <select name="size" title="Project Value band."><option value="">Any size</option>{% for s in opts.sizes %}<option value="{{ s }}" {% if f.size == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select>
+  <div class="stage-chips" title="Portal status, normalised. Click to toggle; none selected = all.">{% for k, l in opts.stages %}<label class="chip st-{{ k }} {% if k in f.stage %}on{% endif %}"><input type="checkbox" name="stage" value="{{ k }}" {% if k in f.stage %}checked{% endif %} hidden>{{ l }}</label>{% endfor %}</div>
+  <button class="btn primary">Apply</button>
+  {% if request.GET %}<a class="btn" href="{{ request.path }}" title="Clear every filter">Reset</a>{% endif %}
+</form>

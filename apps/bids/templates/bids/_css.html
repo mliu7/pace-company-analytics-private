@@ -1,0 +1,65 @@
+  .bids .bids-filters { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 14px; }
+  .bids .bids-filters input[type=search] { min-width: 220px; }
+  .bids .bids-filters select { max-width: 190px; }
+  .bids .stage-chips { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+  .bids .stage-chips .chip { cursor: pointer; margin: 0; padding: 3px 8px; border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--muted); user-select: none; }
+  .bids .stage-chips .chip.on { color: var(--ink); border-color: var(--line-strong); background: var(--info-bg); }
+  .bids .sub-h { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 12px 0 6px; }
+  .bids .tag.warn { background: var(--warn-bg); color: var(--warn); }
+  .bids .fz { position: sticky; left: 0; background: var(--panel); z-index: 2; box-shadow: 2px 0 0 var(--line); }
+  .bids thead .fz { z-index: 3; background: #fafbfd; }
+  .bids .table-wrap { overflow: auto; scrollbar-width: auto; }
+  .bids td.drill, .bids .card.drill { cursor: pointer; } .bids td.drill:hover { background: var(--info-bg); }
+  .bids .pivot td.muted { color: #c3c9d2; }
+  .bids .kpi.drill:hover { border-color: var(--accent); }
+  .bids .pill.st-quoting { background: var(--info-bg); color: var(--accent); } .bids .pill.st-submitted { background: #fff4d6; color: #8a5a00; }
+  .bids .pill.st-awarded { background: var(--good-bg); color: var(--good); } .bids .pill.st-lost { background: var(--bad-bg); color: var(--bad); }
+  .bids .pill.st-on_hold { background: #eee; color: #666; } .bids .pill.st-did_not_bid, .bids .pill.st-no_decision, .bids .pill.st-unknown { background: #f2f2f2; color: #777; }
+  /* board */
+  .bids .board { display: grid; grid-template-columns: repeat(3, minmax(280px, 1fr)); gap: 12px; align-items: start; }
+  .bids .col { background: #f4f6f9; border: 1px solid var(--line); border-radius: var(--radius); padding: 10px; min-height: 200px; }
+  .bids .col h3 { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; margin: 0 0 8px; }
+  .bids .col h3 small { color: var(--muted); font-weight: 400; }
+  .bids .bcard { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; box-shadow: var(--shadow); display: block; color: inherit; text-decoration: none; }
+  .bids .bcard:hover { border-color: var(--accent); }
+  .bids .bcard .t { font-weight: 600; font-size: 13px; line-height: 1.25; }
+  .bids .bcard .m { font-size: 11.5px; color: var(--muted); margin-top: 3px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .bids .bcard .v { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .bids .bcard.overdue { border-left: 3px solid var(--bad); } .bids .bcard.soon { border-left: 3px solid var(--warn); }
+  .bids .bcard .prob { display: inline-block; height: 5px; width: 40px; background: #e6eaf0; border-radius: 3px; vertical-align: middle; overflow: hidden; }
+  .bids .bcard .prob i { display: block; height: 100%; background: var(--accent); }
+  /* calendar */
+  .bids .cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+  .bids .cal .dh { font-size: 11px; text-transform: uppercase; color: var(--muted); text-align: center; padding: 4px; }
+  .bids .cal .day { min-height: 92px; min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; background: #fff; font-size: 11.5px; }
+  .bids .cal .more { display: block; color: var(--accent); cursor: pointer; font-size: 11px; margin-top: 2px; }
+  .bids .cal .day.other { background: #f7f8fa; color: #aab; } .bids .cal .day.today { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .bids .cal .day .n { font-weight: 600; margin-bottom: 3px; }
+  .bids .cal .ev { display: block; border-radius: 4px; padding: 1px 5px; margin-bottom: 2px; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-decoration: none; }
+  .bids .cal .ev.due { background: #c62828; } .bids .cal .ev.submitted { background: #b7791f; } .bids .cal .ev.awarded { background: #178a52; } .bids .cal .ev.walkthrough { background: #6a3ff0; } .bids .cal .ev.start { background: #0e9aa7; }
+  .bids .legend .ev { display: inline-block; color: #fff; border-radius: 4px; padding: 1px 7px; margin-right: 6px; font-size: 11px; cursor: pointer; }
+  .bids .legend .ev.off { opacity: .35; }
+  /* list */
+  .bids .facets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; align-items: center; }
+  .bids .facets .chip { cursor: pointer; margin: 0; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--muted); }
+  .bids .facets .chip.on { color: var(--ink); border-color: var(--line-strong); background: var(--info-bg); }
+  .bids .facets .chip small { color: var(--muted); }
+  .bids table.data th.sorted { color: var(--ink); } .bids table.data th.sorted::after { content: attr(data-dir); font-size: 9px; margin-left: 4px; color: var(--accent); }
+  .bids .list-wrap { max-height: 70vh; }
+  .bids #list { width: auto; min-width: 100%; }
+  .bids #list th, .bids #list td { white-space: nowrap; width: 1%; }
+  .bids #list td.trunc { max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
+  .bids #list th.fz, .bids #list td.fz { max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
+  /* detail */
+  .bids .hdr { display: flex; gap: 18px; flex-wrap: wrap; align-items: baseline; }
+  .bids .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 18px; }
+  .bids .facts .k { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .bids .facts .v { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .bids .trail { border-left: 2px solid var(--line); margin-left: 6px; padding-left: 14px; }
+  .bids .trail .s { position: relative; margin-bottom: 8px; font-size: 12.5px; }
+  .bids .trail .s::before { content: ''; position: absolute; left: -19px; top: 5px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+  .bids .note { margin-top: 6px; }
+  .bids .noteitem { border-top: 1px solid var(--line); padding: 8px 0; font-size: 13px; }
+  .bids .noteitem .who { color: var(--muted); font-size: 11.5px; }
+  .bids textarea { width: 100%; min-height: 60px; }
+  .bids form.inline { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 8px; }

@@ -1,0 +1,39 @@
+# Local extensions and their data are never part of a company release.
+/private/
+/private_data/
+
+# Credentials and machine-specific tool settings.
+.env
+.env.*
+!.env.example
+.claude/
+.codex/
+.DS_Store
+
+# Environments, caches and generated output.
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+staticfiles/
+tmp/
+*.log
+*.swp
+
+# Operational files belong in configured storage, not source control.
+media/
+uploads/
+*.dump
+*.backup
+*.bundle
+*.tar.gz
+*.sql.gz
+*.sqlite3
+*.sqlite3-*

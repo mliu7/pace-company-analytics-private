@@ -1,0 +1,60 @@
+{% extends "dashboard/base.html" %}{% load humanize pca %}
+{% block title %}Field Crew · Pace Company Analytics{% endblock %}
+{% block content %}
+<div class="topbar">
+  <div class="title"><h1>Field crew — {{ division_label }}</h1>
+    <small>Everyone who logged PTT hours to projects in this division, {% if acc.ratings %}with the net +/- from the crew rating model (details: <a href="{% url 'dashboard:ratings' %}?entity=field_employee">Ratings → Field Crew</a> and <code>docs/model_cards/field_crew_v1.md</code>). {% endif %}Hover any column header for what it means. Click a header to sort.</small></div>
+  {% include "dashboard/_division_bar.html" with show_years=True %}
+</div>
+<form method="get" class="card tight" style="margin-bottom:12px">
+  <input type="hidden" name="div" value="{{ div_code }}"><input type="hidden" name="years" value="{{ years }}"><input type="hidden" name="sort" value="{{ sort }}">
+  <div class="filters">
+    <label title="PTT active flag — whether the person is an active user in the time tracker">Status
+      <select name="status"><option value="">any</option><option value="active" {% if g.status == 'active' %}selected{% endif %}>active</option><option value="inactive" {% if g.status == 'inactive' %}selected{% endif %}>inactive</option></select></label>
+    <label title="Currently employed = logged field hours in the last 2 months">Employment
+      <select name="employed"><option value="">any</option><option value="current" {% if g.employed == 'current' %}selected{% endif %}>currently working (last 2 mo)</option><option value="former" {% if g.employed == 'former' %}selected{% endif %}>no recent work</option></select></label>
+    <label title="Union local and card (134-A inside wiremen, 134-C communications, 701, …); non-union = techs/office">Union
+      <select name="union"><option value="">any</option>{% for u in unions %}<option value="{{ u.k }}" {% if g.union == u.k %}selected{% endif %}>{{ u.k|default:"?" }} ({{ u.c }})</option>{% endfor %}</select></label>
+    <label title="Current classification bucket (exact where PTT/SL has a class code, otherwise inferred from wage)">Class
+      <select name="class"><option value="">any</option>{% for c in classes %}<option value="{{ c.k }}" {% if g.class == c.k %}selected{% endif %}>{{ c.k|nice }} ({{ c.c }})</option>{% endfor %}</select></label>
+    <button class="btn primary">Apply</button><a class="btn" href="{% url 'dashboard:field' %}?div={{ div_code }}">Reset</a>
+  </div>
+</form>
+<div class="card">
+<div class="table-wrap tall"><table class="data dense">
+  <thead><tr>
+    <th>{% sort_link request 'name' 'Employee' 'Click for the person page: hours history, projects, coworkers, pay-week detail and their ratings.' %}</th>
+    <th>{% sort_link request 'class' 'Class' 'Current classification. Exact codes come from PTT/SL (CJOU = C-card journeyman, AFOR = A-card foreman, A60 = apprentice at 60%…). Values with ≈ are inferred from the observed wage vs the union journeyman rate for that year; "leads crews" = submits PTT time for 2+ others on 5+ projects.' %}</th>
+    <th>{% sort_link request 'union' 'Union' 'IBEW local and card from PTT/SL: 134-A inside wiremen, 134-C communications/low-voltage, 701, 461. Blank = non-union (typically technicians).' %}</th>
+    <th class="num">{% sort_link request 'started' 'Started' 'Hire date from the SL employee master (PJEMPLOY.date_hired).' %}</th>
+    {% if acc.rates_field %}<th class="num">{% sort_link request 'rate' 'Base rate' 'Base hourly wage from PTT (person.base_hourly_wage) — straight time, no overtime, no burden. The loaded cost to Pace is roughly wage + ~70% union burden.' %}</th>{% endif %}
+    <th>{% sort_link request 'div' 'Home div' 'Home division sub-account from SL (0700 = Premise Security, 0400 = AV, 0200 = IT, 0600 = Electrical, 0800 = ARM).' %}</th>
+    <th>{% sort_link request 'status' 'Status' 'Active = live PTT user today.' %}</th>
+    <th class="num">{% sort_link request 'projects' 'Projects' 'Distinct projects in this division where the person logged PTT field hours (all time).' %}</th>
+    <th class="num">{% sort_link request 'hours' 'Hours' 'All-time PTT field hours in this division (onsite + OT + offsite on Job Reports).' %}</th>
+    <th class="num">{% sort_link request 'hours_recent' 'Hours in window' 'PTT field hours on entries dated within the selected window (since the "Closed within" start).' %}</th>
+    {% if acc.rates_field %}<th class="num">{% sort_link request 'cost' 'SL labor $' 'Loaded labor cost: wages + employer payroll tax charged to these projects for this person in SL charge entry, plus their pro-rata share of each project’s union fringe vouchers (allocated by share of union wages).' %}</th>{% endif %}
+    <th class="num">{% sort_link request 'closed' 'Closed jobs' 'Of their projects, how many are closed & stabilized (final numbers).' %}</th>
+    {% if acc.margins %}<th class="num">{% sort_link request 'gp' 'HW GP %' 'Hours-weighted gross margin of the closed jobs they worked: each job’s final GP % weighted by this person’s hours on it. Context only — job margin is driven by pricing, materials and everyone else on the job; the adjusted rating in the next column is the fair comparison.' %}</th>{% endif %}
+    {% if acc.ratings %}<th class="num">{% sort_link request 'rating' 'Net hrs /1000' 'The field rating: hours saved per 1,000 budget labor hours on jobs this person works, after controlling for customer, PM, solution, size, sold margin, year and crew mix, with placebo-calibrated shrinkage. +100 ≈ jobs come in 10% under labor budget relative to expectation. Hover the value for the interval and caveats; full table under Ratings → Field Crew.' %}</th>{% endif %}
+    <th class="num">{% sort_link request 'lead' 'Lead on' 'Projects where this person submitted PTT time for 2+ other people — the crew-lead signal.' %}</th>
+    <th class="num">{% sort_link request 'last' 'Last worked' 'Most recent PTT field entry in this division.' %}</th>
+  </tr></thead>
+  <tbody>
+  {% for r in rows %}<tr>
+    <td class="nowrap"><a href="{% url 'dashboard:person_detail' r.employee_key %}"><b>{{ r.canonical_name }}</b></a></td>
+    <td class="nowrap {% if r.classification_inferred %}muted{% endif %}" title="{% if r.classification_inferred %}Inferred from wage (no class code in PTT/SL){% if r.current_wage_rate %} — latest observed rate ${{ r.current_wage_rate|num:2 }}/h{% endif %}{% else %}Class code from PTT/SL{% endif %}">{{ r.classification|default:"—" }}</td>
+    <td class="muted nowrap">{{ r.union_norm|default:"non-union" }}</td>
+    <td class="num muted">{{ r.hire_date|date:"M Y"|default:"—" }}</td>
+    {% if acc.rates_field %}<td class="num">{% if r.rate_ok and r.ptt_base_wage and r.ptt_base_wage < 150 %}${{ r.ptt_base_wage|num:2 }}{% else %}—{% endif %}</td>{% endif %}
+    <td class="muted">{{ r.home_subaccount }}</td>
+    <td>{% if r.ptt_active %}<span class="tag closed_stabilized">active</span>{% else %}<span class="tag">inactive</span>{% endif %}</td>
+    <td class="num">{{ r.projects }}</td><td class="num">{{ r.hours|hours }}</td><td class="num">{{ r.hours_recent|hours }}</td>{% if acc.rates_field %}<td class="num">{% if r.rate_ok %}{{ r.cost|money }}{% else %}—{% endif %}</td>{% endif %}
+    <td class="num">{{ r.closed_projects }}</td>{% if acc.margins %}<td class="num">{{ r.hours_weighted_gp|pct }}</td>{% endif %}
+    {% if acc.ratings %}<td class="num">{% if r.rating_adj != None %}<span class="{{ r.rating_adj|posneg }}" title="95% interval {{ r.rating_lo|effect:'h1000' }} … {{ r.rating_hi|effect:'h1000' }}{% if r.rating_pair %} · PAIR rating with {{ r.rating_pair }} — they cannot be separated statistically{% endif %}{% if r.rating_lims %} · {{ r.rating_lims|join:'; ' }}{% endif %}"><b>{{ r.rating_adj|effect:'h1000' }}</b></span> <span class="tag {{ r.rating_status }}" title="publishable = enough evidence; provisional = confound or sensitivity remains; insufficient = under 500 h / 5 jobs">{{ r.rating_status|slice:":4" }}</span>{% if r.rating_pair %}<span class="tag" style="background:#f0e9ff;color:#6a3ff0" title="Pair rating with {{ r.rating_pair }}">pair</span>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>{% endif %}
+    <td class="num muted">{{ r.lead_projects|default:"" }}</td><td class="num muted">{{ r.last_date|date:"Y-m-d" }}</td>
+  </tr>{% empty %}<tr><td colspan="16" class="empty">No field crew match these filters.</td></tr>{% endfor %}
+  </tbody></table></div>
+{% if acc.ratings %}<div class="note" style="margin-top:8px">Net hrs /1000 covers installation/JOC work only — service/T&amp;M hours are excluded from the rating (T&amp;M estimates aren't beatable) and appear only in the hours columns. Individual ratings are for leadership review; see the model card before sharing.</div>{% endif %}
+</div>
+{% endblock %}

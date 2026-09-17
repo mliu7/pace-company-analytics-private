@@ -1,0 +1,213 @@
+{% extends "dashboard/base.html" %}{% load humanize pca %}
+{% block title %}{{ div }} · {{ P.label }} P&amp;L · Pace Company Analytics{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="{% url 'dashboard:finance_pnl' %}?grain={{ P.kind }}&year={{ P.year }}&p={{ P.key }}">Divisional P&amp;L</a> › <a href="{% url 'dashboard:finance_pnl' %}?grain={{ P.kind }}&year={{ P.year }}&p={{ P.key }}&div={{ div }}">{{ div }} {{ div_name }}</a> › {{ P.label }}</div>
+<div class="topbar">
+  <div class="title"><h1>{{ div }} {{ div_name }} · {{ P.label }}</h1>
+    <small>Income statement for the period as posted to the ledger{% if row.open %} — <b>not closed yet</b>: WIP and payroll for {{ row.months_open|join:", " }} are estimates (≈){% endif %}. Accounts are grouped as on the company income statement; open a group to see which projects make it up, click an account for its postings, a project for its ledger lines.</small></div>
+  <div class="row">
+    {% if prev_p %}<a class="btn small" href="{% url 'dashboard:finance_pnl_detail' div prev_p.key %}">◀ {{ prev_p.label }}</a>{% endif %}
+    {% if next_p %}<a class="btn small" href="{% url 'dashboard:finance_pnl_detail' div next_p.key %}">{{ next_p.label }} ▶</a>{% endif %}
+    {% if P.kind == 'month' %}<a class="btn small" href="{% url 'dashboard:finance_pnl_detail' div quarter_key %}">quarter</a><a class="btn small" href="{% url 'dashboard:finance_pnl_detail' div year_key %}">year</a>
+    {% elif P.kind == 'quarter' %}<a class="btn small" href="{% url 'dashboard:finance_pnl_detail' div year_key %}">year</a>{% endif %}
+    {% if code %}<a class="btn small" href="{% url 'dashboard:finance_pnl_detail' 'ALL' P.key %}">company</a>{% endif %}
+  </div>
+</div>
+
+<div class="grid kpi" style="margin-bottom:14px">
+  <div class="card kpi"><div class="label">Revenue</div><div class="value sm">{{ row.revenue|money }}</div><div class="sub">{% if row.other_income %}+ {{ row.other_income|money }} other income{% else %}40000 / 40001{% endif %}</div></div>
+  <div class="card kpi"><div class="label">Costs</div><div class="value sm">{{ row.costs|money }}</div><div class="sub">direct, as posted</div></div>
+  <div class="card kpi"><div class="label">WIP adj</div><div class="value sm {{ row.wip|posneg }}">{% if row.open %}≈{% endif %}{{ row.wip|signed_money }}</div><div class="sub">{% if row.open %}{% if row.wip_booked %}{{ row.wip_booked|signed_money }} booked + {% endif %}{{ row.wip_pca|signed_money }} PCA est.{% else %}booked by the accountants{% endif %}</div></div>
+  <div class="card kpi"><div class="label">Gross</div><div class="value sm {{ row.gross|posneg }}">{{ row.gross|money }}</div><div class="sub">{{ row.gross_pct|pct:1 }} of earned</div></div>
+  <div class="card kpi"><div class="label">Overhead</div><div class="value sm">{{ row.overhead|money }}</div><div class="sub">{% if row.payroll_lag %}+ ≈{{ row.payroll_lag|money }} unposted payroll{% else %}own subaccounts{% endif %}</div></div>
+  <div class="card kpi"><div class="label">Corp. alloc</div><div class="value sm">{% if row.corp_alloc %}{{ row.corp_alloc|money }}{% else %}—{% endif %}</div><div class="sub">{% if row.share %}{{ row.share|pct:1 }} of the 000 pool{% else %}no share assigned{% endif %}</div></div>
+  <div class="card kpi"><div class="label">Operating income</div><div class="value sm {{ row.op_income|posneg }}">{% if row.open %}≈{% endif %}{{ row.op_income|money }}</div><div class="sub">{{ row.op_pct|pct:1 }} of earned</div></div>
+</div>
+
+<div class="card pnl" style="margin-bottom:14px" id="statement">
+  <h2>Income statement <small>{{ months|length }} month{{ months|length|pluralize }} · natural sign · GL subaccount{% if code %}s {{ code }}x{% else %}s: all{% endif %}</small></h2>
+  <div class="table-wrap tall">
+  <table class="data dense" id="is">
+    <thead><tr><th style="width:70px">Acct</th><th>Line</th><th class="num">Amount</th><th class="num" style="width:120px">Detail</th></tr></thead>
+    <tbody>
+      {# ---------------- revenue #}
+      <tr class="grp" id="revenue"><td></td><td><b>Revenue</b></td><td class="num"><b>{{ row.revenue|money }}</b></td><td class="num">{% with a=attribution|getitem:"Revenue" %}{% if a.n %}<a href="#" class="tog act" data-t="attr-Revenue">{{ a.n }} project{{ a.n|pluralize }}</a>{% endif %}{% endwith %}</td></tr>
+      {% for i in st.revenue %}<tr><td class="mono muted">{{ i.acct }}</td><td class="muted">{{ i.descr }}</td><td class="num">{{ i.amount|money }}</td><td class="num">{% if postings_available %}<a href="#" class="post act" data-acct="{{ i.acct }}">postings</a>{% endif %}</td></tr>{% endfor %}
+      {% with a=attribution|getitem:"Revenue" %}{% include "dashboard/_pnl_attr.html" with a=a key="Revenue" gname="Revenue" %}{% endwith %}
+      {% if st.other_income %}
+      <tr class="grp" id="other"><td></td><td><b>Other income</b></td><td class="num"><b>{{ row.other_income|money }}</b></td><td></td></tr>
+      {% for i in st.other_income %}<tr><td class="mono muted">{{ i.acct }}</td><td class="muted">{{ i.descr }}</td><td class="num">{{ i.amount|money }}</td><td class="num">{% if postings_available %}<a href="#" class="post act" data-acct="{{ i.acct }}">postings</a>{% endif %}</td></tr>{% endfor %}
+      {% endif %}
+      {# ---------------- costs #}
+      <tr class="grp" id="costs"><td></td><td><b>Costs</b></td><td class="num"><b>{{ row.costs|money }}</b></td><td></td></tr>
+      {% for grp in st.costs %}
+        <tr class="sub"><td></td><td>&nbsp;&nbsp;<b>{{ grp.group }}</b></td><td class="num"><b>{{ grp.amount|money }}</b></td><td class="num">{% with a=attribution|getitem:grp.group %}{% if a.n %}<a href="#" class="tog act" data-t="attr-{{ grp.group|slugify }}">{{ a.n }} project{{ a.n|pluralize }}</a>{% endif %}{% endwith %}</td></tr>
+        {% for i in grp.items %}<tr><td class="mono muted">{{ i.acct }}</td><td class="muted">&nbsp;&nbsp;&nbsp;&nbsp;{{ i.descr }}</td><td class="num">{{ i.amount|money }}</td><td class="num">{% if postings_available %}<a href="#" class="post act" data-acct="{{ i.acct }}">postings</a>{% endif %}</td></tr>{% endfor %}
+        {% with a=attribution|getitem:grp.group %}{% include "dashboard/_pnl_attr.html" with a=a key=grp.group|slugify gname=grp.group %}{% endwith %}
+      {% endfor %}
+      {# ---------------- WIP #}
+      <tr class="grp" id="wip"><td class="mono muted">50701</td><td><b>WIP adjustment</b> <span class="muted">earned − billed change{% if row.open %}; ≈ = PCA estimate, not booked yet{% endif %}</span></td><td class="num {{ row.wip|posneg }}"><b>{% if row.open %}≈{% endif %}{{ row.wip|signed_money }}</b></td><td class="num"><a href="#wipjobs" class="act">by job</a></td></tr>
+      {% for m in st.wip_by_month %}<tr><td></td><td class="muted">&nbsp;&nbsp;{{ m.month|slice:"4:" }}/{{ m.month|slice:":4" }} {% if m.open %}<span class="tag">open · PCA snapshot ΔWIP</span>{% else %}<span class="muted">booked (RECORD / REVERSE JOBS IN PROCESS)</span>{% endif %}</td>
+        <td class="num">{% if m.open %}{% if m.pca == None %}<span class="muted" title="No WIP snapshot for this month-end.">?</span>{% else %}≈{{ m.pca|signed_money }}{% endif %}{% else %}{{ m.booked|signed_money }}{% if m.pca != None %} <span class="muted" title="PCA's own snapshot ΔWIP for the same month, for comparison (the accountants' entry is the official number).">PCA {{ m.pca|signed_money }}</span>{% endif %}{% endif %}</td>
+        <td class="num">{% if postings_available and not m.open %}<a href="#" class="post act" data-acct="50701">postings</a>{% endif %}</td></tr>{% endfor %}
+      <tr class="tot" id="gross"><td></td><td><b>Gross profit</b> <span class="muted">{{ row.gross_pct|pct:1 }} of earned {{ row.earned|money }}</span></td><td class="num {{ row.gross|posneg }}"><b>{{ row.gross|money }}</b></td><td></td></tr>
+      {# ---------------- overhead #}
+      <tr class="grp" id="overhead"><td></td><td><b>Overhead</b> <span class="muted">own subaccounts</span></td><td class="num"><b>{{ row.overhead|money }}</b></td><td></td></tr>
+      {% for grp in st.overhead %}
+        <tr class="sub"><td></td><td>&nbsp;&nbsp;<b>{{ grp.group }}</b></td><td class="num"><b>{{ grp.amount|money }}</b></td><td></td></tr>
+        {% for i in grp.items %}<tr><td class="mono muted">{{ i.acct }}</td><td class="muted">&nbsp;&nbsp;&nbsp;&nbsp;{{ i.descr }}</td><td class="num">{{ i.amount|money }}</td><td class="num">{% if postings_available %}<a href="#" class="post act" data-acct="{{ i.acct }}">postings</a>{% endif %}</td></tr>{% endfor %}
+      {% endfor %}
+      {% if row.payroll_lag %}<tr class="sub" id="lagline"><td></td><td>&nbsp;&nbsp;<b>Unposted payroll (estimate)</b> <span class="muted">salary batches not entered yet for {{ row.months_open|join:", " }}</span></td><td class="num"><b>≈{{ row.payroll_lag|money }}</b></td><td class="num"><a href="#lag" class="act">how</a></td></tr>{% endif %}
+      {% if code %}<tr class="grp" id="corp"><td></td><td><b>Corporate allocation</b> <span class="muted">{% if row.share %}{{ row.share|pct:1 }} of the 000 overhead pool{% else %}this division carries no share of corporate overhead in the allocation table{% endif %}</span></td><td class="num"><b>{% if row.corp_alloc %}{{ row.corp_alloc|money }}{% else %}—{% endif %}</b></td><td class="num">{% if pool_accts %}<a href="#pool" class="act">pool</a>{% endif %}</td></tr>{% endif %}
+      <tr class="tot" id="op"><td></td><td><b>Operating income</b> <span class="muted">{{ row.op_pct|pct:1 }} of earned</span></td><td class="num {{ row.op_income|posneg }}"><b>{% if row.open %}≈{% endif %}{{ row.op_income|money }}</b></td><td></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="note" style="margin-top:6px">Amounts are the ledger's own (AcctHist, natural sign). "Projects" under a group are the project ledger (PJTran) lines that carry the same GL accounts — payroll allocations reach jobs without a GL account and are shown under Direct labor / Labor burden. The residual line is what posted to the division's subaccounts without a project (journal entries, adjustments, inventory relief, corporate re-classes).</div>
+</div>
+
+<div class="card pnl" style="margin-bottom:14px" id="projects">
+  <div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:flex-end">
+    <h2 style="margin:0">Projects in this period <small>{{ projects_total }} with ledger activity or a WIP change · sorted by Adj. GP (GP + ΔWIP){% if projects_total > projects|length %} · the {{ projects|length }} largest are loaded{% endif %}</small></h2>
+    <label class="muted" style="font-size:12px">Filter <input type="search" id="pf" placeholder="number, title, customer, PM" oninput="pfilter(this.value)" style="font:inherit;padding:5px 8px;border:1px solid var(--line-strong);border-radius:8px;min-width:220px"></label>
+  </div>
+  <div class="table-wrap" style="max-height:70vh;margin-top:8px">
+  <table class="data dense" id="pt">
+    <thead><tr><th>Project</th><th>Customer</th><th>PM</th><th>State</th><th class="num" title="PJTran revenue lines in the period (40000/40001).">Revenue</th><th class="num" title="PJTran direct-cost lines in the period; hover for the split by group.">Costs</th><th class="num" title="Revenue − costs posted in the period: the job's real, booked gross profit.">GP</th><th class="num" title="PCA snapshot WIP change over the period (WIP at {{ wip_start|date:'M j' }} → {{ wip_end|date:'M j' }}). Not profit by itself — the change in the earned-but-unbilled revenue booked.">ΔWIP</th><th class="num" title="GP + ΔWIP — the job's true result for the period on the earned basis.">Adj. GP</th><th class="num">Lines</th></tr></thead>
+    <tbody>
+    {% for j in projects %}
+      <tr class="pr {% if forloop.counter > 60 %}more{% endif %}" data-s="{{ j.cpn }} {{ j.title|lower }} {{ j.customer|lower }} {{ j.pm|lower }}" {% if forloop.counter > 60 %}style="display:none"{% endif %}>
+        <td class="trunc fluid" style="width:40%;min-width:160px" title="{{ j.title }}"><a href="{% url 'dashboard:project_detail' j.cpn %}"><b>{{ j.cpn }}</b></a> <span class="muted">{{ j.title }}</span>{% if j.division and j.division != code and code %} <span class="tag" title="Project belongs to division {{ j.division }}; its lines posted to {{ code }} subaccounts.">{{ j.division }}</span>{% endif %}</td>
+        <td class="muted">{{ j.customer|default:"" }}</td><td class="muted">{{ j.pm|default:"" }}</td><td>{% if j.state %}<span class="tag {{ j.state }}">{{ j.state|state_label }}</span>{% endif %}</td>
+        <td class="num">{{ j.revenue|money }}</td>
+        <td class="num" title="{% for g, v in j.groups.items %}{{ g }}: {{ v|money }}&#10;{% endfor %}{% if j.hours %}{{ j.hours|hours }} labor hours{% endif %}">{{ j.costs|money }}</td>
+        <td class="num {{ j.gross|posneg }}">{{ j.gross|money }}</td>
+        <td class="num {{ j.dwip|posneg }}">{% if j.dwip == None %}<span class="muted">—</span>{% else %}{{ j.dwip|signed_money }}{% endif %}</td>
+        <td class="num {{ j.contribution|posneg }}"><b>{{ j.contribution|money }}</b></td>
+        <td class="num"><a href="#" class="pj act" data-cpn="{{ j.cpn }}">lines</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% if projects|length > 60 %}<div class="note" style="margin-top:6px">Showing the 60 largest contributions. <a href="#" onclick="document.querySelectorAll('#pt tr.more').forEach(function(r){r.style.display=''});this.style.display='none';return false">Show all {{ projects|length }}</a></div>{% endif %}
+</div>
+
+<div class="card pnl" style="margin-bottom:14px" id="wipjobs">
+  <div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:flex-end">
+    <h2 style="margin:0">WIP change by job <small>PCA snapshots {{ wip_start|date:"M j, Y" }} → {{ wip_end|date:"M j, Y" }} · net {{ wip_pca_total|signed_money }}{% if not row.open and row.wip_booked %} · booked in the ledger {{ row.wip_booked|signed_money }}{% endif %} · with each job's ledger revenue and cost for the period</small></h2>
+    <a class="btn small" href="{% url 'dashboard:finance_wip' %}?period={{ wip_period }}{% if code %}&division={{ code }}{% endif %}&side=moved" title="Open the WIP by Job page for {{ P.label }}{% if code %} filtered to division {{ code }}{% endif %}, jobs that moved in the period: contract value, PTT % and when it was set, earned, billed, WIP, cost to date.{% if P.kind == 'quarter' %} That page runs by month or year, so this opens the quarter's last month.{% endif %}">WIP by Job · {{ P.label }}{% if code %} · {{ code }}{% endif %} →</a>
+  </div>
+  {% if not row.open %}<div class="note" style="margin:8px 0">For a closed period the official number is the accountants' entry ({{ row.wip_booked|signed_money }}, WIP line above); PCA's per-job list ({{ wip_pca_total|signed_money }}) explains where the movement came from. They differ because the accountants' month-end entry zeroes service rows and hand-adjusts jobs mid-billing (docs/07 §3).</div>{% endif %}
+  {% if wip_jobs %}
+  <div class="table-wrap freeze" style="max-height:60vh;margin-top:8px">
+  <table class="data dense freeze" id="wj">
+    <thead><tr>
+      <th class="fz fz1">Project</th><th>Customer</th><th>PM</th>
+      <th class="num" title="PCA WIP (contract value × PTT % − billed) at the snapshot before the period.">WIP {{ wip_start|date:"M j" }}</th>
+      <th class="num" title="PCA WIP at the period-end snapshot (or the latest one for an open period).">WIP {{ wip_end|date:"M j" }}</th>
+      <th class="num" title="WIP at the end minus WIP at the start. Positive = the job earned more than it billed over the period. Not profit by itself.">Δ WIP</th>
+      {% if wip_drivers %}<th title="What moved the WIP: earned (CV × PTT % moved, or CV changed) vs billed (invoices posted). ΔWIP = Δearned − Δbilled.">Driver</th>{% endif %}
+      <th class="num" title="The job's project-ledger (PJTran) revenue lines posted in the period (40000/40001) — billed basis.">Revenue</th>
+      <th class="num" title="The job's PJTran direct-cost lines posted in the period; hover for the split by group and the labor hours.">Costs</th>
+      <th class="num" title="Revenue − costs posted in the period: the job's real, booked gross profit. This is profit; ΔWIP alone is not.">GP</th>
+      <th class="num" title="GP + ΔWIP — the job's true result for the period on the earned basis: real gross profit plus the earned-but-unbilled revenue booked (or reversed) as WIP.">Adj. GP</th>
+      <th></th>
+    </tr></thead>
+    <tbody>
+    {% for j in wip_jobs %}<tr{% if forloop.counter > 40 %} class="wmore" style="display:none"{% endif %}>
+      <td class="fz fz1 trunc" title="{{ j.cpn }} {{ j.title }}{% if j.state %} · {{ j.state|state_label }}{% endif %}"><a href="{% url 'dashboard:project_detail' j.cpn %}"><b>{{ j.cpn }}</b></a> <span class="muted">{{ j.title }}</span></td>
+      <td class="muted trunc fluid" style="width:18%;min-width:110px" title="{{ j.customer|default:'' }}">{{ j.customer|default:"" }}</td><td class="muted trunc fluid" style="width:12%;min-width:100px" title="{{ j.pm|default:'' }}">{{ j.pm|default:"" }}</td>
+      <td class="num">{{ j.wip_start|signed_money }}</td><td class="num">{{ j.wip_end|signed_money }}</td>
+      <td class="num {{ j.dwip|posneg }}"><b>{{ j.dwip|signed_money }}</b></td>
+      {% if wip_drivers %}<td class="muted" style="font-size:11px;white-space:nowrap;line-height:1.3" title="Earned (CV × PTT %) {{ j.earned_start|money }} → {{ j.earned_end|money }} ({{ j.dearned|signed_money }}); billed {{ j.billed_start|money }} → {{ j.billed_end|money }} ({{ j.dbilled|signed_money }}).">earned {{ j.dearned|signed_money }}<br>billed {{ j.dbilled|signed_money }}</td>{% endif %}
+      <td class="num">{% if j.revenue %}{{ j.revenue|money }}{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="num" title="{% for g, v in j.groups.items %}{{ g }}: {{ v|money }}&#10;{% endfor %}{% if j.hours %}{{ j.hours|hours }} labor hours{% endif %}">{% if j.costs %}{{ j.costs|money }}{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="num {{ j.gross|posneg }}">{% if j.revenue or j.costs %}{{ j.gross|money }}{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="num {{ j.contribution|posneg }}"><b>{{ j.contribution|money }}</b></td>
+      <td class="num" style="white-space:nowrap"><a href="#" class="pj act" data-cpn="{{ j.cpn }}" title="This job's ledger lines in the period.">lines</a> · <a class="act" href="{% url 'dashboard:finance_wip' %}?period={{ wip_period }}{% if code %}&division={{ code }}{% endif %}&side=moved&q={{ j.cpn }}" title="This job on the WIP by Job page for {{ P.label }}: contract value, PTT % and when it was set, earned, billed, cost to date.">WIP</a></td></tr>{% endfor %}
+    </tbody>
+    <tfoot><tr>
+      <td class="fz fz1">{{ wip_jobs|length }} job{{ wip_jobs|length|pluralize }} with a WIP change</td><td></td><td></td>
+      <td></td><td></td>
+      <td class="num {{ wip_tot.dwip|posneg }}">{{ wip_tot.dwip|signed_money }}</td>
+      {% if wip_drivers %}<td class="muted" style="font-size:11px;white-space:nowrap;font-weight:400;line-height:1.3">earned {{ wip_tot.dearned|signed_money }}<br>billed {{ wip_tot.dbilled|signed_money }}</td>{% endif %}
+      <td class="num">{{ wip_tot.revenue|money }}</td><td class="num">{{ wip_tot.costs|money }}</td>
+      <td class="num {{ wip_tot.gross|posneg }}">{{ wip_tot.gross|money }}</td>
+      <td class="num {{ wip_tot.contribution|posneg }}">{{ wip_tot.contribution|money }}</td><td></td>
+    </tr></tfoot>
+  </table>
+  </div>
+  <div class="note" style="margin-top:6px">{% if wip_jobs|length > 40 %}Largest 40 moves shown. <a href="#" onclick="document.querySelectorAll('#wipjobs tr.wmore').forEach(function(r){r.style.display=''});this.style.display='none';return false">Show all {{ wip_jobs|length }}</a> · {% endif %}Revenue and costs are the job's ledger lines posted in the period (billed basis — the same lines as the statement's project attribution above); ΔWIP is not profit by itself — it is the change in the earned-but-unbilled revenue booked — so the job's real result is Adj. GP = GP + ΔWIP. Totals cover the listed jobs only; jobs with ledger activity but no WIP move are in "Projects in this period".</div>
+  {% else %}<div class="muted" style="margin-top:8px">No per-job WIP snapshots bracket this period{% if not code %}{% else %} for this division{% endif %} (month-end snapshots exist monthly from Jul 2025 and at every Dec 31 since 2018).</div>{% endif %}
+</div>
+
+{% if pool_accts %}
+<div class="card pnl" style="margin-bottom:14px" id="pool">
+  <h2>Corporate (000) overhead pool <small>{{ P.label }} · this division's share {{ row.share|pct:1 }} → {{ row.corp_alloc|money }} · <a href="{% url 'dashboard:finance_allocations' %}">edit shares</a> · <a href="{% url 'dashboard:finance_pnl_detail' '000' P.key %}">000 statement</a></small></h2>
+  <div class="table-wrap" style="max-height:50vh">
+  <table class="data dense"><thead><tr><th>Acct</th><th>Account</th><th class="num">Pool</th><th class="num">Allocated here</th></tr></thead>
+  <tbody>{% for a in pool_accts %}<tr><td class="mono muted">{{ a.acct }}</td><td class="muted">{{ a.descr }}</td><td class="num">{{ a.amount|money }}</td><td class="num">{{ a.alloc|money }}</td></tr>{% endfor %}</tbody></table>
+  </div>
+  {% if row.payroll_lag or T.unallocated.payroll_lag %}<div class="note" style="margin-top:6px">Open month: the pool also carries corporate's own unposted-payroll estimate, allocated by the same share.</div>{% endif %}
+</div>
+{% endif %}
+
+{% if lag_detail %}
+<div class="card pnl" style="margin-bottom:14px" id="lag">
+  <h2>Unposted payroll estimate <small>baseline = average of the last {{ lag_base_months|length }} closed months ({% for m in lag_base_months reversed %}{{ m|slice:"4:" }}/{{ m|slice:"2:4" }}{% if not forloop.last %}, {% endif %}{% endfor %}) · gap floored at zero per month</small></h2>
+  <div class="table-wrap" style="max-height:50vh">
+  <table class="data dense"><thead><tr><th>Month</th><th>Acct</th><th>Account</th><th class="num">Baseline avg</th><th class="num">Posted</th><th class="num">Gap</th></tr></thead>
+  <tbody>{% for l in lag_detail %}<tr><td class="muted">{{ l.month|slice:"4:" }}/{{ l.month|slice:":4" }}</td><td class="mono muted">{{ l.acct }}</td><td class="muted">{{ l.descr }}</td><td class="num">{{ l.avg|money }}</td><td class="num">{{ l.posted|money }}</td><td class="num {{ l.gap|posneg_inv }}">{{ l.gap|signed_money }}</td></tr>{% endfor %}</tbody></table>
+  </div>
+  <div class="note" style="margin-top:6px">Why: only the weekly hourly payroll runs post promptly; the two semi-monthly salary batches (15th and month-end) are entered days-to-weeks after the pay date. Until they land, an open month's posted wages are light — badly so for all-salaried groups. The estimate disappears once the month is closed.</div>
+</div>
+{% endif %}
+
+<div class="fin-modal" id="pnlmodal" onclick="if(event.target===this)this.style.display='none'">
+  <div class="fin-modal-box" id="pnlbox" style="max-width:1100px"><div class="empty">loading…</div></div>
+</div>
+<style>
+  #is tr.grp td { background:#f3f6fa; border-top:2px solid var(--line-strong); }
+  #is tr.sub td { background:#fafbfd; }
+  #is tr.tot td { background:#eef4ff; border-top:2px solid var(--line-strong); border-bottom:2px solid var(--line-strong); }
+  #is tr.attr { display:none; } #is tr.attr.on { display:table-row; }
+  #is tr.attr td { background:#fffdf5; }
+  #is table.inner { width:100%; font-size:12px; } #is table.inner td { padding:3px 6px; border-bottom:1px dotted var(--line); }
+  #wj .fz1 { width:clamp(250px, 20vw, 420px); min-width:clamp(250px, 20vw, 420px); max-width:clamp(250px, 20vw, 420px); }  /* frozen identity column scales with the window, like WIP by Job */
+</style>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  var LINES = "{% url 'dashboard:finance_pnl_lines' %}";
+  var P = "{{ P.key }}", DIV = "{{ div }}";
+  function money(v) { if (v === null || v === undefined) return ""; var n = Math.round(v); var s = Math.abs(n).toLocaleString(); return (n < 0 ? "-$" : "$") + s; }
+  function esc(s) { return String(s === null || s === undefined ? "" : s).replace(/[&<>"]/g, function (c) { return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
+  function open(url) {
+    var m = document.getElementById("pnlmodal"), b = document.getElementById("pnlbox");
+    b.innerHTML = '<div class="empty">loading…</div>'; m.style.display = "flex";
+    fetch(url).then(function (r) { return r.json(); }).then(function (d) {
+      var h = '<div class="fin-modal-head"><h2>' + esc(d.title) + '</h2><a href="#" class="fin-modal-close" onclick="document.getElementById(\'pnlmodal\').style.display=\'none\';return false">✕</a></div>';
+      if (d.note) h += '<div class="note" style="margin-bottom:8px">' + esc(d.note) + '</div>';
+      if (d.link) h += '<div style="margin-bottom:8px"><a class="btn small" href="' + d.link + '">open project page →</a></div>';
+      h += '<div class="table-wrap" style="max-height:65vh"><table class="data dense"><thead><tr>';
+      d.cols.forEach(function (c) { h += '<th class="' + (d.money.indexOf(c[0]) >= 0 || c[0] === "units" ? "num" : "") + '">' + esc(c[1]) + '</th>'; });
+      h += '</tr></thead><tbody>';
+      d.rows.forEach(function (r) { h += '<tr>'; d.cols.forEach(function (c) { var v = r[c[0]]; var isM = d.money.indexOf(c[0]) >= 0; h += '<td class="' + (isM || c[0] === "units" ? "num" : "") + '">' + (isM ? money(v) : esc(v)) + '</td>'; }); h += '</tr>'; });
+      h += '</tbody><tfoot><tr><td colspan="' + (d.cols.length - 1) + '">' + d.n + ' line' + (d.n === 1 ? '' : 's') + '</td><td class="num">' + money(d.total) + '</td></tr></tfoot></table></div>';
+      b.innerHTML = h;
+    }).catch(function () { b.innerHTML = '<div class="empty">could not load</div>'; });
+  }
+  document.querySelectorAll("a.post").forEach(function (a) { a.addEventListener("click", function (e) { e.preventDefault(); open(LINES + "?kind=postings&div=" + DIV + "&p=" + P + "&acct=" + a.dataset.acct); }); });
+  document.querySelectorAll("a.pj").forEach(function (a) { a.addEventListener("click", function (e) { e.preventDefault(); open(LINES + "?kind=pjtran&div=" + DIV + "&p=" + P + "&cpn=" + a.dataset.cpn + (a.dataset.group ? "&group=" + encodeURIComponent(a.dataset.group) : "")); }); });
+  document.querySelectorAll("a.tog").forEach(function (a) {   // "N projects" → the attribution rows; each one's open state is remembered across periods (PCA.pref, base.html)
+    var t = document.getElementById(a.dataset.t); if (!t) return;
+    if (PCA.pref("attr." + a.dataset.t)) t.classList.add("on");
+    a.addEventListener("click", function (e) { e.preventDefault(); t.classList.toggle("on"); PCA.setPref("attr." + a.dataset.t, t.classList.contains("on")); if (t.classList.contains("on")) t.scrollIntoView({block: "nearest"}); });
+  });
+  window.pfilter = function (q) { q = (q || "").toLowerCase(); document.querySelectorAll("#pt tr.pr").forEach(function (r) { r.style.display = (!q ? (r.classList.contains("more") ? "none" : "") : (r.dataset.s.indexOf(q) >= 0 ? "" : "none")); }); };
+  if (location.hash) { var el = document.querySelector(location.hash); if (el) el.scrollIntoView({block: "center"}); }
+})();
+</script>
+{% endblock %}

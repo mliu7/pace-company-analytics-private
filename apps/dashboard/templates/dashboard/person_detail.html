@@ -1,0 +1,173 @@
+{% extends "dashboard/base.html" %}{% load humanize pca %}
+{% block title %}{{ e.canonical_name }} · Pace Company Analytics{% endblock %}
+{% block content %}{% load extension_hooks %}{% extension_cards "person" e %}
+<div class="crumbs"><a href="{% url 'dashboard:people' %}">Project managers</a> · <a href="{% url 'dashboard:field' %}">Field crew</a></div>
+<div class="topbar">
+  <div class="title"><h1>{{ e.canonical_name }} <span class="muted" style="font-weight:400;font-size:14px">{{ e.employee_key }}</span></h1>
+    <small>{{ e.ptt_employee_role|nice }} · {{ e.ptt_employee_type|nice }} {{ e.union_code }} {{ e.labor_class }} · home division {{ e.home_subaccount }} · hired {{ e.hire_date|date:"M Y"|default:"—" }}{% if e.termination_date %} · left {{ e.termination_date|date:"M Y" }}{% endif %} · SL {{ e.sl_status }} · PTT {% if e.ptt_active %}active{% else %}inactive{% endif %}</small></div>
+</div>
+
+{% if managed %}
+<h3 style="margin:6px 0 8px">As project manager · closed {{ start|date:"M Y" }} → today</h3>
+<div class="grid kpi" style="margin-bottom:14px">
+  <div class="card kpi"><div class="label">Closed jobs</div><div class="value">{{ pm_summary.n }}</div><div class="sub">{{ pm_summary.losers }} lost money · {{ pm_open|length }} open now</div></div>
+  <div class="card kpi"><div class="label">Revenue</div><div class="value">{{ pm_summary.revenue|money_k }}</div><div class="sub">{{ pm_summary.hours|hours }} field hours</div></div>
+  {% if acc.margins %}<div class="card kpi"><div class="label">Gross profit</div><div class="value {{ pm_summary.gp|posneg }}">{{ pm_summary.gp|money_k }}</div><div class="sub">{{ pm_summary.gp_pct|pct }} margin</div></div>
+  <div class="card kpi"><div class="label">Sold → final</div><div class="value sm">{{ pm_summary.sold_pct|pct }} → {{ pm_summary.final_pct_with|pct }}</div><div class="sub">preservation <span class="{{ pm_summary.preservation|posneg }}">{{ pm_summary.preservation|pts }}</span></div></div>{% endif %}
+  {% if acc.ratings %}{% for r in ratings %}<div class="card kpi"><div class="label">Adj. {{ r.metric_name|nice }} <span class="tag {{ r.publication_status }}">{{ r.publication_status }}</span></div><div class="value sm {{ r.adjusted_effect|posneg }}">{{ r.adjusted_effect|pts }}</div><div class="sub">raw {{ r.raw_effect|pts }} · n {{ r.project_count }} (eff {{ r.effective_project_count|num:1 }}) · rel {{ r.reliability_score|pct:0 }} · {{ r.customer_count }} customers · {{ r.limitations|join:"; " }}</div></div>{% endfor %}
+  <div class="card kpi"><div class="label">Remaining-hours forecast accuracy</div><div class="value sm">{% if fc.n %}{{ fc.bias|num:0 }} h bias{% else %}—{% endif %}</div><div class="sub">{% if fc.n %}MAE {{ fc.mae|num:0 }} h over {{ fc.n }} revisions on closed jobs (forecast total − final hours){% else %}no revisions on closed jobs{% endif %}</div></div>{% endif %}
+</div>
+<div class="grid two" style="margin-bottom:14px">
+  <div class="card"><h2>By close year <small title="Lifetime job economics grouped by the year the job closed — not a fiscal-year P&L.">closed-job cohorts</small></h2>
+    <table class="data"><thead><tr><th>Year</th><th class="num">Jobs</th><th class="num">Revenue</th><th class="num">GP $</th><th class="num">GP %</th><th class="num">Hours</th></tr></thead><tbody>
+    {% for r in pm_by_year %}<tr><td>{{ r.y }}</td><td class="num">{{ r.n }}</td><td class="num">{{ r.rev|money }}</td><td class="num {{ r.gp|posneg }}">{{ r.gp|money }}</td><td class="num">{% if r.rev %}{% widthratio r.gp r.rev 100 %}%{% endif %}</td><td class="num">{{ r.hours|hours }}</td></tr>{% endfor %}</tbody></table></div>
+  <div class="card"><h2>Open projects <small>{{ pm_open|length }}</small></h2>
+    <table class="data"><thead><tr><th>Project</th><th>State</th><th class="num">CV</th><th class="num">EAC GP%</th><th class="num">vs sold</th><th>Risk</th></tr></thead><tbody>
+    {% for r in pm_open %}<tr><td class="trunc fluid" style="width:55%;min-width:160px" title="{{ r.title }}"><a href="{% url 'dashboard:project_detail' r.canonical_project_number %}">{{ r.display_number }}</a> <span class="muted">{{ r.title }}</span></td><td><span class="tag {{ r.lifecycle_state }}">{{ r.lifecycle_state|state_label }}</span></td><td class="num">{{ r.contract_value|money }}</td><td class="num">{{ r.eac_gp_percent|pct }}</td><td class="num {{ r.projected_margin_change_points|posneg }}">{{ r.projected_margin_change_points|pts }}</td><td>{% if r.risk_level %}<span class="tag {{ r.risk_level }}">{{ r.risk_level }}</span>{% endif %}</td></tr>{% empty %}<tr><td colspan="6" class="empty">none</td></tr>{% endfor %}</tbody></table></div>
+</div>
+<div class="card" style="margin-bottom:14px"><h2>Closed projects managed <small>{{ pm_closed|length }} in window</small></h2>
+  <div class="table-wrap"><table class="data dense"><thead><tr><th title="Click for the full project trace.">Project</th><th title="Billing customer.">Customer</th><th title="Work type (rule-derived).">Mode</th><th title="Dominant PTT System on the hours (video, access control, AV…).">Solution</th><th class="num" title="Close date.">Closed</th><th class="num" title="Current contract value.">Contract</th><th class="num" title="Sold margin (current budget).">Sold GP%</th><th class="num" title="Billed revenue.">Revenue</th><th class="num" title="Gross profit.">GP $</th><th class="num" title="GP ÷ revenue.">GP %</th><th class="num" title="PTT field hours on the job.">Hours</th><th class="num" title="Budgeted labor hours.">Bud hrs</th></tr></thead><tbody>
+  {% for r in pm_closed %}<tr><td class="trunc fluid" style="width:35%;min-width:160px" title="{{ r.title }}"><a href="{% url 'dashboard:project_detail' r.canonical_project_number %}">{{ r.display_number }}</a> <span class="muted">{{ r.title }}</span></td><td class="trunc fluid" style="width:20%" title="{{ r.customer_name }}">{{ r.customer_name }}</td><td class="muted">{{ r.project_mode_rule|nice }}</td><td class="muted">{{ r.solution_class|nice }}</td><td class="num muted">{{ r.close_date|date:"Y-m-d" }}</td><td class="num">{{ r.contract_value|money }}</td><td class="num muted">{{ r.sold_gp_percent|pct }}</td><td class="num">{{ r.billed_revenue|money }}</td><td class="num {{ r.actual_gp_dollars|posneg }}">{{ r.actual_gp_dollars|money }}</td><td class="num {% if r.actual_gp_percent < 0 %}neg{% endif %}">{{ r.actual_gp_percent|pct }}</td><td class="num">{{ r.ptt_hours_total|num }}</td><td class="num muted">{{ r.budget_labor_hours|num }}</td></tr>{% endfor %}
+  </tbody></table></div></div>
+{% endif %}
+
+{% if ptt_upd.total %}
+<div class="card" style="margin-bottom:14px" id="ptt-updates">
+  <h2>PTT progress updates <small>% complete saves by {{ e.canonical_name }} on any job · {% if ptt_upd.n %}<b>{{ ptt_upd.n }}</b> update{{ ptt_upd.n|pluralize }} on {{ ptt_upd.jobs }} job{{ ptt_upd.jobs|pluralize }} over {{ ptt_upd.days }} day{{ ptt_upd.days|pluralize }}{% if ptt_upd.own != ptt_upd.n %} · {{ ptt_upd.own }} on jobs they manage{% endif %}{% if ptt_upd.rem_n %} · remaining hours revised {{ ptt_upd.rem_n }} time{{ ptt_upd.rem_n|pluralize }}{% endif %} · last {{ ptt_upd.last|date:"M j, Y" }}{% else %}none {% if ptt_upd.window == '12m' %}in the last 12 months{% elif ptt_upd.window == '24m' %}in the last 24 months{% endif %} ({{ ptt_upd.total }} ever){% endif %} · newest first</small>
+    <span style="margin-left:auto">{% for k, lbl in ptt_upd_windows %}<a class="btn small {% if ptt_upd.window == k %}primary{% endif %}" href="?{% qs_without request 'updw' %}&updw={{ k }}">{{ lbl }}</a>{% endfor %}</span></h2>
+  {% if ptt_upd.n %}<div class="table-wrap"><table class="data dense"><thead><tr>
+    <th class="num" title="When the % was saved in PTT.">When</th><th title="The job — click for the full trace.">Job</th><th title="Division.">Div</th><th title="Lifecycle state today.">State</th><th title="The job's project manager (— when it is this person).">PM</th>
+    <th class="num" title="The % in force the day before → the % saved. An out-of-range PTT value (remaining costs above the cost basis) is flagged and moves nothing.">% complete</th>
+    <th class="num" title="Points moved by this save.">Δ pts</th><th class="num" title="Contract value × Δ% — the earned value this save moved.">Δ earned</th>
+    <th class="num" title="Remaining hours this person entered on the same day (PTT revision), when they did.">Rem hrs</th></tr></thead><tbody>
+    {% for u in ptt_upd.rows %}<tr><td class="num muted" style="white-space:nowrap">{{ u.at|date:"D M j, Y · g:i A" }}</td>
+      <td class="trunc fluid" style="width:40%;min-width:200px" title="{{ u.title }}"><a href="{% url 'dashboard:project_detail' u.cpn %}">{{ u.display_number }}</a> <span class="muted">{{ u.title }}</span></td>
+      <td class="muted">{{ u.division }}</td><td><span class="tag {{ u.lifecycle_state }}" title="{{ u.lifecycle_state|state_label }}">{{ u.lifecycle_state|state_short }}</span></td>
+      <td style="white-space:nowrap">{% if u.own %}<span class="muted">—</span>{% elif u.pm_key %}<a href="{% url 'dashboard:person_detail' u.pm_key %}">{{ u.pm_name }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="num" style="white-space:nowrap">{% if u.bad %}<span class="tag high" title="PTT reports {{ u.pct|pct:0 }} — outside 0–100; ignored.">{{ u.pct|pct:0 }} invalid</span>{% else %}{% if u.prev != None %}<span class="muted">{{ u.prev|pct:0 }} →</span> {% endif %}<b>{{ u.pct|pct:0 }}</b>{% endif %}</td>
+      <td class="num {{ u.d|posneg }}">{% if u.d != None %}{{ u.d|pts }}{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="num {{ u.d_earned|posneg }}">{% if u.d_earned != None %}{{ u.d_earned|signed_money }}{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="num">{% if u.rem != None %}{{ u.rem|hours }}{% else %}<span class="muted">—</span>{% endif %}</td></tr>{% endfor %}
+  </tbody></table></div>{% endif %}
+</div>
+{% endif %}
+
+{% if sold %}
+<div class="card" style="margin-bottom:14px"><h2>As salesperson <small>codes {% for s in salesperson_codes %}{{ s.code }} {% endfor %} · {{ sold|length }} projects</small></h2>
+  <div class="table-wrap" style="max-height:360px"><table class="data"><thead><tr><th>Project</th><th>State</th><th class="num">Created</th><th class="num">Contract</th><th class="num">Sold GP%</th><th class="num">GP %</th></tr></thead><tbody>
+  {% for r in sold %}<tr><td class="trunc fluid" style="width:55%;min-width:160px" title="{{ r.title }}"><a href="{% url 'dashboard:project_detail' r.canonical_project_number %}">{{ r.display_number }}</a> <span class="muted">{{ r.title }}</span></td><td><span class="tag {{ r.lifecycle_state }}">{{ r.lifecycle_state|state_label }}</span></td><td class="num muted">{{ r.sl_created_at|date:"Y-m-d" }}</td><td class="num">{{ r.contract_value|money }}</td><td class="num muted">{{ r.sold_gp_percent|pct }}</td><td class="num">{{ r.actual_gp_percent|pct }}</td></tr>{% endfor %}
+  </tbody></table></div></div>
+{% endif %}
+
+{% if crew_counts.total %}
+<h3 style="margin:6px 0 8px">As field employee · {{ field_total|hours }} on {{ crew_counts.total }} projects · {{ e.classification|default:"unclassified" }}{% if e.classification_inferred %} <span class="muted">(inferred from wage{% if subject_rate_ok and e.current_wage_rate %}, ${{ e.current_wage_rate|num:2 }}/h observed{% endif %})</span>{% endif %}</h3>
+{% if acc.ratings and field_ratings_display %}
+<div class="grid kpi" style="margin-bottom:14px">
+  {% for label, unit, help, r in field_ratings_display %}
+  <div class="card kpi" title="{{ help }} Model: docs/model_cards/field_crew_v1.md">
+    <div class="label">{{ label }} <span class="tag {{ r.publication_status }}">{{ r.publication_status }}</span>{% if r.detail.pair %} <span class="tag" style="background:#f0e9ff;color:#6a3ff0" title="Pair rating with {{ r.detail.pair_with }} — they cannot be separated statistically; the effect is for the pair.">pair</span>{% endif %}</div>
+    <div class="value sm {{ r.adjusted_effect|posneg }}">{{ r.adjusted_effect|effect:unit }}</div>
+    <div class="sub">95% {{ r.interval_low|effect:unit }} … {{ r.interval_high|effect:unit }} · {% if r.metric_name == 'crew_lead_hours_saved_per_1000' %}<a href="?{% qs_without request 'crew' %}&crew=lead#worked" title="Show just the jobs where they were the crew lead in the Projects worked table below. The filtered list can be longer than this count: the rating itself uses only closed installation/JOC jobs with 40+ budget and actual hours.">{{ r.project_count }} jobs</a>{% else %}<a href="#worked" title="Jump to the Projects worked table below.">{{ r.project_count }} jobs</a>{% endif %} · {{ r.labor_hours_exposure|hours }}{% if r.reliability_score != None %} · rel {{ r.reliability_score|pct:0 }}{% endif %}{% if r.limitations %}<br>{{ r.limitations|join:"; " }}{% endif %}</div>
+  </div>
+  {% endfor %}
+  {% if field_ratings_display.0.3.detail.service_hours %}<div class="card kpi"><div class="label">Service / T&M exposure</div><div class="value sm">{{ field_ratings_display.0.3.detail.service_hours|num:0 }} h</div><div class="sub">excluded from the rating — T&M estimates aren't beatable (rated work is installation/JOC only)</div></div>{% endif %}
+</div>
+{% endif %}
+<div class="grid three" style="margin-bottom:14px">
+  <div class="card"><h2>Hours by year</h2><table class="data"><thead><tr><th>Year</th><th class="num">Hours</th><th class="num">Projects</th></tr></thead><tbody>{% for r in field_hours_by_year %}<tr><td>{{ r.y }}</td><td class="num">{{ r.h|hours }}</td><td class="num">{{ r.projects }}</td></tr>{% endfor %}</tbody></table></div>
+  <div class="card"><h2>Systems worked</h2><ul class="mini-list">{% for r in field_systems %}<li><span class="k">{{ r.k|default:"(blank)" }}</span><span class="v">{{ r.h|hours }}</span></li>{% endfor %}</ul></div>
+  <div class="card"><h2>Most frequent coworkers <small>same project, same day</small></h2><ul class="mini-list">{% for r in coworkers %}<li><span class="k"><a href="{% url 'dashboard:person_detail' r.employee_key %}">{{ r.canonical_name }}</a></span><span class="v">{{ r.days }} days · {{ r.projects }} jobs</span></li>{% endfor %}</ul></div>
+  {% if subject_rate_ok %}<div class="card"><h2>Recent SL pay weeks <small>wage / payroll tax</small></h2>
+    <div class="table-wrap" style="max-height:320px"><table class="data dense"><thead><tr><th class="num" title="Payroll check date (Wednesday after the pay week).">Check</th><th title="LABORUNION or LABOR (non-union).">Acct</th><th class="num" title="Hours charged to projects that pay week.">Hrs</th><th class="num" title="Straight wages charged to projects.">Wage</th><th class="num" title="Observed wage rate that week.">$/h</th><th class="num" title="Employer payroll tax (FICA/FUTA/SUTA) attributed to this person’s project charges.">Tax</th></tr></thead><tbody>
+    {% for r in rates %}<tr><td class="num">{{ r.check_date|date:"Y-m-d" }}</td><td class="muted">{{ r.labor_account }}</td><td class="num">{{ r.hours|num:1 }}</td><td class="num">{{ r.wage_amount|money }}</td><td class="num">{{ r.wage_rate|money:2 }}</td><td class="num muted">{{ r.payroll_tax_burden|money }}</td></tr>{% empty %}<tr><td colspan="6" class="empty">no SL charge-entry rows</td></tr>{% endfor %}
+    </tbody></table></div></div>{% endif %}
+</div>
+<div class="card" style="margin-bottom:14px" id="worked">
+  <h2>Projects worked <small>PTT hours · project outcome for context · click a header to sort</small></h2>
+  <div class="row" style="margin:2px 0 10px">
+    <a class="btn small {% if not crew_filter %}primary{% endif %}" href="?{% qs_without request 'crew' %}#worked">All ({{ crew_counts.total }})</a>
+    <a class="btn small {% if crew_filter == 'lead' %}primary{% endif %}" href="?{% qs_without request 'crew' %}&crew=lead#worked" title="Jobs where this person submitted PTT time for 2+ other people — the crew-lead signal behind the crew-lead rating.">As crew lead ({{ crew_counts.lead }})</a>
+    <a class="btn small {% if crew_filter == 'member' %}primary{% endif %}" href="?{% qs_without request 'crew' %}&crew=member#worked">As crew member ({{ crew_counts.member }})</a>
+  </div>
+  <div class="table-wrap" style="max-height:560px"><table class="data dense"><thead><tr>
+    <th>{% sort_link request 'project' 'Project' 'Click a project for the full trace.' %}</th>
+    <th>{% sort_link request 'customer' 'Customer' 'Billing customer.' %}</th>
+    <th>{% sort_link request 'solution' 'Solution' 'Dominant PTT system on the job’s hours.' %}</th>
+    <th>{% sort_link request 'lead' 'Lead' 'Whether this person was the crew lead on the job (submitted PTT time for 2+ others).' %}</th>
+    <th class="num">{% sort_link request 'hours' 'Hrs' 'This person’s PTT field hours on the job.' %}</th>
+    <th class="num">{% sort_link request 'share' 'Share' 'Their share of all PTT hours on the job.' %}</th>
+    {% if subject_rate_ok %}<th class="num">{% sort_link request 'cost' 'SL labor $' 'Loaded labor cost: wages + employer payroll tax charged to the job for this person, plus their pro-rata share of the job’s union fringe.' %}</th>{% endif %}
+    <th class="num">{% sort_link request 'hpct' 'Hrs vs bud' 'Whole-project PTT hours as a % of budget labor hours. Under 100% = the whole crew beat the labor budget. Green under 90%, red over 110%.' %}</th>
+    <th class="num">{% sort_link request 'sold' 'Sold' 'GP % the job was sold at (current budget).' %}</th>
+    <th class="num">{% sort_link request 'gp' 'Final' 'Whole-project final GP % — context, not an individual rating.' %}</th>
+    <th class="num">{% sort_link request 'delta' 'Δ vs sold' 'Final GP % minus sold GP %, in points. The row tint follows this: green = beat sold by 2+ pts, red = missed by 2+ pts, deeper red = the job lost money.' %}</th>
+    <th class="num">{% sort_link request 'first' 'First' 'First PTT entry on the job.' %}</th>
+    <th class="num">{% sort_link request 'last' 'Last' 'Most recent PTT entry on the job.' %}</th>
+  </tr></thead><tbody>
+  {% for r in field %}<tr class="{{ r.row_class }}">
+    <td class="trunc fluid" style="width:35%;min-width:160px" title="{{ r.title }}"><a href="{% url 'dashboard:project_detail' r.canonical_project_number %}">{{ r.display_number }}</a> <span class="muted">{{ r.title }}</span></td>
+    <td class="trunc fluid" style="width:20%" title="{{ r.customer }}">{{ r.customer }}</td><td class="muted">{{ r.solution_class|nice }}</td>
+    <td>{% if r.is_lead %}<span class="tag" title="Submitted PTT time for 2+ others on this job.">lead</span>{% endif %}</td>
+    <td class="num">{{ r.actual_hours|num:1 }}</td><td class="num muted">{{ r.share_of_project_hours|pct:0 }}</td>{% if subject_rate_ok %}<td class="num">{{ r.actual_labor_cost|money }}</td>{% endif %}
+    <td class="num {% if r.hours_pct != None %}{% if r.hours_pct > 1.1 %}neg{% elif r.hours_pct < 0.9 %}pos{% endif %}{% endif %}" {% if r.hours_pct != None %}title="{{ r.ptt_hours_total|num }} h worked vs {{ r.budget_labor_hours|num }} h budgeted (whole crew)"{% endif %}>{{ r.hours_pct|pct:0 }}</td>
+    <td class="num muted">{{ r.sold_gp_percent|pct }}</td>
+    <td class="num {% if r.actual_gp_percent < 0 %}neg{% endif %}">{{ r.actual_gp_percent|pct }}</td>
+    <td class="num {{ r.gp_delta|posneg }}">{{ r.gp_delta|pts }}</td>
+    <td class="num muted">{{ r.first_date|date:"M j y" }}</td><td class="num muted">{{ r.last_date|date:"M j y" }}</td></tr>
+  {% empty %}<tr><td colspan="13" class="empty">No projects match this filter.</td></tr>{% endfor %}
+  </tbody></table></div>
+  <div class="note" style="margin-top:6px">Row tint: <span class="pos">green</span> = final GP beat sold by 2+ pts · <span class="neg">red</span> = missed sold by 2+ pts (deeper red = the job lost money) · no tint = within ±2 pts, still open, or no sold basis. Job hrs vs budget and GP are whole-project outcomes — the whole crew, pricing and material are in them; the adjusted ratings above are the fair individual comparison.</div>
+</div>
+{% endif %}
+{% if log.has_any %}
+<div class="card" style="margin-bottom:14px" id="log">
+  <h2>Time log <small>every PTT entry, newest first · the same per-person, per-day view PTT shows</small></h2>
+  {% if log.counts.others %}<div class="row" style="margin:2px 0 10px">
+    <a class="btn small {% if not log.others %}primary{% endif %}" href="?{% qs_without request 'lwho' 'lpage' 'lproj' 'ly' 'lm' %}#log" title="Entries where this person is the employee, whoever entered them.">Their time ({{ log.counts.self }})</a>
+    <a class="btn small {% if log.others %}primary{% endif %}" href="?{% qs_without request 'lwho' 'lpage' 'lproj' 'ly' 'lm' %}&lwho=others#log" title="Entries this person submitted in PTT on behalf of other people — the crew-lead signal.">Entered for others ({{ log.counts.others }})</a>
+  </div>{% endif %}
+  <form method="get" action="#log" class="filters" style="margin-bottom:8px">
+    {% if request.GET.sort %}<input type="hidden" name="sort" value="{{ request.GET.sort }}">{% endif %}{% if request.GET.crew %}<input type="hidden" name="crew" value="{{ request.GET.crew }}">{% endif %}{% if request.GET.years %}<input type="hidden" name="years" value="{{ request.GET.years }}">{% endif %}{% if log.others %}<input type="hidden" name="lwho" value="others">{% endif %}
+    <label>Year<select name="ly"><option value="">all</option>{% for y in log.years %}<option value="{{ y.y }}" {% if log.year == y.y %}selected{% endif %}>{{ y.y }} ({{ y.n }})</option>{% endfor %}</select></label>
+    <label>Month<select name="lm"><option value="">all</option>{% for m, name in log.months %}<option value="{{ m }}" {% if log.month == m %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
+    <label>Project<select name="lproj" style="max-width:340px"><option value="">all</option>{% for p in log.projects %}<option value="{{ p.project__canonical_project_number }}" {% if log.proj == p.project__canonical_project_number %}selected{% endif %}>{{ p.project__display_number }} · {{ p.project__title|truncatechars:40 }} ({{ p.n }})</option>{% endfor %}</select></label>
+    <label style="flex-direction:row;align-items:center;gap:6px;padding-bottom:9px" title="PTT entries that were later deleted (status 2). Hidden by default; they never count as hours."><input type="checkbox" name="lrm" value="1" {% if log.show_removed %}checked{% endif %} style="min-width:0"> include removed</label>
+    <button class="btn primary small">Apply</button><a class="btn small" href="?{% qs_without request 'ly' 'lm' 'lproj' 'lrm' 'lpage' %}#log">Reset</a>
+  </form>
+  <div class="note" style="margin-bottom:8px">{{ log.totals.n|default:0 }} entries · {{ log.totals.days|default:0 }} days · <b>{{ log.totals.total|num:1 }} h</b> ({{ log.totals.onsite|num:1 }} on-site · {{ log.totals.ot|num:1 }} OT · {{ log.totals.offsite|num:1 }} off-site) · {{ log.totals.projects|default:0 }} projects{% if log.totals.time_off %} · {{ log.totals.time_off|num:1 }} h time off{% endif %}{% if log.show_removed %} · removed entries are struck through and not counted here{% endif %}</div>
+  <div class="table-wrap" style="max-height:640px"><table class="data dense timelog"><thead><tr>
+    <th class="num" title="Date of work. A heavier rule starts each day; the day line shows the day's total live job-report hours when the day has more than one entry.">Date</th>
+    {% if log.others %}<th title="Whose time this is.">Employee</th>{% endif %}
+    <th title="Project the entry was charged to. Time-off and other non-job forms show their form type instead.">Project</th>
+    <th title="PTT phase (SL task).">Task</th>
+    <th title="PTT System choice.">System</th>
+    <th title="PTT Work type choice.">Work type</th>
+    <th title="Union shift code (hover for the pay multiplier).">Shift</th>
+    <th class="num" title="On-site hours.">On</th>
+    <th class="num" title="Overtime hours.">OT</th>
+    <th class="num" title="Off-site hours.">Off</th>
+    <th class="num" title="Total hours on this entry (time-off hours on a time-off form).">Total</th>
+    <th title="Marked complete on the Job Report.">Done</th>
+    <th title="Activity note as typed in PTT.">Activity</th>
+    <th title="Open-issues note as typed in PTT.">Open issues</th>
+    <th title="When the entry was submitted (US-Central) and by whom when someone else entered it.">Entered</th>
+  </tr></thead><tbody>
+  {% for r in log.rows %}<tr class="{% if r.day_first %}dayfirst{% endif %}{% if r.source_status == 2 %} removed{% endif %}">
+    <td class="num nw">{% if r.day_first %}{{ r.work_date|date:"D M j, Y" }}{% if r.day_n > 1 %}<div class="muted" style="font-size:11px">{{ r.day_n }} entries · {{ r.day_total|num:1 }} h</div>{% endif %}{% else %}<span class="muted">{{ r.work_date|date:"D M j, Y" }}</span>{% endif %}</td>
+    {% if log.others %}<td>{% if r.employee %}<a href="{% url 'dashboard:person_detail' r.employee.employee_key %}">{{ r.employee.canonical_name }}</a>{% else %}<span class="muted">PTT person {{ r.ptt_person_pk }}</span>{% endif %}</td>{% endif %}
+    <td class="trunc fluid" style="width:25%;min-width:160px"{% if r.project %} title="{{ r.project.title }}"{% endif %}>{% if r.project %}<a href="{% url 'dashboard:project_detail' r.project.canonical_project_number %}">{{ r.project.display_number }}</a> <span class="muted" title="{{ r.project.title }}">{{ r.project.title }}</span>{% endif %}{% if r.form_type != 1 %} <span class="tag {% if r.form_type == 2 %}timeoff{% endif %}">{{ r.form_label }}</span>{% endif %}</td>
+    <td class="muted nw">{{ r.task_id_text }}</td><td class="muted nw">{{ r.system_choice }}</td><td class="muted nw">{{ r.work_type_choice }}</td>
+    <td class="muted nw" {% if r.shift_multiplier %}title="pay multiplier {{ r.shift_multiplier }}"{% endif %}>{{ r.shift_code }}</td>
+    <td class="num">{{ r.hours_onsite|numdash:1 }}</td><td class="num muted">{{ r.hours_ot|numdash:1 }}</td><td class="num muted">{{ r.hours_offsite|numdash:1 }}</td>
+    <td class="num"><b>{% if r.form_type == 2 %}{{ r.hours_time_off|numdash:1 }}{% else %}{{ r.hours_total|numdash:1 }}{% endif %}</b></td>
+    <td class="muted">{% if r.completed_flag %}✓{% endif %}</td>
+    <td class="wrap" style="width:30%"{% if r.activity_note %} title="{{ r.activity_note }}"{% endif %}><div class="clamp2">{{ r.activity_note }}</div></td>
+    <td class="wrap muted" style="width:15%"{% if r.open_issues_note %} title="{{ r.open_issues_note }}"{% endif %}><div class="clamp2">{{ r.open_issues_note }}</div></td>
+    <td class="muted" style="white-space:nowrap">{% if r.by_other %}{% if r.submitted_by %}<a href="{% url 'dashboard:person_detail' r.submitted_by.employee_key %}" title="Entered by {{ r.submitted_by.canonical_name }} on this person's behalf.">{{ r.submitted_by.canonical_name }}</a>{% else %}PTT person {{ r.ptt_submitted_by_pk }}{% endif %}<br>{% endif %}<span title="Submitted {{ r.submitted_at|date:'Y-m-d H:i' }}{% if r.last_edited_at %} · last edited {{ r.last_edited_at|date:'Y-m-d H:i' }}{% endif %}{% if r.removed_at %} · removed {{ r.removed_at|date:'Y-m-d H:i' }}{% endif %} (US-Central)">{{ r.submitted_at|date:"M j, H:i" }}</span>{% if r.last_edited_at %} <span class="tag edited" title="Edited in PTT after submission, last on {{ r.last_edited_at|date:'Y-m-d H:i' }}.">edited</span>{% endif %}{% if r.source_status == 2 %} <span class="tag removed" title="Deleted in PTT{% if r.removed_at %} on {{ r.removed_at|date:'Y-m-d H:i' }}{% endif %}.">removed</span>{% endif %}</td>
+  </tr>{% empty %}<tr><td colspan="15" class="empty">No entries match these filters.</td></tr>{% endfor %}
+  </tbody></table></div>
+  {% if log.page.paginator.num_pages > 1 %}<div class="pager">{% qs_without request 'lpage' as bq %}{% if log.page.has_previous %}<a class="btn small" href="?{{ bq }}&lpage={{ log.page.previous_page_number }}#log">‹ newer</a>{% endif %}<span>page {{ log.page.number }} of {{ log.page.paginator.num_pages }} · {{ log.page.paginator.per_page }} entries per page</span>{% if log.page.has_next %}<a class="btn small" href="?{{ bq }}&lpage={{ log.page.next_page_number }}#log">older ›</a>{% endif %}</div>{% endif %}
+</div>
+{% endif %}
+{% if not managed and not field and not sold and not log.has_any %}<div class="card empty">No projects, hours or sales are attributed to this person.</div>{% endif %}
+{% endblock %}

@@ -1,0 +1,85 @@
+{% extends "dashboard/base.html" %}{% load humanize pca static %}
+{% block title %}Resource Scheduler · Pace Company Analytics{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{% static 'scheduling/schedule.css' %}?v={{ ASSET_VERSION }}">
+<form hidden aria-hidden="true">{% csrf_token %}</form>
+<div class="topbar">
+  <div class="title"><h1>Resource Scheduler</h1>
+    <small>Weekly crew allocation for the field and engineering roster: every project carries phases with total man-hours over date windows; the scheduler turns them into a per-day crew plan, lets you put named people on project-days within their weekly and daily caps, shows who is free, which jobs still need people or dates, and compares the plan with the hours PTT actually recorded. {{ n_resources }} people · {{ n_projects }} projects.</small></div>
+  <div class="row sch-tools">
+    <div class="sch-seg" id="viewToggle" title="Schedule = the week board; Projects = timeline and project cards. Remembered.">
+      <button type="button" data-view="schedule" class="on">Schedule</button><button type="button" data-view="projects">Projects</button>
+    </div>
+    <div class="sch-weeknav" id="weekNav">
+      <button type="button" class="btn small" id="wkPrev" title="Previous week">‹</button>
+      <span class="sch-wklabel" id="wkLabel">{{ week_label }}</span>
+      <button type="button" class="btn small" id="wkNext" title="Next week">›</button>
+      <button type="button" class="btn small" id="wkToday" title="Jump to the current week (live clock, US Central)">Today</button>
+    </div>
+    {% if can_write %}
+    <button type="button" class="btn small primary" id="btnNewProject" title="Add a project to staff (name, PM, division, dates, phases and hours).">+ Project</button>
+    <button type="button" class="btn small" id="btnNewResource" title="Add a person by hand — the roster is otherwise seeded from PTT / SL employees.">+ Resource</button>
+    {% endif %}
+    <details class="sch-menu">
+      <summary class="btn small" title="Week CSV, Excel workbook, or the per-person weekly schedule for printing.">Export ▾</summary>
+      <div class="sch-menu-list">
+        <a id="expCsv" href="#">Week CSV</a>
+        <a id="expXlsx" href="#">Week XLSX</a>
+        <a id="expRes" href="#">Resource schedules (print)</a>
+      </div>
+    </details>
+  </div>
+</div>
+
+<div id="view-schedule">
+  <div class="sch-layout">
+    <div class="sch-mainc">
+      <div class="card tight sch-summary" id="weekSummary"><div class="empty">Loading the week…</div></div>
+      <div class="filters sch-filters">
+        <label title="Show only projects (lane and chips) of this division; people are narrowed to those whose home division includes it (people with no division always show). Remembered.">Division
+          <select id="fDiv"><option value="">All divisions</option></select></label>
+        <label title="Show only projects of this PM. Remembered.">PM
+          <select id="fPm"><option value="">All PMs</option></select></label>
+        <label title="All people, or only people with hours this week. Remembered.">Rows
+          <select id="fRows"><option value="all">All people</option><option value="booked">With hours this week</option></select></label>
+        <span class="muted sch-hint" id="boardHint"></span>
+      </div>
+      <div class="card tight sch-boardcard">
+        <div class="table-wrap freeze sch-boardwrap" id="boardWrap"><div class="empty">Loading…</div></div>
+        <div class="sch-statline" id="statLine"></div>
+      </div>
+      <div class="card tight" id="adherenceCard" style="margin-top:12px">
+        <h2>Planned vs worked this week <small>schedule adherence — planned hours from this board against the hours PTT recorded per person and job (people with a PTT link on jobs with an SL number).</small></h2>
+        <div id="adherence"></div>
+      </div>
+    </div>
+    <aside class="card tight sch-needs" id="needsBox"><div class="empty">Loading…</div></aside>
+  </div>
+</div>
+
+<div id="view-projects" hidden>
+  <div class="card tight" style="margin-bottom:12px">
+    <div class="sch-gantt-head">
+      <h2 style="margin:0">All projects timeline</h2>
+      <label class="muted" style="font-size:12px">Division <select id="gDiv"><option value="">All</option></select></label>
+      <span class="muted" id="ganttRange"></span>
+    </div>
+    <div class="sch-gantt" id="gantt"></div>
+  </div>
+  <div class="card tight">
+    <div class="sch-cards-head">
+      <div class="sch-tabs" id="cardTabs"></div>
+      <label class="muted" style="font-size:12px">PM <select id="cPm"><option value="">All PMs</option></select></label>
+    </div>
+    <div class="sch-cards" id="cards"></div>
+  </div>
+</div>
+
+<div id="sch-modal" class="sch-modal" hidden><div class="sch-modal-box" id="sch-modal-box" role="dialog" aria-modal="true"></div></div>
+<div id="sch-dialog" class="sch-modal sch-dialog" hidden><div class="sch-modal-box" id="sch-dialog-box" role="dialog" aria-modal="true"></div></div>
+<div id="sch-toast" class="sch-toast" hidden></div>
+{{ cfg|json_script:"sched-cfg" }}
+{% endblock %}
+{% block scripts %}
+<script src="{% static 'scheduling/schedule.js' %}?v={{ ASSET_VERSION }}"></script>
+{% endblock %}

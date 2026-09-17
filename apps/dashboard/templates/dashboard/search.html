@@ -1,0 +1,90 @@
+{% extends "dashboard/base.html" %}{% load humanize pca %}
+{% block title %}{% if q %}“{{ q }}” · Search{% else %}Search{% endif %} · Pace Company Analytics{% endblock %}
+{% block content %}
+<div class="srch">
+<div class="topbar">
+  <div class="title"><h1>Search</h1><small>Projects by number, title, PO or quote reference · people · customers · vendors · 010 orders &amp; quotes · document numbers (shippers, SL orders, invoices, payments, vouchers, checks, POs, serials) · divisions · pages. Every word has to match; a typo in a name still finds it.</small></div>
+</div>
+<form method="get" action="{% url 'dashboard:search' %}" class="srch-box" role="search">
+  <span class="gs-ico">⌕</span>
+  <input type="search" name="q" value="{{ q }}" placeholder="Search everything…" autocomplete="off" spellcheck="false" autofocus aria-label="Search">
+  {% if type_filter %}<input type="hidden" name="type" value="{{ type_filter }}">{% endif %}
+  <button class="btn primary" type="submit">Search</button>
+</form>
+
+{% if res %}
+<div class="srch-facets">
+  <a href="?q={{ q|urlencode }}" class="{% if not type_filter %}on{% endif %}">Everything <span class="n">{{ res.total }}{% if res.capped %}+{% endif %}</span></a>
+  {% for f in facets %}<a href="?q={{ q|urlencode }}&type={{ f.type }}" class="{% if type_filter == f.type %}on{% endif %}">{{ f.label }} <span class="n">{{ f.count }}{% if f.capped %}+{% endif %}</span></a>{% endfor %}
+</div>
+{% if not res.total %}
+<div class="card"><div class="empty-big"><b>Nothing matched “{{ q }}”</b>Try fewer words, part of a name, or a project number.</div>
+  <div class="tips">
+    <div><b>Project numbers</b>Type any leading digits — 2652 lists every job starting 2652; the trailing 000000 counts.</div>
+    <div><b>Names</b>Words can be in any order: “security cps” finds CPS security jobs. First names and last names both work for people.</div>
+    <div><b>Document numbers</b>Shippers (SH…), SL orders (ORD…), invoices (IN…), payments, AP vouchers and vendor invoice numbers, checks, POs, serials — the digits alone work too (83034 finds SH00083034).</div>
+    <div><b>Pages</b>“wip”, “receivables”, “map”, “vendors” jump straight to the page.</div>
+  </div></div>
+{% elif not groups %}
+<div class="card"><div class="empty-big"><b>No {{ type_label|lower }} matched “{{ q }}”</b><a href="?q={{ q|urlencode }}">Show everything</a> that matched instead.</div></div>
+{% endif %}
+
+{% for g in groups %}
+<div class="card" id="g-{{ g.type }}">
+  <h2><span><span class="gs-ava {{ g.type }}">{% if g.type == 'project' %}▤{% elif g.type == 'person' %}☺{% elif g.type == 'customer' %}▣{% elif g.type == 'vendor' %}⇡{% elif g.type == 'order' %}≡{% elif g.type == 'document' %}⌗{% elif g.type == 'division' %}◈{% else %}→{% endif %}</span>{{ g.label }}</span>
+    <small>{{ g.count }}{% if g.capped %}+{% endif %} match{{ g.count|pluralize:"es" }}{% if g.count > g.items|length or g.capped %} · first {{ g.items|length }} shown — add a word to narrow it{% endif %}</small></h2>
+  <div class="table-wrap{% if g.items|length > 12 %} tall{% endif %}"><table class="data dense"><thead><tr>
+    {% if g.type == 'project' %}<th>Number</th><th>Title</th><th>Customer</th><th>Div</th><th>State</th><th>PM</th><th class="num">Last activity</th>
+    {% elif g.type == 'person' %}<th>Name</th><th>Role</th><th>Classification</th><th>Division</th><th>Status</th>
+    {% elif g.type == 'customer' %}<th>Customer</th><th>Sector</th><th>Location</th><th class="num">Open jobs</th><th class="num">All jobs</th><th>Status</th>
+    {% elif g.type == 'vendor' %}<th>Vendor</th><th>City</th><th>Status</th>
+    {% elif g.type == 'order' %}<th>Number</th><th>Kind</th><th>Description</th><th>Customer</th><th>Status</th><th>PO</th><th>Rep</th><th class="num">Date</th>
+    {% elif g.type == 'document' %}<th>Number</th><th>Kind</th><th>Who / what</th><th>Details</th><th class="num">Date</th><th class="num">Amount</th><th>Opens</th>
+    {% elif g.type == 'division' %}<th>Code</th><th>Division</th>
+    {% else %}<th>Page</th><th>Section</th>{% endif %}
+  </tr></thead><tbody>
+  {% for r in g.items %}<tr>
+    {% if g.type == 'project' %}
+      <td class="num-col"><a href="{{ r.url }}">{{ r.number|hl:q }}</a></td>
+      <td><a href="{{ r.url }}" style="color:inherit">{{ r.title|hl:q }}</a>{% if r.note %} <span class="muted">· {{ r.note|hl:q }}</span>{% endif %}</td>
+      <td>{{ r.customer }}</td><td class="num-col">{{ r.division }}</td>
+      <td><span class="tag {{ r.state_key }}">{{ r.state }}</span></td><td>{{ r.pm }}</td>
+      <td class="num muted">{% if r.last %}{{ r.last|date:"M j, Y" }}{% else %}—{% endif %}</td>
+    {% elif g.type == 'person' %}
+      <td><a href="{{ r.url }}">{{ r.title|hl:q }}</a></td><td>{{ r.role }}</td><td>{{ r.classification }}</td><td>{{ r.division }}</td>
+      <td>{% if r.active %}<span class="tag low">active</span>{% else %}<span class="tag">inactive</span>{% endif %}</td>
+    {% elif g.type == 'customer' %}
+      <td><a href="{{ r.url }}">{{ r.title|hl:q }}</a></td><td>{{ r.sector }}</td><td>{{ r.place }}</td>
+      <td class="num">{{ r.open_jobs|default:"—" }}</td><td class="num">{{ r.jobs|default:"—" }}</td>
+      <td>{% if r.active %}<span class="tag low">active</span>{% else %}<span class="tag">inactive</span>{% endif %}</td>
+    {% elif g.type == 'vendor' %}
+      <td><a href="{{ r.url }}">{{ r.title|hl:q }}</a></td><td>{{ r.place }}</td>
+      <td>{% if r.active %}<span class="tag low">active</span>{% else %}<span class="tag">inactive</span>{% endif %}</td>
+    {% elif g.type == 'order' %}
+      <td class="num-col"><a href="{{ r.url }}">{{ r.number|hl:q }}</a></td><td>{{ r.kind }}</td><td>{{ r.title|hl:q }}</td><td>{{ r.company|hl:q }}</td>
+      <td>{{ r.status }}</td><td>{{ r.po|hl:q }}</td><td>{{ r.rep }}</td><td class="num muted">{% if r.when %}{{ r.when|date:"M j, Y" }}{% else %}—{% endif %}</td>
+    {% elif g.type == 'document' %}
+      <td class="num-col"><a href="{{ r.url }}">{{ r.number|hl:q }}</a></td><td><span class="tag">{{ r.kind }}</span></td>
+      <td><a href="{{ r.url }}" style="color:inherit">{{ r.title|hl:q }}</a></td><td class="muted">{{ r.sub|hl:q }}</td>
+      <td class="num muted">{% if r.when %}{{ r.when|date:"M j, Y" }}{% else %}—{% endif %}</td><td class="num">{% if r.amount != None %}{{ r.amount|money }}{% else %}—{% endif %}</td>
+      <td class="muted">{{ r.opens }}</td>
+    {% elif g.type == 'division' %}
+      <td class="num-col"><a href="{{ r.url }}">{{ r.number|hl:q }}</a></td><td><a href="{{ r.url }}" style="color:inherit">{{ r.title|hl:q }}</a></td>
+    {% else %}
+      <td><a href="{{ r.url }}">{{ r.title|hl:q }}</a></td><td class="muted">{{ r.group }}</td>
+    {% endif %}
+  </tr>{% endfor %}
+  </tbody></table></div>
+</div>
+{% endfor %}
+{% elif not q %}
+<div class="card" style="margin-top:14px"><div class="empty-big"><b>Search everything</b>Start typing in the box above, or press <kbd class="gs-foot" style="display:inline;padding:2px 6px">⌘K</kbd> from any page.</div>
+  <div class="tips">
+    <div><b>Project numbers</b>Any leading digits — 2652 lists every job starting 2652; 260071-000000 and 260071 are different jobs.</div>
+    <div><b>Names</b>Words in any order: “security cps” finds CPS security jobs; first or last names find people.</div>
+    <div><b>Document numbers</b>Shippers (SH…), SL orders (ORD…), invoices (IN…), payments, AP vouchers and vendor invoice numbers, checks, POs, serials — the digits alone work too (83034 finds SH00083034). Each opens the page that shows it and flashes the row.</div>
+    <div><b>Pages</b>“wip”, “receivables”, “map”, “vendors” jump straight to the page.</div>
+  </div></div>
+{% endif %}
+</div>
+{% endblock %}

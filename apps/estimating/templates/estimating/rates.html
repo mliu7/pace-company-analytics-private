@@ -1,0 +1,31 @@
+{% extends "dashboard/base.html" %}{% load humanize pca static %}
+{% block title %}Labor rates · Pace Company Analytics{% endblock %}
+{% block extra_css %}@import url("{% static 'estimating/estimating.css' %}");{% endblock %}
+{% block content %}
+<div class="topbar"><div class="title"><h1>Labor rate card</h1><small>Cost and sell per hour for the 11 labor types every estimate line can carry (6 union, 5 non-union). Effective-dated: a change takes effect on the date you give and the builder prices labor at the card in force today; older saves keep the rates they were saved with in their version snapshot. <a href="{% url 'estimating:estimating_home' %}">Catalog</a> · <a href="{% url 'estimating:estimating_estimates' %}">Estimates</a></small></div></div>
+{% if saved %}<div class="note" style="margin-bottom:8px"><span class="pos">Saved — {{ saved }} rate row{{ saved|pluralize }} written.</span></div>{% endif %}
+{% for n in card_notes %}<div class="warnbox" style="margin:0 0 10px">{{ n.text }}</div>{% endfor %}
+<div class="est-layout" style="grid-template-columns: minmax(0,1fr) 380px">
+<div class="card tight">
+<form method="post" action="{% url 'estimating:estimating_rates_save' %}" id="rateform">{% csrf_token %}
+<div class="row" style="justify-content:space-between;margin-bottom:8px"><h2 style="margin:0">Costing values <small>hover a heading for the definition</small></h2>
+  {% if can_write %}<span class="row" style="gap:6px"><label class="note" title="Date the new rates take effect (today by default)">Effective <input type="date" name="effective_from" value="{{ today|date:'Y-m-d' }}"></label><button class="btn primary" type="submit" title="Write the changed rates, effective on that date">Save rates</button><button class="btn small" type="submit" name="action" value="reset" title="Write the dashboard's default card (Union 92/125 · Engineering 78/135 · Fabrication 45.60/77 · Programming, Commissioning, Service 58/135) effective on that date" onclick="return confirm('Reset every rate to the defaults, effective on the chosen date?')">Reset defaults</button></span>{% endif %}
+</div>
+<table class="data dense"><thead><tr><th title="Labor type as it appears in the builder columns and the exports">Costing value</th><th title="Union types are field trades; non-union are shop / engineering">Group</th><th class="num" title="What an hour costs Pace">Cost / h</th><th class="num" title="What an hour is sold at">Sell / h</th><th class="num" title="(sell − cost) ÷ sell">Margin</th><th class="num" title="sell ÷ cost">Markup</th><th title="Date this rate came into force (default = the dashboard's card)">Effective</th><th title="The dashboard's DEFAULT_COSTING for comparison">Default</th></tr></thead><tbody>
+{% regroup rates by group_label as groups %}{% for g in groups %}<tr><td colspan="8" style="background:#eef2f7;font-weight:700;font-size:11px;letter-spacing:.06em;text-transform:uppercase">{{ g.grouper }}</td></tr>
+{% for r in g.list %}<tr><td><b>{{ r.label }}</b> <span class="muted mono" style="font-size:11px">{{ r.rate_id }}</span></td><td>{{ r.group_label }}</td>
+<td class="num">{% if can_write %}<input class="rate-input" name="cost_{{ r.rate_id }}" type="number" step="0.01" min="0" value="{{ r.cost }}" data-orig="{{ r.cost }}">{% else %}{{ r.cost|money:2 }}{% endif %}</td>
+<td class="num">{% if can_write %}<input class="rate-input" name="sell_{{ r.rate_id }}" type="number" step="0.01" min="0" value="{{ r.sell }}" data-orig="{{ r.sell }}">{% else %}{{ r.sell|money:2 }}{% endif %}</td>
+<td class="num">{{ r.margin }}</td><td class="num">{% if r.markup %}{{ r.markup|floatformat:3 }}{% endif %}</td><td>{% if r.effective_from %}{{ r.effective_from|date:"M j, Y" }}{% else %}<span class="muted">default</span>{% endif %}{% if r.default %} <span class="tag ok" title="Equals the dashboard default">default</span>{% endif %}</td><td class="muted">{{ r.default_cost|money:2 }} / {{ r.default_sell|money:2 }}</td></tr>{% endfor %}{% endfor %}
+</tbody></table>
+</form>
+<div class="note" style="margin-top:8px">Labor units on a line are <b>hours for that line</b> — never multiplied by the product quantity: 0 hides the group, 1 exports exactly one hour. The Excel layout the dashboard previewed (Equipment · Fabrication · Field Labor · AV Field Labor · Programming · Proj Mgmt · Eng/Doc/QC · A Card Labor × Cost / Cost Extended / Markup / Sell / Sell Extended) is what the <b>Detail CSV</b> export writes per labor type.</div>
+</div>
+<div>
+  <div class="notes-box"><b>Estimator Notes</b> <span class="note">policy — enforced as warnings on every estimate, never blocking</span><ul>{% for n in notes %}<li>{{ n }}</li>{% endfor %}</ul></div>
+  <div class="card tight" style="margin-top:10px"><h2>Rate history <small>newest first</small></h2>
+  <div class="table-wrap" style="max-height:44vh"><table class="data dense hist"><thead><tr><th>Effective</th><th>Type</th><th class="num">Cost</th><th class="num">Sell</th><th>Set by</th></tr></thead><tbody>{% for h in history %}<tr><td>{{ h.effective_from|date:"M j, Y" }}</td><td>{{ h.label }} <span class="muted">{{ h.group }}</span></td><td class="num">{{ h.cost|money:2 }}</td><td class="num">{{ h.sell|money:2 }}</td><td>{{ h.set_by.display_name|default:"seed" }}</td></tr>{% endfor %}</tbody></table></div></div>
+</div>
+</div>
+{% endblock %}
+{% block scripts %}<script>document.querySelectorAll('.rate-input').forEach(i => i.addEventListener('input', () => i.classList.toggle('changed', i.value !== i.dataset.orig)));</script>{% endblock %}

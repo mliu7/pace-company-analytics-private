@@ -1,0 +1,132 @@
+{% load humanize pca %}
+{# Balance-sheet side breakdown (liabilities / assets) — modal fragment, also embedded by finance_ledger_page.html. Context: apps.dashboard.views._ledger_breakdown_view; `side` = the module SPEC. #}
+<div class="liab" id="liab">
+{% if not standalone %}
+  <div class="fin-modal-head">
+    <h2>{{ side.title }}</h2>
+    <span class="muted">{{ total|money }} · as of {{ snap.as_of|date:"M j, g:i A" }} · {{ side.population }}</span>
+    <a href="{{ page_url }}?page=1" class="btn small" style="margin-left:auto" title="Open this breakdown as its own bookmarkable page.">open as page ↗</a>
+    <a href="#" class="fin-modal-close" data-liab-close style="margin-left:0">✕</a>
+  </div>
+  {% if viewed_date %}<div class="callout warn" style="margin:0 0 10px">Today's ledger (SL pull {{ snap.as_of|date:"D M j, g:i A" }}). The account-level breakdown is not stored day by day, so this explains today's total {{ side.label }} of {{ total|money }}{% if viewed_headline != None %}{% if viewed_headline == headline %} — unchanged since {{ viewed_date|date:"M j" }}{% else %}, not {{ viewed_date|date:"M j" }}'s {{ viewed_headline|money }}{% endif %}{% endif %}.</div>{% endif %}
+{% endif %}
+  <div class="liab-body">
+    <div class="liab-bar" title="Share of total {{ side.label }} by group. Click a segment to jump to it.">{% for g in groups %}{% if g.bar_pct %}<span class="seg" style="width:{{ g.bar_pct|floatformat:2 }}%;background:{{ g.color }}" data-liab-jump="{{ g.key }}" title="{{ g.label }} · {{ g.total|money }} · {% if g.share|absolute < 0.005 %}<1%{% else %}{{ g.share|pct:0 }}{% endif %}"></span>{% endif %}{% endfor %}</div>
+    <div class="liab-legend">{% for g in groups %}<a href="#" class="item" data-liab-jump="{{ g.key }}" title="{{ g.blurb }}"><i style="background:{{ g.color }}"></i>{{ g.label }} <b>{{ g.total|money }}</b> <span class="muted">{% if g.share|absolute < 0.005 %}&lt;1%{% else %}{{ g.share|pct:0 }}{% endif %}</span></a>{% endfor %}</div>
+    {% if negatives %}<div class="note" style="margin:-6px 0 10px">{% for g in negatives %}{{ g.label }} nets to {{ g.total|money }} ({{ side.neg_note }}), so it is not drawn in the bar.{% endfor %}</div>{% endif %}
+    {% if identity_gap and identity_gap|absolute > 0.5 %}<div class="note" style="margin:-6px 0 10px;color:var(--bad)">The accounts here sum to {{ total|money }} vs {{ headline|money }} on the snapshot ({{ identity_gap|signed_money }}) — the ledger copy moved since the snapshot was built; hit Refresh now on the snapshot page.</div>{% endif %}
+
+    <div class="liab-tiles">
+      <div class="liab-tile" title="Sum of {{ side.population }} — the figure on the balance-sheet card."><div class="label">Total {{ side.label }}</div><div class="val">{{ total|money }}</div><div class="sub">{{ total_sub }}</div></div>
+      <div class="liab-tile" title="Change since the previous live snapshot ({{ prev.as_of|date:'D M j, g:i A' }}) — the same chip as on the card. Per-account day changes below are the postings entered between the two pulls."><div class="label">vs prior day</div><div class="val {{ ladder.day|dcls:side.inv }}">{{ ladder.day|signed_money }}</div><div class="sub">{% if prev %}since {{ prev.as_of|date:"M j, g:i A" }}{% else %}no prior snapshot{% endif %}</div></div>
+      <div class="liab-tile" title="Net postings to these accounts in the current fiscal period ({{ snap.snapshot_date|date:'F' }}) — AcctHist period-to-date."><div class="label">Month to date</div><div class="val {{ ladder.mtd|dcls:side.inv }}">{{ ladder.mtd|signed_money }}</div><div class="sub">{{ snap.snapshot_date|date:"F" }} postings</div></div>
+      <div class="liab-tile" title="Balance today minus the fiscal-year beginning balance (Dec 31 close)."><div class="label">Since Dec 31</div><div class="val {{ ladder.ytd|dcls:side.inv }}">{{ ladder.ytd|signed_money }}</div><div class="sub">year-to-date change</div></div>
+      <div class="liab-tile" title="Balance today minus the month-end balance twelve months ago."><div class="label">vs 12 months ago</div><div class="val {{ ladder.year_ago|dcls:side.inv }}">{{ ladder.year_ago|signed_money }}</div><div class="sub">same month last year</div></div>
+    </div>
+    <div class="liab-movers">
+      <span title="The accounts that moved most since Dec 31.">Since Dec 31:</span> {% for a in movers.ytd %}<b class="{{ a.ytd|dcls:side.inv }}">{{ a.name }} {{ a.ytd|signed_money }}</b>{% if not forloop.last %} · {% endif %}{% endfor %}
+      {% if movers.mtd %}<br><span title="The accounts that moved most in the current fiscal period.">Month to date:</span> {% for a in movers.mtd %}<b class="{{ a.mtd|dcls:side.inv }}">{{ a.name }} {{ a.mtd|signed_money }}</b>{% if not forloop.last %} · {% endif %}{% endfor %}{% endif %}
+      {% if movers.day %}<br><span title="Postings entered between the previous pull and this one.">Since prior pull:</span> {% for a in movers.day %}<b class="{{ a.day|dcls:side.inv }}">{{ a.name }} {{ a.day|signed_money }}</b>{% if not forloop.last %} · {% endif %}{% endfor %}{% endif %}
+    </div>
+
+    <div class="tabs liab-tabs">
+      <a data-liab-tab="breakdown" class="active" title="Every liability account, grouped, with balance, share, changes and a 20-month trend. Click a group to collapse it, an account for its story, subaccounts, year-ends, chart and ledger activity.">Breakdown</a>
+      <a data-liab-tab="sub" title="The subledger behind account {{ side.sub_tab.acct }} — document by document, and how it bridges to the ledger.">{{ side.sub_tab.label }} · {{ sub_total|money_k }}</a>
+      <a data-liab-tab="trend" title="Month-end balance of each group over the last 20 months, stacked, and the year-end history.">Trend · 20 months</a>
+    </div>
+
+    {# ------------------------------------------------------------------ breakdown #}
+    <div class="liab-tab" data-tab="breakdown">
+    <table class="data dense liab-table">
+      <thead><tr>
+        <th>Account</th>
+        <th class="num" title="Natural-sign ledger balance today.">Balance</th>
+        <th class="num" title="Share of total liabilities.">Share</th>
+        <th class="num" title="Postings entered between the previous live pull and this one (net change in the balance).">Δ day</th>
+        <th class="num" title="Net postings in the current fiscal period.">Δ MTD</th>
+        <th class="num" title="Balance today minus the Dec 31 close.">Δ since Dec 31</th>
+        <th class="num" title="Balance today minus the month-end balance twelve months ago.">vs year ago</th>
+        <th title="Month-end balance, last 20 months (each line scaled to its own range).">Trend</th>
+      </tr></thead>
+      <tbody>
+      {% for g in groups %}
+      <tr class="liab-group" id="liab-g-{{ g.key }}" data-group="{{ g.key }}" data-open="1" title="{{ g.blurb }}">
+        <td><span class="caret">▾</span><i class="sw" style="background:{{ g.color }}"></i><b>{{ g.label }}</b> <span class="muted">{{ g.n_active }} account{{ g.n_active|pluralize }}{% if g.n_cleared %} · {{ g.n_cleared }} at $0{% endif %}</span></td>
+        <td class="num"><b>{{ g.total|money }}</b></td>
+        <td class="num muted">{% if g.share|absolute < 0.005 %}&lt;1%{% else %}{{ g.share|pct:0 }}{% endif %}</td>
+        <td class="num {{ g.day|dcls:side.inv }}">{% if g.day %}{{ g.day|signed_money }}{% else %}<span class="muted">–</span>{% endif %}</td>
+        <td class="num {{ g.mtd|dcls:side.inv }}">{{ g.mtd|signed_money }}</td>
+        <td class="num {{ g.ytd|dcls:side.inv }}">{{ g.ytd|signed_money }}</td>
+        <td class="num {{ g.vs_year_ago|dcls:side.inv }}">{% if g.vs_year_ago != None %}{{ g.vs_year_ago|signed_money }}{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td><svg class="spark" viewBox="0 0 96 22" style="stroke:{{ g.color }}"><polyline points="{{ g.spark }}"/></svg></td>
+      </tr>
+      {% for a in g.accounts %}
+      <tr class="liab-acct{% if not a.active %} liab-cleared{% endif %}" data-group="{{ g.key }}" data-acct="{{ a.acct }}"{% if not a.active %} hidden{% endif %} title="{{ a.explain|default:a.descr }}">
+        <td class="liab-indent"><span class="caret">▸</span><span class="mono muted">{{ a.acct }}</span> {{ a.name }}{% if a.subs|length > 1 %} <span class="tag" title="Balance is spread over {{ a.subs|length }} subaccounts — expand for the split.">{{ a.subs|length }} subs</span>{% endif %}</td>
+        <td class="num">{{ a.balance|money }}</td>
+        <td class="num muted">{% if a.share|absolute >= 0.005 %}{{ a.share|pct:0 }}{% else %}<span class="muted">&lt;1%</span>{% endif %}</td>
+        <td class="num {{ a.day|dcls:side.inv }}">{% if a.day %}{{ a.day|signed_money }}{% else %}<span class="muted">–</span>{% endif %}</td>
+        <td class="num {{ a.mtd|dcls:side.inv }}">{% if a.mtd %}{{ a.mtd|signed_money }}{% else %}<span class="muted">–</span>{% endif %}</td>
+        <td class="num {{ a.ytd|dcls:side.inv }}">{% if a.ytd %}{{ a.ytd|signed_money }}{% else %}<span class="muted">–</span>{% endif %}</td>
+        <td class="num {{ a.vs_year_ago|dcls:side.inv }}">{% if a.vs_year_ago %}{{ a.vs_year_ago|signed_money }}{% else %}<span class="muted">–</span>{% endif %}</td>
+        <td><svg class="spark" viewBox="0 0 96 22"><polyline points="{{ a.spark }}"/></svg></td>
+      </tr>
+      <tr class="liab-detail" data-group="{{ g.key }}" data-for="{{ a.acct }}" hidden><td colspan="8">
+        <div class="liab-detail-grid">
+          <div>
+            <p class="explain">{% if a.explain %}{{ a.explain }}{% else %}GL account {{ a.acct }} “{{ a.descr }}” — no plain-English note yet.{% endif %}</p>
+            {% if a.subs|length > 1 %}
+            <h4>By subaccount</h4>
+            <table class="data dense"><tbody>{% for s in a.subs %}<tr><td class="mono">{{ s.sub }}</td><td class="num">{{ s.bal|money }}</td></tr>{% endfor %}</tbody></table>
+            {% endif %}
+            <h4>Year-end balances</h4>
+            <table class="data dense"><thead><tr>{% for y in years %}<th class="num">Dec {{ y }}</th>{% endfor %}<th class="num">Today</th></tr></thead>
+              <tbody><tr>{% for y in years %}<td class="num muted">{{ a.ye|getitem:y|money }}</td>{% endfor %}<td class="num"><b>{{ a.balance|money }}</b></td></tr></tbody></table>
+            <h4>Month-end balance · 20 months</h4>
+            <div class="chart" style="height:130px"><canvas data-liab-chart="{{ a.acct }}"></canvas></div>
+          </div>
+          <div>
+            <h4>Ledger activity · since {{ activity_since|date:"M j" }}</h4>
+            {% if a.activity %}
+            <div class="note" style="margin-bottom:6px">{{ a.activity.n }} posting{{ a.activity.n|pluralize }} · modules {{ a.activity.modules }} · <span class="{% if side.inv %}neg{% else %}pos{% endif %}">↑ {{ a.activity.up|money }}</span> {{ side.up_word }} · <span class="{% if side.inv %}pos{% else %}neg{% endif %}">↓ {{ a.activity.down|money }}</span> {{ side.down_word }} · last {{ a.activity.last_date|date:"M j" }}</div>
+            <table class="data dense"><thead><tr><th>Date</th><th>Mod</th><th>Ref</th><th>Description</th><th class="num" title="Positive = the balance went up.">{{ side.change_label }}</th></tr></thead><tbody>
+              {% for p in a.postings %}<tr><td style="white-space:nowrap">{{ p.tran_date|date:"M j" }}</td><td class="muted">{{ p.module }}</td><td class="mono">{{ p.ref_nbr|default:p.batch_nbr }}</td><td class="trunc fluid" style="width:55%" title="{{ p.tran_desc }}">{{ p.tran_desc|default:"—" }}</td><td class="num {{ p.amt|dcls:side.inv }}">{{ p.amt|signed_money }}</td></tr>{% endfor %}
+            </tbody></table>
+            <div class="note" style="margin-top:4px">largest {{ a.postings|length }} shown · <a href="#" class="drill" data-kind="gl_acct" data-acct="{{ a.acct }}" data-title="{{ a.acct }} {{ a.name }} — ledger postings since {{ activity_since|date:'M j' }}">all {{ a.activity.n }} postings →</a></div>
+            {% else %}<div class="note">No postings in the window — the balance has not moved since {{ activity_since|date:"M j" }}.</div>{% endif %}
+            {% if a.acct == side.sub_tab.acct %}<div class="note" style="margin-top:8px"><a href="#" class="h3link" data-liab-tab="sub">{{ side.sub_tab.link_label }}</a></div>{% endif %}
+            {% for lbl, href in a.links %}<div class="note" style="margin-top:6px"><a href="{{ href }}" class="h3link">{{ lbl }}</a></div>{% endfor %}
+            {% if a.acct == '20500' and tax_by_jurisdiction %}
+            <h4>Collected by jurisdiction · since {{ activity_since|date:"M j" }}</h4>
+            <table class="data dense"><tbody>{% for t in tax_by_jurisdiction %}<tr><td>{{ t.tran_desc|default:"(blank)" }}</td><td class="num muted">{{ t.n }}</td><td class="num">{{ t.amt|money }}</td></tr>{% endfor %}</tbody></table>
+            {% endif %}
+          </div>
+        </div>
+      </td></tr>
+      {% endfor %}
+      {% if g.n_cleared %}<tr class="liab-more" data-group="{{ g.key }}"><td colspan="8" class="liab-indent"><a href="#" data-liab-more="{{ g.key }}" class="muted">+ show {{ g.n_cleared }} account{{ g.n_cleared|pluralize }} at $0 with no recent activity</a></td></tr>{% endif %}
+      {% endfor %}
+      </tbody>
+      <tfoot><tr><td>Total {{ side.label }}</td><td class="num">{{ total|money }}</td><td class="num">100%</td>
+        <td class="num {{ ladder.day|dcls:side.inv }}">{{ ladder.day|signed_money }}</td><td class="num {{ ladder.mtd|dcls:side.inv }}">{{ ladder.mtd|signed_money }}</td>
+        <td class="num {{ ladder.ytd|dcls:side.inv }}">{{ ladder.ytd|signed_money }}</td><td class="num {{ ladder.year_ago|dcls:side.inv }}">{{ ladder.year_ago|signed_money }}</td><td></td></tr></tfoot>
+    </table>
+    <div class="note" style="margin-top:6px">{{ side.sign_note }} Groups partition {{ side.population }}, so they reconcile to the headline by construction. {% if not has_activity %}Ledger activity appears after the next finance refresh.{% endif %}</div>
+    </div>
+
+    {# ------------------------------------------------------------------ subledger (AP / AR) #}
+    <div class="liab-tab" data-tab="sub" hidden>
+{% include side.sub_tab.template %}
+    </div>
+
+    {# ------------------------------------------------------------------ trend #}
+    <div class="liab-tab" data-tab="trend" hidden>
+    <div class="chart" style="height:280px" title="Month-end balance by group, stacked; the line is the total. Hover for values."><canvas id="liab-trend"></canvas></div>
+    <table class="data dense" style="margin-top:10px"><thead><tr><th>Group</th>{% for y in years %}<th class="num">Dec {{ y }}</th>{% endfor %}<th class="num">Today</th><th class="num">Δ since Dec 31</th><th class="num">vs year ago</th></tr></thead><tbody>
+      {% for g in groups %}<tr><td><i class="sw" style="background:{{ g.color }}"></i>{{ g.label }}</td>{% for y in years %}<td class="num muted">{{ g.ye|getitem:y|money }}</td>{% endfor %}<td class="num"><b>{{ g.total|money }}</b></td><td class="num {{ g.ytd|dcls:side.inv }}">{{ g.ytd|signed_money }}</td><td class="num {{ g.vs_year_ago|dcls:side.inv }}">{% if g.vs_year_ago != None %}{{ g.vs_year_ago|signed_money }}{% else %}—{% endif %}</td></tr>{% endfor %}
+    </tbody><tfoot><tr><td>Total</td>{% for y in years %}<td class="num">{{ ye_totals|getitem:y|money }}</td>{% endfor %}<td class="num">{{ total|money }}</td><td class="num {{ ladder.ytd|dcls:side.inv }}">{{ ladder.ytd|signed_money }}</td><td class="num {{ ladder.year_ago|dcls:side.inv }}">{{ ladder.year_ago|signed_money }}</td></tr></tfoot></table>
+    <div class="note" style="margin-top:6px">Month-end balances from AcctHist (beginning balance + periods through the month; the 13th adjustment period is folded into December). The current month is the balance today.</div>
+    </div>
+  </div>
+  {{ chart|json_script:"liab-chart-data" }}
+</div>

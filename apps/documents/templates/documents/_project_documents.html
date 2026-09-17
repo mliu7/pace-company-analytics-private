@@ -1,0 +1,7 @@
+{% load humanize pca documents %}{% if acc.documents %}{% project_documents p as D %}{% if D.n %}
+<div class="card doc-card" id="documents" style="margin-bottom:14px">
+  <h2>Documents <small title="Files on SharePoint and the P: drive whose folder or file name carries this job's number (or a confirmed link). One click opens the file at the source with your own login.">{{ D.n }} file{{ D.n|pluralize }}{% if D.n_recent %} · <b>{{ D.n_recent }} changed in 14 days</b>{% endif %}{% if D.low %} · {{ D.low }} to check{% endif %} · <a href="{{ D.page_url }}">browse</a></small></h2>
+  <style>{% include "documents/_css.html" %}</style>
+  {% if D.recent %}<div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:8px;font-size:12.5px"><span class="muted">Recently changed:</span>{% for f in D.recent %}<a href="{{ f.preview_url }}" title="{{ f.path }} · {{ f.mtime|date:'M j, g:i a' }}{% if f.modified_by %} by {{ f.modified_by }}{% endif %}">{{ f.name|truncatechars:40 }}</a>{% if not forloop.last %}<span class="muted">·</span>{% endif %}{% endfor %}</div>{% endif %}
+  {% include "documents/_file_groups.html" with D=D scope="pdocs" %}
+</div>{% endif %}{% endif %}

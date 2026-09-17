@@ -1,0 +1,287 @@
+{% extends "dashboard/base.html" %}{% load humanize pca %}
+{% block title %}Sales Tax · Pace Company Analytics{% endblock %}
+{% block content %}
+<div class="topbar">
+  <div class="title"><h1>Sales tax{% if focus_row %} <small style="display:inline;font-size:14px">· {{ focus_row.name }}</small>{% endif %}</h1>
+    <small>Everything behind GL 20500 ACCRUED SALES TAX, state by state: the tax charged on invoices, what was remitted to each state and for which period, fees, the accountants' adjustments, what is collected but not yet filed, the rate table SL prices from, sales into every state against the economic-nexus tests, and a rules reference. Every posting since 2012 is classified from the ledger's own descriptions (hover any figure for its definition); the state totals reconcile to the ledger balance. <b>Superadmin only.</b>{% if focus %} · <a href="{% url 'dashboard:finance_salestax' %}">all states</a>{% endif %}</small></div>
+  <div class="row">
+    <span class="pill info" title="The latest posting in the local copy of the 20500 ledger (refreshed three times a day with the finance refresh).">ledger through {{ as_of_run|date:"M j, Y" }}</span>
+    {% if kp.rec.ok %}<span class="pill good" title="Σ classified postings by fiscal year equals the AcctHist net change for every year on record ({{ kp.rec.years }} years) — the classification loses nothing.">reconciles to the ledger ✓</span>{% else %}<span class="pill bad" title="Largest yearly gap between the classified postings and AcctHist.">ledger gap {{ kp.rec.worst|money:2 }}</span>{% endif %}
+  </div>
+</div>
+
+<div class="grid kpi" style="margin-bottom:12px">
+  <div class="card kpi"><div class="label" title="GL 20500 ACCRUED SALES TAX as the ledger stands (AcctHist: FY{{ kp.fy }} beginning balance + every period posted). Credit balance = tax collected from customers and not yet remitted, plus the accountants' adjustments. The Daily Snapshot's liabilities breakdown shows the same account.">Set aside now</div>
+    <div class="value sm">{{ kp.balance|money }}</div><div class="sub">{% if kp.gap|floatformat:2 == '0.00' %}= Σ of the state balances below ✓{% else %}state balances sum to {{ kp.by_state_sum|money }} ({{ kp.gap|signed_money }} unattributed){% endif %}</div></div>
+  <div class="card kpi"><div class="label" title="Sales tax charged on invoices (less credit memos) posted in the last 12 fiscal periods.">Collected · 12 months</div>
+    <div class="value sm">{{ kp.collected12|money }}</div><div class="sub">{{ kp.n12|intcomma }} tax lines · {{ kp.states_collecting }} state{{ kp.states_collecting|pluralize }} · all-time {{ kp.collected_all|money_k }}</div></div>
+  <div class="card kpi"><div class="label" title="Payments to states booked against 20500 in the last 12 fiscal periods (journal entries and AP vouchers; reversals netted). Fees debited to the liability are shown separately.">Remitted · 12 months</div>
+    <div class="value sm">{{ kp.remitted12|money }}</div><div class="sub">{{ kp.n_rem12 }} payment{{ kp.n_rem12|pluralize }} · {{ kp.states_remitting }} state{{ kp.states_remitting|pluralize }}{% if kp.fees12 %} · <span class="neg">fees {{ kp.fees12|money }}</span>{% endif %} · all-time {{ kp.remitted_all|money_k }}</div></div>
+  <div class="card kpi"><div class="label" title="Tax collected in periods AFTER the last period each state's remittances cover — the part of the balance that is simply not filed yet. Only states with a sales tax; a state never remitted to counts every dollar collected.">Not yet filed</div>
+    <div class="value sm {% if kp.unfiled > 0 %}warn-ink{% endif %}">{{ kp.unfiled|money }}</div><div class="sub">{{ kp.unfiled_states }} state{{ kp.unfiled_states|pluralize }} · see the filing calendar</div></div>
+  <div class="card kpi"><div class="label" title="States where tax was collected in the last 12 months but no remittance has ever been booked — collected money that belongs to a state Pace is not paying.">Collecting, never remitted</div>
+    <div class="value sm {% if kp.never_remitted %}neg{% endif %}">{{ kp.never_remitted|length }}</div><div class="sub">{% for s in kp.never_remitted %}<a href="?state={{ s.state }}">{{ s.state }}</a> {{ s.collected12|money_k }}{% if not forloop.last %} · {% endif %}{% empty %}every collecting state has remittances{% endfor %}</div></div>
+  <div class="card kpi"><div class="label" title="The accountants' entries on 20500 in the last 12 periods other than invoices and payments: accruals of missed tax, corrections, year-end true-ups (positive raises the liability). Net-zero reclasses inside the account are excluded.">Adjustments · 12 months</div>
+    <div class="value sm {{ kp.adj12|posneg }}">{{ kp.adj12|signed_money }}</div><div class="sub">all-time {{ kp.adj_all|signed_money }} · <a href="#adjustments">list</a></div></div>
+</div>
+
+<div class="grid two" style="margin-bottom:12px">
+  <div class="card"><h2>The liability over time <small>month-end balance of 20500, seven years</small></h2><div class="chart" style="height:170px"><canvas id="c_bal"></canvas></div>
+    <div class="note" style="margin-top:6px">The balance climbs as tax is charged and drops when a state is paid; the big drops are catch-up payments and year-end adjustments (Dec 2024: $270,193 moved from the liability to 40000 SALES — see <a href="#adjustments">adjustments</a>).</div></div>
+  <div class="card"><h2>Collected vs remitted <small>by posting period, 24 months</small></h2><div class="chart" style="height:170px"><canvas id="c_months"></canvas></div>
+    <div class="note" style="margin-top:6px">Green = tax charged on invoices; red = paid to states; amber = adjustments and fees. Remittances lag collections by one to two months by design (the return for a month is due the next month).</div></div>
+</div>
+
+{% if focus_row %}
+<div class="card" style="margin-bottom:12px">
+  <h2>{{ focus_row.name }} <small>month by month · balance carried since the first posting{% if focus_row.rule %} · return due {{ focus_row.rule.due }} · allowance: {{ focus_row.rule.discount }} · <a href="{{ focus_row.rule.url }}" target="_blank" rel="noopener">state revenue site ↗</a>{% endif %}</small></h2>
+  <div class="row" style="gap:14px;flex-wrap:wrap;margin-bottom:8px">
+    <div class="wip-chip"><div class="label">Balance</div><div class="val {{ focus_row.balance|posneg }}">{{ focus_row.balance|money }}</div><div class="sub muted">collected {{ focus_row.collected|money_k }} − remitted {{ focus_row.remitted|money_k }}{% if focus_row.fees %} − fees {{ focus_row.fees|money_k }}{% endif %}{% if focus_row.adjustments %} {{ focus_row.adjustments|signed_money }} adj.{% endif %}</div></div>
+    <div class="wip-chip"><div class="label">Not yet filed</div><div class="val {% if focus_row.open_collected > 0 %}warn-ink{% endif %}">{{ focus_row.open_collected|money }}</div><div class="sub muted">{% if focus_row.open_months %}{{ focus_row.open_months }} period{{ focus_row.open_months|pluralize }} since {{ focus_row.open_first }}{% else %}covered by the last remittance{% endif %}</div></div>
+    <div class="wip-chip"><div class="label">Last remittance</div><div class="val">{% if focus_row.last_paid %}{{ focus_row.last_paid.amt|money }}{% else %}—{% endif %}</div><div class="sub muted">{% if focus_row.last_paid %}{{ focus_row.last_paid.tran_date|date:"M j, Y" }} · for {{ focus_row.last_paid.period_covered|slice:':4' }}-{{ focus_row.last_paid.period_covered|slice:'4:' }}{% if focus_row.last_paid.period_inferred %} (inferred){% endif %}{% else %}never{% endif %}</div></div>
+    <div class="wip-chip"><div class="label">Effective rate · 12 mo</div><div class="val">{% if focus_row.eff_rate != None %}{{ focus_row.eff_rate|pct:2 }}{% else %}—{% endif %}</div><div class="sub muted">tax ÷ taxable base on shipments{% if focus_row.rule %} · state base {{ focus_row.rule.base_rate }} %{% endif %}</div></div>
+  </div>
+  <div class="table-wrap" style="max-height:340px"><table class="data dense"><thead><tr><th>Period</th><th class="num">Collected</th><th class="num">Remitted</th><th class="num">Fees</th><th class="num">Adjustments</th><th class="num">Balance</th><th class="num">Lines</th></tr></thead><tbody>
+  {% for r in ledger reversed %}<tr><td>{{ r.label }}</td><td class="num">{% if r.collected %}{{ r.collected|money:2 }}{% else %}<span class="muted">—</span>{% endif %}</td><td class="num">{% if r.remitted %}{{ r.remitted|money:2 }}{% else %}<span class="muted">—</span>{% endif %}</td><td class="num">{% if r.fee %}{{ r.fee|money:2 }}{% else %}<span class="muted">—</span>{% endif %}</td><td class="num {{ r.adjustment|posneg }}">{% if r.adjustment %}{{ r.adjustment|signed_money }}{% else %}<span class="muted">—</span>{% endif %}</td><td class="num {{ r.balance|posneg }}"><b>{{ r.balance|money }}</b></td><td class="num muted">{{ r.n }}</td></tr>{% endfor %}
+  </tbody></table></div>
+</div>
+{% endif %}
+
+<div class="card" style="margin-bottom:12px">
+  <h2>By state <small>{{ states|length }} row{{ states|length|pluralize }} · every state with a posting since 2012 · click a state for its month-by-month ledger, remittances and recent invoices</small></h2>
+  <div class="table-wrap tall"><table class="data dense" id="sttable"><thead><tr>
+    <th title="Sales tax charged on invoices shipped into the state (credit memos net). State from the shipper's ZIP-based tax ID, else the posting description, else the ship-to / customer state.">State</th>
+    <th class="num" title="Collected in the last 12 posting periods.">Collected 12 mo</th>
+    <th class="num" title="Remitted in the last 12 posting periods.">Remitted 12 mo</th>
+    <th class="num" title="Collected − remitted − fees + adjustments over the whole history: what is still set aside for this state. Negative = paid more than was collected (over-paid, or collections booked without a state).">Balance</th>
+    <th class="num" title="Tax collected in periods after the last period a remittance covered — not filed yet.">Not filed</th>
+    <th title="Latest payment booked to the state: date, amount, the period it says it covers ('inferred' = the description named no period, so the month before the payment is assumed).">Last remittance</th>
+    <th class="num" title="Effective rate over the last 12 months: tax ÷ the shipments' taxable base.">Eff. rate</th>
+    <th class="num" title="State-level rate from the rules reference (local add-ons apply on top).">Base rate</th>
+    <th class="num" title="Distinct customers charged tax in the last 12 months.">Cust.</th>
+    <th title="Automatic checks: collecting but never remitted · months of collections not covered by a remittance · no state sales tax · remitted more than collected.">Flags</th>
+  </tr></thead><tbody>
+  {% for s in states %}<tr {% if s.state == focus %}style="background:#fffbe6"{% endif %}>
+    <td><a href="?state={{ s.state }}"><b>{{ s.state }}</b></a> <span class="muted">{{ s.name }}</span>{% if not s.taxes and s.state != '??' %} <span class="tag" title="No state sales tax.">no tax</span>{% endif %}{% if not s.active and s.state != '??' %} <span class="tag" title="No tax collected in the last 13 months.">inactive</span>{% endif %}</td>
+    <td class="num">{% if s.collected12 %}{{ s.collected12|money }}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num">{% if s.remitted12 %}{{ s.remitted12|money }}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num {% if s.balance < -100 %}neg{% elif s.balance > 0 %}{% endif %}"><b>{{ s.balance|money }}</b></td>
+    <td class="num {% if s.open_collected > 500 %}warn-ink{% endif %}" title="{% if s.open_months %}{{ s.open_months }} period{{ s.open_months|pluralize }} since {{ s.open_first }}{% endif %}">{% if s.open_collected %}{{ s.open_collected|money }}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td style="white-space:nowrap">{% if s.last_paid %}{{ s.last_paid.tran_date|date:"M j, Y" }} <span class="muted">{{ s.last_paid.amt|money_k }} · for {{ s.last_paid.period_covered|slice:'4:' }}/{{ s.last_paid.period_covered|slice:':4' }}{% if s.last_paid.period_inferred %} ?{% endif %}</span>{% if s.months_since_paid > 3 %} <span class="tag moderate" title="Months since the last payment.">{{ s.months_since_paid }} mo</span>{% endif %}{% elif s.state != '??' %}<span class="neg">never</span>{% endif %}</td>
+    <td class="num">{% if s.eff_rate != None %}{{ s.eff_rate|pct:2 }}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num muted">{% if s.rule %}{{ s.rule.base_rate }} %{% endif %}</td>
+    <td class="num muted">{{ s.customers12|default:"" }}</td>
+    <td style="white-space:normal">{% for cls, txt in s.flags %}<span class="ar-chip {% if cls == 'bad' %}neg{% elif cls == 'warn' %}{% else %}info{% endif %}" {% if cls == 'warn' %}style="background:var(--warn-bg);color:var(--warn);border-color:#f2dfb1"{% endif %}>{{ txt }}</span> {% endfor %}</td>
+  </tr>{% endfor %}
+  </tbody><tfoot><tr><td>Total</td><td class="num">{{ kp.collected12|money }}</td><td class="num">{{ kp.remitted12|money }}</td><td class="num">{{ kp.by_state_sum|money }}</td><td class="num">{{ kp.unfiled|money }}</td><td colspan="5" class="muted" style="font-weight:400">{% if kp.gap|floatformat:2 == '0.00' %}= the ledger balance{% else %}ledger {{ kp.balance|money }} · {{ kp.gap|signed_money }} sits on lines without a state{% endif %}</td></tr></tfoot></table></div>
+  <div class="chart" style="height:150px;margin-top:10px"><canvas id="c_states"></canvas></div>
+</div>
+
+<div class="card" style="margin-bottom:12px">
+  <h2>Filing calendar <small>what is owed next, per state · from the last period each state's remittance covered</small></h2>
+  <div class="table-wrap" style="max-height:420px"><table class="data dense"><thead><tr>
+    <th>State</th><th title="The latest period a remittance description said it covered.">Last period paid</th><th title="The period that should be filed next.">Next period</th>
+    <th class="num" title="Tax collected in every period after the last one paid.">Collected since</th><th class="num">Periods</th><th title="The state's return due date (rules reference — verify with the state).">Due</th><th title="Vendor / collection allowance the state offers for timely filing.">Discount</th><th>Flags</th>
+  </tr></thead><tbody>
+  {% for c in cal %}<tr>
+    <td><a href="?state={{ c.state }}"><b>{{ c.state }}</b></a> <span class="muted">{{ c.name }}</span>{% if not c.registered %} <span class="tag critical">never remitted</span>{% endif %}</td>
+    <td>{{ c.last_period|default:"—" }}{% if c.last_paid %} <span class="muted">paid {{ c.last_paid.tran_date|date:"M j" }}</span>{% endif %}</td>
+    <td>{{ c.next_period|default:"—" }}</td>
+    <td class="num {% if c.open_collected > 500 %}warn-ink{% endif %}">{{ c.open_collected|money }}</td>
+    <td class="num muted">{{ c.open_months|default:"" }}{% if c.open_first %} <span class="muted">from {{ c.open_first }}</span>{% endif %}</td>
+    <td class="muted" style="white-space:normal">{{ c.due }}</td><td class="muted" style="white-space:normal">{{ c.discount }}</td>
+    <td style="white-space:normal">{% for cls, txt in c.flags %}<span class="ar-chip {% if cls == 'bad' %}neg{% endif %}">{{ txt }}</span> {% endfor %}</td>
+  </tr>{% empty %}<tr><td colspan="8" class="empty">No state activity on record.</td></tr>{% endfor %}
+  </tbody></table></div>
+</div>
+
+<div class="grid two" style="margin-bottom:12px">
+  <div class="card">
+    <h2>Remittances <small>{% if focus %}{{ focus_row.name }} — every payment{% else %}the last 40 payments · every state{% endif %} · what the ledger says each one covered</small></h2>
+    <div class="table-wrap" style="max-height:460px"><table class="data dense"><thead><tr><th>Paid</th><th>State</th><th>For</th><th class="num">Amount</th><th>Entry</th><th>Keyed by</th></tr></thead><tbody>
+    {% for r in rem %}<tr>
+      <td style="white-space:nowrap">{{ r.tran_date|date:"M j, Y" }}</td>
+      <td><a href="?state={{ r.state }}">{{ r.state|default:"?" }}</a>{% if r.state_source != 'description' and r.state_source %} <span class="muted" title="How the state was read.">{{ r.state_source }}</span>{% endif %}</td>
+      <td>{{ r.period_label|default:"—" }}{% if r.period_inferred %} <span class="muted" title="The description named no period; the month before the payment is assumed.">?</span>{% endif %}</td>
+      <td class="num {% if r.kind == 'fee' %}neg{% endif %}">{{ r.amt|money:2 }}{% if r.kind == 'fee' %} <span class="tag critical">fee</span>{% endif %}{% if r.amt < 0 %} <span class="tag" title="A reversal.">rev</span>{% endif %}</td>
+      <td class="muted" title="{{ r.tran_desc }} · batch {{ r.batch_nbr }} · period {{ r.per_post }}">{{ r.module }} · {{ r.tran_desc }}{% if r.note %} <span class="tag">{{ r.note }}</span>{% endif %}</td>
+      <td class="muted">{{ r.crtd_user }}</td>
+    </tr>{% empty %}<tr><td colspan="6" class="empty">No remittances on record.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </div>
+  <div class="card">
+    <h2>By year <small>collected · remitted · fees · adjustments, by posting period</small></h2>
+    <table class="data dense"><thead><tr><th>Year</th><th class="num">Collected</th><th class="num">Remitted</th><th class="num">Payments</th><th class="num">States</th><th class="num">Fees</th><th class="num">Adjustments</th></tr></thead><tbody>
+    {% for y in rem_years %}<tr><td>{{ y.fy }}</td><td class="num">{{ y.collected|money }}</td><td class="num">{{ y.remitted|money }}</td><td class="num muted">{{ y.n }}</td><td class="num muted">{{ y.states }}</td><td class="num {% if y.fees %}neg{% else %}muted{% endif %}">{% if y.fees %}{{ y.fees|money }}{% else %}—{% endif %}</td><td class="num {{ y.adjustments|posneg }}">{% if y.adjustments %}{{ y.adjustments|signed_money }}{% else %}<span class="muted">—</span>{% endif %}</td></tr>{% endfor %}
+    </tbody></table>
+    <div class="note" style="margin-top:8px">Before July 2022 every invoice carried the flat Illinois rate (TAX2, 7.75 %) and the payments were booked as "RECORD SALES TAX PAYMENT" without a state — the page attributes those to Illinois. The nationwide ZIP-level rate table was loaded on 2022-07-19; state-coded remittances start in late 2022.</div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:12px" id="adjustments">
+  <h2>Adjustments and reclasses <small>the accountants' entries on 20500 other than invoices and payments · largest first</small></h2>
+  <div class="grid two">
+    <div><div class="table-wrap" style="max-height:380px"><table class="data dense"><thead><tr><th>Date</th><th>Entry</th><th>State</th><th class="num" title="Credit − debit: positive raises the liability.">Amount</th><th>Kind</th></tr></thead><tbody>
+    {% for a in adj %}<tr><td style="white-space:nowrap">{{ a.tran_date|date:"M j, Y" }}</td><td title="batch {{ a.batch_nbr }} · period {{ a.per_post }} · {{ a.crtd_user }}">{{ a.module }} · {{ a.tran_desc }}</td><td>{% if a.state %}<a href="?state={{ a.state }}">{{ a.state }}</a>{% else %}<span class="muted">—</span>{% endif %}</td><td class="num {{ a.amount|posneg }}">{{ a.amount|signed_money }}</td><td class="muted">{{ a.note|default:"adjustment" }}</td></tr>{% endfor %}
+    </tbody></table></div></div>
+    <div>
+      <table class="data dense"><thead><tr><th>Year</th><th class="num" title="Lines that move amounts inside 20500 and net to zero within their batch (subaccount reclasses, year-end regroupings).">Reclass lines</th><th class="num">Moved</th></tr></thead><tbody>
+      {% for r in recl %}<tr><td>{{ r.fy }}</td><td class="num muted">{{ r.n }}</td><td class="num muted">{{ r.moved|money }}</td></tr>{% endfor %}</tbody></table>
+      <div class="note" style="margin-top:8px">Reclasses net to zero and do not change what is owed. Adjustments do: a credit accrues tax that was not charged ("RECLASS MISSED SALES TAX"), a debit releases it — the 2024-12-31 "Accrual Adj" debited 20500 $270,193.45 and credited 40000 SALES in the same batch, i.e. the accountants decided that much of the accrued liability was not owed and recognised it as revenue. Fees (return fees, penalties) charged by a state and debited here are listed with the remittances.</div>
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:12px">
+  <h2>Sales into every state vs the economic-nexus test <small>trailing 12 months · sales-order invoices by ship-to state, project invoices by the customer's state</small></h2>
+  <div class="table-wrap" style="max-height:520px"><table class="data dense"><thead><tr>
+    <th>State</th><th class="num" title="Revenue on invoices into the state, last 12 months (credit memos net).">Sales 12 mo</th><th class="num" title="Invoices (count).">Invoices</th>
+    <th class="num" title="The state's economic-nexus test for remote sellers: sales, and transactions where the state still has that test. 'AND' = both must be met.">Nexus test</th>
+    <th class="num" title="Sales as a share of the dollar test.">Of test</th><th class="num" title="Tax on those invoices (the invoice lines).">Tax charged</th><th class="num" title="Remitted to the state in the last 12 periods.">Remitted</th>
+    <th class="num" title="SO1 hardware orders into the state with no tax line — customer exempt, resale, or missed. Project billings and SO2 project-material orders are not counted (real-property work).">Untaxed</th><th>Status</th>
+  </tr></thead><tbody>
+  {% for r in nexus %}{% if r.revenue or r.collected12 or r.remitted12 %}<tr>
+    <td><a href="?state={{ r.state }}"><b>{{ r.state }}</b></a> <span class="muted">{{ r.name }}</span>{% if not r.taxes %} <span class="tag">no tax</span>{% endif %}</td>
+    <td class="num">{{ r.revenue|money }}</td><td class="num muted">{{ r.txns }}</td>
+    <td class="num muted" style="white-space:nowrap">{% if r.rule.nexus_sales %}{{ r.rule.nexus_sales|money_k }}{% if r.rule.nexus_txns %} {% if r.rule.nexus_and %}AND{% else %}or{% endif %} {{ r.rule.nexus_txns }} txns{% endif %}{% else %}—{% endif %}</td>
+    <td class="num {% if r.over %}neg{% endif %}">{% if r.share != None %}{{ r.share|pct:0 }}{% if r.over %} <span class="tag critical">over</span>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num">{% if r.tax %}{{ r.tax|money }}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num">{% if r.remitted12 %}{{ r.remitted12|money }}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num {% if r.untaxed_sales and r.taxes %}warn-ink{% endif %}">{% if r.untaxed_txns %}{{ r.untaxed_txns }} · {{ r.untaxed_sales|money_k }}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td style="white-space:normal">{% for cls, txt in r.status %}<span class="ar-chip {% if cls == 'bad' %}neg{% elif cls == 'ok' %}pos{% endif %}">{{ txt }}</span> {% endfor %}</td>
+  </tr>{% endif %}{% endfor %}
+  {% if other_sales %}<tr><td class="muted">no state on the invoice or customer</td><td class="num muted">{{ other_sales.revenue|money }}</td><td class="num muted">{{ other_sales.txns }}</td><td colspan="6" class="muted">project invoices whose customer master has no state</td></tr>{% endif %}
+  </tbody></table></div>
+  <div class="note" style="margin-top:8px">Economic nexus (South Dakota v. Wayfair, 2018): once sales into a state pass its test in the current or previous calendar year, the seller must register, collect and remit there whether or not it has a location — a state where Pace has people or inventory has nexus regardless. "Over the test, no tax collected" is the exposure to look at first; "collecting, never remitted" is money already taken from customers. Thresholds are from the 2026 surveys (41 states at $100,000; California, Texas and New York at $500,000; Alabama and Mississippi at $250,000; Illinois dropped its 200-transaction test on 2026-01-01) — verify before acting.</div>
+</div>
+
+<div class="grid two" style="margin-bottom:12px">
+  <div class="card">
+    <h2>Untaxed hardware orders into states Pace remits to <small>sales-order invoices, last 12 months ·{{ untaxed_n.n }} invoice{{ untaxed_n.n|pluralize }} · {{ untaxed_n.s|money }} · largest {{ untaxed|length }}</small></h2>
+    <div class="table-wrap" style="max-height:420px"><table class="data dense"><thead><tr><th>Invoice</th><th>Customer</th><th>Ship-to</th><th>Job / order</th><th class="num">Revenue</th></tr></thead><tbody>
+    {% for u in untaxed %}<tr>
+      <td class="mono" title="Keyed by {{ u.crtd_user }}">{{ u.ref_nbr }} <span class="muted">{{ u.doc_date|date:"M j, y" }}</span></td>
+      <td class="trunc" style="max-width:220px">{% if u.cust_link and acc.customers %}<a href="{% url 'dashboard:customer_detail' u.cust_link %}">{{ u.customer }}</a>{% else %}{{ u.customer }}{% endif %}</td>
+      <td>{{ u.st }}{% if u.ship_city %} <span class="muted">{{ u.ship_city }}</span>{% endif %}</td>
+      <td>{% if u.cpn %}<a href="/projects/{{ u.cpn }}/">{{ u.project_id_raw }}</a>{% elif u.cnet_number and acc.sales010 %}<a href="{% url 'dashboard:sales010_order_detail' u.cnet_number %}">order {{ u.order_nbr }}</a>{% elif u.order_nbr %}<span class="muted">order {{ u.order_nbr }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="num">{{ u.revenue|money }}</td>
+    </tr>{% empty %}<tr><td colspan="5" class="empty">Every invoice into a remitting state carried tax.</td></tr>{% endfor %}
+    </tbody></table></div>
+    <div class="note" style="margin-top:8px">States Pace remits to: {{ remit_states|join:", " }}. Only SO1 orders (hardware sold and shipped) are counted: project progress billings and SO2 project-material orders are real-property work, where the contractor is the consumer of its materials in most states, so they carry no tax by design. An untaxed hardware order is right when the customer holds an exemption or resale certificate — and worth a look otherwise. SL's customer master records no exemption certificates (the exemption-number field is empty on every one of its 2,082 customers), so exempt status has to come from the accountants' certificate files — this list cannot tell an exempt customer from a missed one.</div>
+  </div>
+  <div class="card">
+    <h2>Customers charged the most tax <small>last 12 months</small></h2>
+    <div class="table-wrap" style="max-height:420px"><table class="data dense"><thead><tr><th>Customer</th><th>States</th><th class="num">Invoices</th><th class="num">Taxable</th><th class="num">Tax</th></tr></thead><tbody>
+    {% for c in custs %}<tr><td class="trunc" style="max-width:240px">{% if c.cust_link and acc.customers %}<a href="{% url 'dashboard:customer_detail' c.cust_link %}">{{ c.customer }}</a>{% else %}{{ c.customer }}{% endif %}{% if c.exempt %} <span class="tag moderate" title="Exemption number on the SL customer master: {{ c.exempt }}">exempt # on file</span>{% endif %}</td><td class="muted">{{ c.states }}</td><td class="num muted">{{ c.n }}</td><td class="num muted">{{ c.taxable|money }}</td><td class="num">{{ c.tax|money }}</td></tr>{% endfor %}
+    </tbody></table></div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:12px">
+  <h2>Recent taxed invoices <small>{% if focus %}{{ focus_row.name }} · {% endif %}last 120 days · the shipment's tax ID, rate and taxable base behind each 20500 line</small></h2>
+  <div class="table-wrap" style="max-height:460px"><table class="data dense"><thead><tr><th>Invoice</th><th>Customer</th><th>State</th><th>Ship-to · jurisdiction</th><th>Tax ID</th><th class="num">Rate</th><th class="num">Taxable</th><th class="num">Tax</th><th>Job / order</th></tr></thead><tbody>
+  {% for r in recent %}<tr>
+    <td class="mono">{{ r.ref_nbr }}{% if r.doc_type == 'CM' %} <span class="tag closed_stabilized">CM</span>{% endif %} <span class="muted">{{ r.tran_date|date:"M j" }}</span></td>
+    <td class="trunc" style="max-width:200px">{% if r.cust_link and acc.customers %}<a href="{% url 'dashboard:customer_detail' r.cust_link %}">{{ r.customer }}</a>{% else %}{{ r.customer }}{% endif %}{% if r.cust_exempt_nbr %} <span class="tag moderate" title="Exemption number on file: {{ r.cust_exempt_nbr }} — yet tax was charged.">exempt #</span>{% endif %}</td>
+    <td><a href="?state={{ r.state }}">{{ r.state|default:"?" }}</a> <span class="muted" title="How the state was read.">{{ r.state_source }}</span></td>
+    <td class="trunc" style="max-width:220px" title="{{ r.tran_desc }}">{% if r.ship_city %}{{ r.ship_city }}, {{ r.ship_state }} {{ r.ship_zip }} · {% endif %}<span class="muted">{{ r.tran_desc }}</span>{% if r.note %} <span class="tag">{{ r.note }}</span>{% endif %}</td>
+    <td class="mono muted">{{ r.tax_id|default:"—" }}</td>
+    <td class="num muted">{% if r.tax_rate != None %}{{ r.tax_rate|floatformat:2 }} %{% endif %}</td>
+    <td class="num muted">{% if r.taxable != None %}{{ r.taxable|money }}{% endif %}</td>
+    <td class="num {% if r.tax < 0 %}neg{% endif %}">{{ r.tax|money:2 }}</td>
+    <td>{% if r.cpn %}<a href="/projects/{{ r.cpn }}/">{{ r.project_id_raw }}</a>{% elif r.cnet_number and acc.sales010 %}<a href="{% url 'dashboard:sales010_order_detail' r.cnet_number %}">order {{ r.order_nbr }}</a>{% elif r.order_nbr %}<span class="muted">order {{ r.order_nbr }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+  </tr>{% empty %}<tr><td colspan="9" class="empty">No taxed invoices in the window.</td></tr>{% endfor %}
+  </tbody></table></div>
+</div>
+
+<div class="card" style="margin-bottom:12px">
+  <h2>Rates SL prices from <small>the SalesTax master: {{ master.n|intcomma }} tax IDs (one per ZIP), {{ master.states }} states, loaded {{ master.loaded|date:"M j, Y" }}, last refreshed {{ master.updated|date:"M j, Y" }} ({{ master.edited|intcomma }} rows changed since the load{% if master.scheduled %}, {{ master.scheduled }} with a scheduled change{% endif %})</small></h2>
+  <div class="grid two">
+    <div>
+      <h4 class="muted" style="margin:0 0 6px;font-size:11.5px;text-transform:uppercase;letter-spacing:.04em">Rate checks · last 12 months</h4>
+      {% if checks.mismatch %}<div class="note" style="margin-bottom:6px"><span class="warn-ink">{{ checks.mismatch|length }} shipment{{ checks.mismatch|length|pluralize }} priced at a rate that differs from the master's current rate for the same tax ID</span> (the master changed after the shipment, or was edited): net tax difference {{ checks.mismatch_total|signed_money }} at today's rates.</div>
+      <div class="table-wrap" style="max-height:220px"><table class="data dense"><thead><tr><th>Invoice</th><th>Ship-to</th><th>Tax ID</th><th class="num">Applied</th><th class="num">Master</th><th class="num">Taxable</th><th class="num">Δ tax</th></tr></thead><tbody>
+      {% for m in checks.mismatch %}<tr><td class="mono">{{ m.ref_nbr }} <span class="muted">{{ m.tran_date|date:"M j, y" }}</span></td><td>{{ m.ship_city }}, {{ m.ship_state }} {{ m.ship_zip }}</td><td class="mono muted">{{ m.tax_id }}</td><td class="num">{{ m.applied|floatformat:2 }} %</td><td class="num">{{ m.master|floatformat:2 }} %</td><td class="num muted">{{ m.taxable|money }}</td><td class="num {{ m.diff_tax|posneg }}">{{ m.diff_tax|signed_money }}</td></tr>{% endfor %}
+      </tbody></table></div>{% else %}<div class="note">Every shipment in the last 12 months was priced at the master's current rate for its tax ID.</div>{% endif %}
+      {% if checks.flat_out_of_state %}<div class="note" style="margin-top:8px"><span class="warn-ink">{{ checks.flat_out_of_state|length }} shipment{{ checks.flat_out_of_state|length|pluralize }} to another state were priced at the flat Illinois rate (TAX2)</span> — the destination state's rate should apply: {% for f in checks.flat_out_of_state|slice:":8" %}<span class="mono">{{ f.ref_nbr }}</span> {{ f.ship_state }} {{ f.tax|money }}{% if not forloop.last %} · {% endif %}{% endfor %}.</div>{% endif %}
+      {% if checks.zero_rate %}<div class="note" style="margin-top:8px"><span class="warn-ink">Tax IDs with a 0 % rate used in states that have a sales tax:</span> {% for z in checks.zero_rate %}<span class="mono">{{ z.tax_id }}</span> {{ z.descr }} ({{ z.n }} shipment{{ z.n|pluralize }}, {{ z.taxable|money }} taxable){% if not forloop.last %} · {% endif %}{% endfor %}.</div>{% endif %}
+      <h4 class="muted" style="margin:12px 0 6px;font-size:11.5px;text-transform:uppercase;letter-spacing:.04em">Hand-made tax IDs</h4>
+      <table class="data dense"><thead><tr><th>ID</th><th>Description</th><th>State</th><th class="num">Rate</th><th>Since</th></tr></thead><tbody>
+      {% for s in special %}<tr><td class="mono">{{ s.tax_id }}</td><td>{{ s.descr }}</td><td>{{ s.state|default:"—" }}</td><td class="num">{{ s.rate|floatformat:2 }} %</td><td class="muted">{{ s.sl_created_at|date:"M Y" }}</td></tr>{% endfor %}
+      </tbody></table>
+      <div class="note" style="margin-top:6px">TAX2 is the rate every Illinois order gets. Illinois sources in-state sales to the seller's location, so it should equal the combined rate at Pace's shipping location — verify it against the ZIP entry for that address in the master.</div>
+    </div>
+    <div>
+      <h4 class="muted" style="margin:0 0 6px;font-size:11.5px;text-transform:uppercase;letter-spacing:.04em">Tax IDs used most · last 12 months</h4>
+      <div class="table-wrap" style="max-height:420px"><table class="data dense"><thead><tr><th>Tax ID</th><th>Jurisdiction</th><th class="num">Master rate</th><th class="num">Applied</th><th class="num">Shipments</th><th class="num">Tax</th><th>Last</th></tr></thead><tbody>
+      {% for u in used %}<tr><td class="mono">{{ u.tax_id }}</td><td>{{ u.descr|default:"(not in the master)" }}</td><td class="num">{% if u.master_rate != None %}{{ u.master_rate|floatformat:2 }} %{% endif %}</td><td class="num muted">{% if u.applied_min != None %}{% if u.applied_min == u.applied_max %}{{ u.applied_min|floatformat:2 }} %{% else %}{{ u.applied_min|floatformat:2 }}–{{ u.applied_max|floatformat:2 }} %{% endif %}{% endif %}</td><td class="num muted">{{ u.n }}</td><td class="num">{{ u.collected|money }}</td><td class="muted">{{ u.last|date:"M j" }}</td></tr>{% endfor %}
+      </tbody></table></div>
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:12px">
+  <details data-remember="rules"><summary style="cursor:pointer"><h2 style="display:inline">State rules reference <small>all 50 states + DC · rates, nexus tests, sourcing, installation labor, contractor treatment, due dates, discounts · with Pace's own numbers alongside</small></h2></summary>
+  <div class="note" style="margin:8px 0"><b>Reference, not advice.</b> Compiled 2026-09-08 from the state revenue departments and the 2026 nexus surveys; local rates and rules change every quarter. Use it to know what question to ask, then verify with the state's site (linked) or the accountants before filing or changing how orders are priced. "Install labor" = separately stated labor to install equipment; "contractor" = how the state treats a contractor doing real-property work such as a security or AV installation.</div>
+  <div class="table-wrap" style="max-height:640px"><table class="data dense"><thead><tr>
+    <th>State</th><th class="num">Base rate</th><th>Local rates</th><th class="num">Nexus test</th><th>Sourcing</th><th>Install labor</th><th>Contractor</th><th>Return due</th><th>Discount</th>
+    <th class="num" title="Pace: revenue into the state, last 12 months.">Sales 12 mo</th><th class="num" title="Pace: tax collected, last 12 posting periods.">Collected</th><th class="num" title="Pace: remitted, last 12 posting periods.">Remitted</th>
+  </tr></thead><tbody>
+  {% for code, rule, s, n in rules_rows %}<tr>
+    <td style="white-space:nowrap"><a href="{{ rule.url }}" target="_blank" rel="noopener" title="{{ rule.url }}"><b>{{ code }}</b></a> {{ rule.name }}{% if code in no_tax %} <span class="tag">no tax</span>{% endif %}</td>
+    <td class="num">{% if rule.base_rate %}{{ rule.base_rate }} %{% else %}—{% endif %}</td>
+    <td style="white-space:normal;max-width:220px" class="muted">{{ rule.local_note }}</td>
+    <td class="num muted" style="white-space:nowrap">{% if rule.nexus_sales %}{{ rule.nexus_sales|money_k }}{% if rule.nexus_txns %} {% if rule.nexus_and %}AND{% else %}or{% endif %} {{ rule.nexus_txns }}{% endif %}{% else %}—{% endif %}</td>
+    <td style="white-space:normal;max-width:200px" class="muted">{{ rule.sourcing }}</td>
+    <td style="white-space:normal;max-width:220px" class="muted">{{ rule.install_labor }}</td>
+    <td style="white-space:normal;max-width:240px" class="muted">{{ rule.contractor }}</td>
+    <td style="white-space:normal;max-width:180px" class="muted">{{ rule.due }}</td>
+    <td style="white-space:normal;max-width:180px" class="muted">{{ rule.discount }}</td>
+    <td class="num">{% if n and n.revenue %}{{ n.revenue|money }}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num">{% if s and s.collected12 %}{{ s.collected12|money }}{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td class="num">{% if s and s.remitted12 %}{{ s.remitted12|money }}{% else %}<span class="muted">—</span>{% endif %}</td>
+  </tr>{% endfor %}
+  </tbody></table></div>
+  </details>
+</div>
+
+<div class="note">Definitions. <b>Collected</b> = the 20500 credit on an invoice (a credit memo debits it back) — the sales-order module prices tax by the ship-to ZIP (the tax ID and rate on the shipment are shown per invoice); project invoices keyed in AR carry tax only when the accountant adds a tax line. <b>Remitted</b> = a debit to 20500 that names a state and a tax ("TN SALES TAX MAR", an AP voucher to a state agency); the period it covers is read from the description (a "?" means the month before the payment was assumed). <b>Fees</b> = return fees / penalties debited to 20500. <b>Adjustments</b> = every other entry (accruals, corrections, year-end true-ups); <b>reclasses</b> net to zero inside the account and are excluded. <b>Balance</b> per state = collected − remitted − fees + adjustments over the whole history; the states sum to the GL balance except for lines whose state could not be read (shown as "??"). Postings before July 2022 are Illinois (the only tax charged then). Every line's state comes from the shipment's ZIP-based tax ID when there is one, else the posting description, the ship-to state, or the customer's state.</div>
+{% endblock %}
+{% block scripts %}
+{{ charts|json_script:"stcharts" }}
+<script>
+const SC = JSON.parse(document.getElementById('stcharts').textContent);
+const fmt$ = v => v == null ? '—' : v.toLocaleString('en-US', {style: 'currency', currency: 'USD', maximumFractionDigits: 0});
+new Chart(document.getElementById('c_bal'), { type: 'line',
+  data: { labels: SC.balance.map(r => r.m), datasets: [{ label: 'Balance', data: SC.balance.map(r => r.v), borderColor: '#1f5eff', backgroundColor: 'rgba(31,94,255,.12)', fill: true, pointRadius: 0, tension: .15 }] },
+  options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => fmt$(c.raw) } } },
+    scales: { y: { ticks: { callback: v => PCA.money(v) }, grid: { color: '#eef2f7' } }, x: { grid: { display: false }, ticks: { maxTicksLimit: 8 } } } } });
+new Chart(document.getElementById('c_months'), { type: 'bar',
+  data: { labels: SC.months.map(r => r.m), datasets: [
+    { label: 'Collected', data: SC.months.map(r => r.c), backgroundColor: 'rgba(23,138,82,.8)', borderRadius: 2 },
+    { label: 'Remitted', data: SC.months.map(r => -r.r), backgroundColor: 'rgba(198,40,40,.7)', borderRadius: 2 },
+    { label: 'Adjustments & fees', data: SC.months.map(r => r.a), backgroundColor: 'rgba(183,121,31,.7)', borderRadius: 2 } ] },
+  options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' }, tooltip: { callbacks: { label: c => c.dataset.label + ': ' + fmt$(c.raw) } } },
+    scales: { x: { stacked: true, grid: { display: false }, ticks: { maxTicksLimit: 12 } }, y: { stacked: true, ticks: { callback: v => PCA.money(v) }, grid: { color: '#eef2f7' } } } } });
+if (document.getElementById('c_states')) new Chart(document.getElementById('c_states'), { type: 'bar',
+  data: { labels: SC.states.map(r => r.s), datasets: [
+    { label: 'Collected 12 mo', data: SC.states.map(r => r.c), backgroundColor: 'rgba(23,138,82,.8)', borderRadius: 2 },
+    { label: 'Remitted 12 mo', data: SC.states.map(r => r.r), backgroundColor: 'rgba(198,40,40,.7)', borderRadius: 2 },
+    { label: 'Balance', data: SC.states.map(r => r.b), backgroundColor: 'rgba(31,94,255,.5)', borderRadius: 2 } ] },
+  options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' }, tooltip: { callbacks: { label: c => c.dataset.label + ': ' + fmt$(c.raw) } } },
+    onClick: (e, els) => { if (els.length) location.href = '?state=' + SC.states[els[0].index].s; },
+    scales: { x: { grid: { display: false } }, y: { ticks: { callback: v => PCA.money(v) }, grid: { color: '#eef2f7' } } } } });
+// click-to-pin definitions (hover titles remain)
+(function () {
+  let tipEl = null; const hide = () => { if (tipEl) { tipEl.remove(); tipEl = null; } };
+  document.addEventListener('click', e => {
+    const t = e.target.closest('th[title], .kpi .label[title], .ar-chip[title], .tag[title], td[title]');
+    if (!t || e.target.closest('a, button, input, select, summary')) { hide(); return; }
+    const text = t.getAttribute('title'); if (!text) { hide(); return; }
+    hide(); tipEl = document.createElement('div'); tipEl.className = 'click-tip'; tipEl.textContent = text; document.body.appendChild(tipEl);
+    const r = t.getBoundingClientRect(); tipEl.style.left = Math.min(r.left, window.innerWidth - 380) + 'px'; tipEl.style.top = (r.bottom + window.scrollY + 6) + 'px';
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') hide(); });
+})();
+</script>
+{% endblock %}

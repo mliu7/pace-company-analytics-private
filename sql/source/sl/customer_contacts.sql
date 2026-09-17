@@ -1,0 +1,25 @@
+-- Customer master contact and billing fields (who to call / e-mail about an invoice): attention, phone, e-mail,
+-- bill-to name / attention / phone, terms, statement cycle, default salesperson, status, class, credit limit
+-- (set for four customers only), setup date. Full read (~2,100 rows) each finance refresh. No card data is read.
+SELECT RTRIM(c.CustId)      AS customer_id,
+       RTRIM(c.Name)        AS name,
+       RTRIM(c.Attn)        AS attn,
+       RTRIM(c.Phone)       AS phone,
+       RTRIM(c.Fax)         AS fax,
+       RTRIM(c.EMailAddr)   AS email,
+       RTRIM(c.BillName)    AS bill_name,
+       RTRIM(c.BillAttn)    AS bill_attn,
+       RTRIM(c.BillPhone)   AS bill_phone,
+       RTRIM(c.BillAddr1)   AS bill_addr1,
+       RTRIM(c.BillCity)    AS bill_city,
+       RTRIM(c.BillState)   AS bill_state,
+       RTRIM(c.BillZip)     AS bill_zip,
+       RTRIM(c.Terms)       AS terms,
+       RTRIM(c.StmtCycleId) AS stmt_cycle,
+       RTRIM(c.StmtType)    AS stmt_type,
+       RTRIM(c.SlsperId)    AS slsper_id,
+       RTRIM(c.Status)      AS status,
+       RTRIM(c.ClassId)     AS class_id,
+       c.CrLmt              AS credit_limit,
+       c.SetupDate          AS setup_date
+FROM dbo.Customer c

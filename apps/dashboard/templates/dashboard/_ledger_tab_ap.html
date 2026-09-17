@@ -1,0 +1,39 @@
+{% load humanize pca %}
+{# Accounts payable tab of the liabilities breakdown — the subledger behind GL 20000 (context: ap, buckets) #}
+    <div class="liab-tiles">
+      <div class="liab-tile" title="Released vouchers and prepayments with an open balance, net of debit adjustments — the AP aging on the snapshot page."><div class="label">Open AP (subledger)</div><div class="val">{{ ap.total|money }}</div><div class="sub">{{ ap.n }} document{{ ap.n|pluralize }} · {{ ap.vendors }} vendors</div></div>
+      <div class="liab-tile" title="Open balance past its due date."><div class="label">Past due</div><div class="val {% if ap.past_due %}neg{% endif %}">{{ ap.past_due|money }}</div><div class="sub">{{ ap.past_due_pct|pct:0 }} of AP · {{ ap.past_due_n }} doc{{ ap.past_due_n|pluralize }}</div></div>
+      <div class="liab-tile" title="Vouchers due in the next 14 calendar days — near-term cash need."><div class="label">Due next 14 days</div><div class="val">{{ ap.due14|money }}</div><div class="sub">{{ ap.due14_n }} voucher{{ ap.due14_n|pluralize }}</div></div>
+      <div class="liab-tile" title="How concentrated the payable is: share of open AP owed to the three largest vendors."><div class="label">Top 3 vendors</div><div class="val">{{ ap.top_share|pct:0 }}</div><div class="sub">of open AP</div></div>
+      <div class="liab-tile" title="AP subledger total minus ledger account 20000. A non-zero bridge is timing between the AP module and the ledger: released vouchers or payments whose GL batch has not posted yet, or journal entries made straight to 20000."><div class="label">Subledger − GL 20000</div><div class="val {% if ap.bridge|absolute > 1 %}warn-ink{% endif %}">{{ ap.bridge|signed_money }}</div><div class="sub">GL 20000 = {{ ap.gl_balance|money }}</div></div>
+    </div>
+    <div class="liab-detail-grid" style="grid-template-columns:1.35fr 1fr">
+      <div>
+        <h4 style="margin-top:0">By vendor <span class="muted" style="text-transform:none;letter-spacing:0">· largest first · click a balance for the vouchers</span></h4>
+        <table class="data dense"><thead><tr><th>Vendor</th><th class="num">Docs</th><th class="num">Balance</th><th class="num">Share</th><th class="num" title="Open balance past due.">Past due</th><th class="num" title="Earliest due date among the vendor's open documents.">Oldest due</th></tr></thead><tbody>
+        {% for v in ap.top_vendors %}<tr>
+          <td class="trunc fluid" style="width:45%;min-width:140px" title="{{ v.name }} ({{ v.vendor_id }})">{{ v.name|default:v.vendor_id }}</td>
+          <td class="num muted">{{ v.n }}</td>
+          <td class="num"><a href="#" class="drill" data-kind="ap" data-vendor="{{ v.vendor_id }}" data-title="{{ v.name }} — open AP">{{ v.amt|money }}</a></td>
+          <td class="num muted">{{ v.share|pct:0 }}</td>
+          <td class="num {% if v.past_due %}neg{% else %}muted{% endif %}">{% if v.past_due %}{{ v.past_due|money }}{% else %}–{% endif %}</td>
+          <td class="num muted">{{ v.oldest|date:"M j y" }}</td></tr>{% endfor %}
+        {% if ap.others %}<tr class="muted"><td>{{ ap.others.vendors }} other vendors</td><td class="num">{{ ap.others.n }}</td><td class="num">{{ ap.others.amt|money }}</td><td class="num"></td><td class="num">{% if ap.others.past_due %}{{ ap.others.past_due|money }}{% else %}–{% endif %}</td><td></td></tr>{% endif %}
+        </tbody><tfoot><tr><td>All vendors</td><td class="num">{{ ap.n }}</td><td class="num"><a href="#" class="drill" data-kind="ap" data-title="All open AP">{{ ap.total|money }}</a></td><td class="num">100%</td><td class="num">{{ ap.past_due|money }}</td><td></td></tr></tfoot></table>
+      </div>
+      <div>
+        <h4 style="margin-top:0">By age <span class="muted" style="text-transform:none;letter-spacing:0">· days past due</span></h4>
+        <table class="data dense"><tbody>
+          {% for key, lbl in buckets %}{% with b=ap.buckets|getitem:key %}<tr><td>{{ lbl }}</td><td class="num muted">{{ b.n|default:0 }}</td><td class="num {% if key != 'current' %}hb-{{ key }}{% endif %}"><a href="#" class="drill" data-kind="ap" data-bucket="{{ key }}" data-title="All AP · {{ lbl }}">{{ b.amt|default:0|money }}</a></td></tr>{% endwith %}{% endfor %}
+        </tbody></table>
+        <h4>By posting month <span class="muted" style="text-transform:none;letter-spacing:0">· when the voucher hit the ledger</span></h4>
+        <table class="data dense"><tbody>
+          {% for p in ap.periods %}<tr><td>{% if p.per_post == 'older' %}Older{% else %}{{ p.per_post|slice:":4" }}-{{ p.per_post|slice:"4:" }}{% endif %}</td><td class="num muted">{{ p.n }}</td><td class="num">{{ p.amt|money }}</td></tr>{% endfor %}
+        </tbody></table>
+        <h4>Largest open vouchers</h4>
+        <table class="data dense"><thead><tr><th>Ref</th><th>Vendor</th><th class="num">Due</th><th class="num">Balance</th></tr></thead><tbody>
+          {% for d in ap.largest %}<tr><td class="mono" title="{{ d.doc_desc }}{% if d.invoice_nbr %} · inv {{ d.invoice_nbr }}{% endif %}{% if d.po_nbr %} · PO {{ d.po_nbr }}{% endif %}">{{ d.ref_nbr }}</td><td class="trunc fluid" style="width:50%" title="{{ d.vendor_name }}">{{ d.vendor_name }}</td><td class="num muted {% if d.days_past_due > 0 %}neg{% endif %}">{{ d.due_date|date:"M j" }}</td><td class="num">{{ d.amt|money }}</td></tr>{% endfor %}
+        </tbody></table>
+      </div>
+    </div>
+    <div class="note" style="margin-top:8px">Same population as the AP aging on the snapshot page: released VO/PP/AD documents with a balance, VT templates excluded. Vendor balances net any debit adjustments.</div>

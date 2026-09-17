@@ -1,0 +1,12 @@
+{% load static %}<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in · Pace Company Analytics</title><link rel="stylesheet" href="{% static 'dashboard/app.css' %}">
+<style>.gate{min-height:100vh;display:flex;align-items:center;justify-content:center;background:#101a2b}
+.gate .card{background:#fff;border-radius:14px;padding:34px 38px;max-width:380px;text-align:center}
+.gate .logo{width:44px;height:44px;border-radius:10px;background:#1f5eff;color:#fff;font-weight:800;font-size:22px;display:flex;align-items:center;justify-content:center;margin:0 auto 12px}
+.gate .btn{display:inline-block;background:#1f5eff;color:#fff;border-radius:9px;padding:10px 18px;font-weight:600;margin-top:14px}</style></head>
+<body><div class="gate"><div class="card"><div class="logo">P</div><h2 style="margin:0 0 4px">Pace Company Analytics</h2>
+<div class="muted" style="color:#5d6b7c;font-size:13px">Internal system · authorized users only</div>
+{% if sso %}<a class="btn" href="{% url 'oidc_authentication_init' %}">Sign in with Microsoft</a>
+<div style="margin-top:10px;font-size:12px;color:#8fa0b8">Uses your Pace Microsoft 365 account (MFA required).</div>
+{% else %}<div class="btn" style="background:#546e7a">Development mode — sign-in is automatic</div>{% endif %}
+</div></div></body></html>

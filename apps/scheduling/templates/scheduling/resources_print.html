@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Resource schedules · week of {{ week }} · Pace Company Analytics</title>
+<style>
+  body { font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif; color: #14202e; margin: 24px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: #5d6b7c; margin-bottom: 18px; }
+  .person { break-inside: avoid; page-break-inside: avoid; margin-bottom: 22px; border: 1px solid #e3e8ef; border-radius: 10px; padding: 12px 14px; }
+  .person h2 { font-size: 15px; margin: 0 0 2px; display: flex; justify-content: space-between; gap: 12px; }
+  .person h2 small { color: #5d6b7c; font-weight: 400; font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid #e3e8ef; vertical-align: top; }
+  th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #5d6b7c; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr.pto td { color: #c62828; font-weight: 600; }
+  tr.empty td { color: #9aa3b2; }
+  .pm { color: #5d6b7c; font-size: 12px; }
+  .toolbar { margin-bottom: 14px; }
+  .toolbar button { font: inherit; padding: 6px 12px; border-radius: 8px; border: 1px solid #cbd3de; background: #fff; cursor: pointer; }
+  @media print { .toolbar { display: none; } body { margin: 10mm; } .person { border-color: #bbb; } }
+</style>
+</head>
+<body>
+<div class="toolbar"><button onclick="window.print()">Print</button></div>
+<h1>Resource schedules — week of {{ week }}</h1>
+<div class="sub">Pace Company Analytics · Resource Scheduler · {{ people|length }} {% if people|length == 1 %}person{% else %}people{% endif %}</div>
+{% for p in people %}
+<div class="person">
+  <h2><span>{{ p.name }} <small>· {{ p.trade }}</small></span><small>{{ p.total }}h scheduled</small></h2>
+  <table>
+    <thead><tr><th>Day</th><th>Project</th><th>Phase</th><th style="text-align:right">Hours</th></tr></thead>
+    <tbody>
+    {% for r in p.rows %}
+    <tr class="{% if r.pto %}pto{% elif r.empty %}empty{% endif %}"><td>{{ r.day }}</td><td>{{ r.project }}{% if r.pm %} <span class="pm">PM {{ r.pm }}</span>{% endif %}{% if r.access %} <span class="pm">· {{ r.access }}</span>{% endif %}</td><td>{{ r.phase }}</td><td class="num">{{ r.hours }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% empty %}
+<p>No resources selected.</p>
+{% endfor %}
+</body>
+</html>

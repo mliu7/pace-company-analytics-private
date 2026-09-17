@@ -1,0 +1,11 @@
+{% load pca documents %}<tr class="{% if l.state == 'rejected' %}muted{% endif %}">
+  <td>{% if l.project %}<a href="{% url 'dashboard:project_detail' l.project.canonical_project_number %}">{{ l.project.display_number }}</a> <span class="muted">{{ l.project.title|truncatechars:50 }}</span>{% elif l.bid %}<a href="{% url 'bids:bid_detail' l.bid.id %}">bid · {{ l.bid.client_name }} · {{ l.bid.project_name|truncatechars:50 }}</a>{% elif l.customer %}<a href="{% url 'dashboard:customer_detail' l.customer.sl_customer_id %}">{{ l.customer.canonical_name }}</a>{% endif %}
+    <div class="muted" style="font-size:11.5px">{% if where == 'file' %}from the file name{% else %}from folder “{{ where }}”{% endif %}{% if l.evidence.matched %} · matched “{{ l.evidence.matched }}”{% endif %}</div></td>
+  <td title="{{ rules|getitem:l.rule|first }}">{{ l.rule|nice }}</td>
+  <td class="num"><span class="tag {{ l.confidence|conf_label }}">{{ l.confidence|pct:0 }}</span></td>
+  <td><span class="pill {% if l.state == 'confirmed' %}good{% elif l.state == 'rejected' %}bad{% endif %}">{{ l.state }}</span></td>
+  {% if can_link %}<td class="num" style="white-space:nowrap"><form method="post" action="{% url 'documents:document_link_state' %}" style="display:inline">{% csrf_token %}<input type="hidden" name="link" value="{{ l.id }}"><input type="hidden" name="next" value="{{ next_url }}">
+    {% if l.state != 'confirmed' %}<button class="btn small" name="state" value="confirmed" title="Keep this link whatever the rules say next.">✓</button>{% endif %}
+    {% if l.state != 'rejected' %}<button class="btn small" name="state" value="rejected" title="Never link this again.">✕</button>{% endif %}
+    {% if l.state != 'auto' %}<button class="btn small" name="state" value="auto" title="{% if l.rule == 'manual' %}Remove the manual link.{% else %}Back to automatic.{% endif %}">↺</button>{% endif %}</form></td>{% endif %}
+</tr>

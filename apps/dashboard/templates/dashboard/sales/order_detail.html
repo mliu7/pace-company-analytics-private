@@ -1,0 +1,77 @@
+{% extends "dashboard/base.html" %}{% load humanize pca %}
+{% block title %}{{ d.document_number }} · 010 · Pace Company Analytics{% endblock %}
+{% block content %}
+<div class="crumbs"><a href="{% url 'dashboard:sales010_orders' %}">Hardware orders</a> › {{ d.document_number }}</div>
+<div class="topbar"><div class="title">
+  <h1>{% if d.doc_type == 'quote' %}Quote{% else %}Order{% endif %} {{ d.document_number }} <span style="font-weight:500">{{ d.customer_company }}</span></h1>
+  <small><span class="tag {% if d.status == 'BackOrder' %}high{% endif %}">{{ d.status }}</span>{% if d.stage %} <span class="tag">{{ d.stage|nice }}</span>{% endif %}{% if not d.line_count and d.total %} <span class="tag moderate" title="This document has no line items in ChannelOnline — its totals are header values, not priced items. The pipeline treats it as a placeholder.">placeholder · no line items</span>{% endif %}
+    {% if d.customer %}· <a href="{% url 'dashboard:customer_detail' d.customer.sl_customer_id %}">{{ d.customer.canonical_name }}</a>{% endif %}
+    · Rep {{ d.salesperson_name|default:"House" }} · Created by {{ d.created_by_name|default:"?" }}
+    {% if d.customer_po %} · PO {{ d.customer_po }}{% endif %}{% if d.terms %} · {{ d.terms }}{% endif %}
+    {% if d.sl_ord_nbr %} · SL <span class="mono">{{ d.sl_ord_nbr }}</span> ({{ d.sl_so_type }}){% endif %}
+    {% if d.deleted %} · <span class="tag critical">deleted in CNET</span>{% endif %}</small>
+</div></div>
+
+<div class="grid two" style="margin-bottom:14px">
+  <div class="card">
+    <h2>Quoted → realized <small>CNET quote vs SL fulfillment; drift = SL shipped cost − quoted cost</small></h2>
+    <table class="data score"><thead><tr><th></th><th class="num">Quoted (CNET)</th><th class="num">SL order</th><th class="num">Realized (shipped/invoiced)</th></tr></thead><tbody>
+      <tr><td>Revenue</td><td class="num">{{ bridge.quoted.rev|money }}</td><td class="num muted">{{ bridge.sl.rev|money }}</td><td class="num">{{ bridge.real.rev|money }}</td></tr>
+      <tr><td>Cost</td><td class="num">{{ bridge.quoted.cost|money }}</td><td class="num muted">—</td><td class="num">{{ bridge.real.cost|money }}</td></tr>
+      <tr><td>Freight (charged)</td><td class="num">{{ bridge.quoted.frt|money }}</td><td class="num muted">{{ bridge.sl.frt|money }}</td><td class="num">{{ bridge.real.frt|money }}</td></tr>
+      <tr class="strong"><td>Gross profit</td><td class="num">{{ bridge.quoted.gp|money }}</td><td class="num muted"></td><td class="num {{ bridge.real.gp|posneg }}">{{ bridge.real.gp|money }}</td></tr>
+      <tr><td class="muted">GP margin</td><td class="num muted">{{ bridge.quoted.gp_pct|pct }}</td><td class="num"></td><td class="num muted">{{ bridge.real.gp_pct|pct }}</td></tr>
+    </tbody></table>
+    {% if bridge.drift != None %}<div class="note" style="margin-top:8px">Cost drift: <b class="{% if bridge.drift > 0 %}neg{% elif bridge.drift < 0 %}pos{% endif %}">{{ bridge.drift|signed_money }}</b> vs quoted cost{% if not d.fully_shipped %} (order not fully shipped — partial){% endif %}.</div>{% endif %}
+  </div>
+  <div class="card">
+    <h2>Lifecycle <small>quote → order → SL → shipments → invoices, with day gaps</small></h2>
+    <table class="data"><tbody>
+    {% for s in steps %}<tr><td class="num muted" style="width:110px">{{ s.when|date:"Y-m-d" }}</td>
+      <td>{{ s.label }} {% if s.sub %}<span class="muted">{{ s.sub }}</span>{% endif %}</td>
+      <td class="num muted" style="width:70px">{% if s.gap != None %}+{{ s.gap }}d{% endif %}</td></tr>
+    {% empty %}<tr><td class="empty">No dated events yet.</td></tr>{% endfor %}</tbody></table>
+    {% if d.note_internal %}<h3 style="margin-top:10px">Internal note</h3><div class="note" style="white-space:pre-wrap">{{ d.note_internal }}</div>{% endif %}
+    {% if d.note_shipping %}<div class="note" style="margin-top:6px"><b>Shipping:</b> {{ d.note_shipping }}</div>{% endif %}
+    <div class="muted" style="margin-top:8px;font-size:12.5px">Ship to: {{ d.ship_company }}{% if d.ship_attn %} · {{ d.ship_attn }}{% endif %}{% if d.ship_addr1 %} · {{ d.ship_addr1 }}{% endif %} · {{ d.ship_city }} {{ d.ship_state }} {{ d.ship_zip }}</div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:14px">
+  <h2>Lines <small>{{ lines|length }} · quoted cost/price per unit; SL cost where the part matches an SL order line</small></h2>
+  <div class="table-wrap" style="max-height:520px"><table class="data dense"><thead><tr>
+    <th>#</th><th>Part</th><th>Manufacturer</th><th>Description</th><th>Supplier</th><th class="num">Qty</th>
+    <th class="num">Unit cost</th><th class="num">Unit price</th><th class="num">Quoted GP</th>
+    <th class="num" title="SL order-line unit cost for the same part.">SL cost</th><th class="num" title="SL unit cost − quoted unit cost.">Drift/u</th><th>Status</th><th class="num">Serials</th></tr></thead><tbody>
+  {% for l in lines %}<tr>
+    <td class="num muted">{{ l.line_number }}</td>
+    <td class="mono">{{ l.part_number }}</td><td class="trunc fluid" style="width:10%;min-width:90px" title="{{ l.manufacturer }}">{{ l.manufacturer }}</td>
+    <td class="trunc fluid" style="width:35%;min-width:160px" title="{{ l.description }}">{{ l.description }}</td>
+    <td class="muted trunc fluid" style="width:10%;min-width:90px" title="{{ l.supplier_name }} {{ l.supplier_sku }}">{{ l.supplier_name }}</td>
+    <td class="num">{{ l.qty|num }}{% if l.qty_cancelled %} <span class="neg" title="cancelled">−{{ l.qty_cancelled|num }}</span>{% endif %}</td>
+    <td class="num">{{ l.unit_cost|money:2 }}</td><td class="num">{{ l.unit_price|money:2 }}</td>
+    <td class="num {{ l.quoted_margin|posneg }}">{{ l.quoted_margin|money }}</td>
+    <td class="num muted">{{ l.sl_line_cost|money:2 }}</td>
+    <td class="num">{% if l.drift_unit != None %}<span class="{% if l.drift_unit > 0 %}neg{% elif l.drift_unit < 0 %}pos{% endif %}">{{ l.drift_unit|money:2 }}</span>{% else %}—{% endif %}</td>
+    <td class="muted">{{ l.status }}</td>
+    <td class="num">{% if l.serials.all %}<details style="display:inline"><summary style="cursor:pointer">{{ l.serials.all|length }}</summary>
+      <div class="mono" style="font-size:11px;max-width:260px;white-space:normal">{% for s in l.serials.all %}{{ s.serial }} {% endfor %}</div></details>{% else %}<span class="muted">—</span>{% endif %}</td>
+  </tr>{% endfor %}</tbody></table></div>
+</div>
+
+{% if shippers %}
+<div class="card" style="margin-bottom:14px">
+  <h2>Shipments &amp; invoices <small>SL shippers — realized revenue, cost and freight per shipment</small></h2>
+  <table class="data"><thead><tr><th>Shipper</th><th class="num">Ship date</th><th>Invoice</th><th class="num">Invoice date</th>
+    <th class="num">Invoiced</th><th class="num">Cost</th><th class="num">GP</th><th class="num">Freight charged</th><th>Status</th></tr></thead><tbody>
+  {% for s in shippers %}<tr><td class="mono">{{ s.shipper_id }}</td><td class="num">{{ s.ship_date|date:"Y-m-d" }}</td>
+    <td class="mono muted">{{ s.invc_nbr }}</td><td class="num muted">{{ s.invc_date|date:"Y-m-d" }}</td>
+    <td class="num">{{ s.tot_invc|money }}</td><td class="num">{{ s.tot_cost|money }}</td>
+    <td class="num {{ s.gp|posneg }}">{{ s.gp|money }}</td>
+    <td class="num muted">{{ s.tot_frt|money }}</td><td class="muted">{{ s.status }}</td></tr>{% endfor %}</tbody></table>
+</div>
+{% endif %}
+
+{% if quotes %}<div class="note">Source quote{{ quotes|length|pluralize }}: {% for q in quotes %}<a href="{% url 'dashboard:sales010_order_detail' q.document_number %}">{{ q.document_number }}</a> <span class="tag" title="linkage method">{{ q.conversion_method|nice }}</span>{% if not forloop.last %} · {% endif %}{% endfor %}</div>{% endif %}
+{% if d.converted_document %}<div class="note">This quote became order <a href="{% url 'dashboard:sales010_order_detail' d.converted_document.document_number %}">{{ d.converted_document.document_number }}</a> <span class="tag">{{ d.conversion_method|nice }}</span></div>{% endif %}
+{% endblock %}

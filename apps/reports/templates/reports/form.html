@@ -1,0 +1,5 @@
+{% extends "dashboard/base.html" %}{% block content %}<div class="topbar"><h1>{{ heading }}</h1></div>
+<div class="card"><p>The creator and company superadmins always have access. Additional access is limited to the individuals and groups you select. Group membership changes take effect immediately.</p>
+<form method="post" enctype="multipart/form-data">{% csrf_token %}{{ form.as_p }}<button class="btn">Save</button> <a href="{% url 'reports:reports_list' %}">Cancel</a></form></div>
+{% if groups %}<div class="card"><h2>Groups</h2>{% for group in groups %}<p><a href="?edit={{ group.pk }}">{{ group.name }}</a> · {{ group.members.count }} members{% if group.can_create_reports %} · may create reports{% endif %}</p>{% endfor %}</div>{% endif %}
+<p class="muted">Report HTML can include inline styles, scripts and data images. External resources, network calls and forms are disabled. Ask Codex or Claude to generate a self-contained HTML file, then upload it here.</p>{% endblock %}

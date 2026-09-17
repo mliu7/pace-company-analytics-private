@@ -1,0 +1,19 @@
+{% load humanize pca %}{% if a.n %}
+<tr class="attr" id="attr-{{ key }}"><td></td><td colspan="3">
+  <table class="inner">
+    <thead><tr><th style="text-align:left">Project</th><th style="text-align:left">Customer</th><th class="num">Amount</th><th class="num">Share</th><th class="num"></th></tr></thead>
+    <tbody>
+    {% for i in a.items|slice:":25" %}
+      <tr><td class="trunc fluid" style="width:45%;min-width:160px" title="{{ i.title }}"><a href="{% url 'dashboard:project_detail' i.cpn %}"><b>{{ i.cpn }}</b></a> <span class="muted">{{ i.title }}</span>{% if i.division and code and i.division != code %} <span class="tag" title="Project belongs to division {{ i.division }}.">{{ i.division }}</span>{% endif %}</td>
+        <td class="muted">{{ i.customer|default:"" }}</td>
+        <td class="num">{{ i.amount|money }}</td>
+        <td class="num muted">{% if a.gl %}{% widthratio i.amount a.gl 100 %}%{% endif %}</td>
+        <td class="num"><a href="#" class="pj act" data-cpn="{{ i.cpn }}" data-group="{{ gname }}">lines</a></td></tr>
+    {% endfor %}
+    {% if a.n > 25 %}<tr><td colspan="5" class="muted">… and {{ a.n|add:"-25" }} smaller project{{ a.n|add:"-25"|pluralize }} ({{ a.items|length }} total — see the project table below for all of them).</td></tr>{% endif %}
+    <tr style="font-weight:600"><td colspan="2">On projects</td><td class="num">{{ a.attributed|money }}</td><td class="num muted">{% if a.gl %}{% widthratio a.attributed a.gl 100 %}%{% endif %}</td><td></td></tr>
+    <tr class="muted" title="Posted to the division's subaccounts with no project reference — journal entries, inventory relief, adjustments, re-classes."><td colspan="2">Not on a project (GL only)</td><td class="num">{{ a.residual|money }}</td><td class="num">{% if a.gl %}{% widthratio a.residual a.gl 100 %}%{% endif %}</td><td></td></tr>
+    </tbody>
+  </table>
+</td></tr>
+{% endif %}
