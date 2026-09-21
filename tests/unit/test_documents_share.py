@@ -6,6 +6,8 @@ import shutil
 import sys
 import tempfile
 import unittest
+from unittest.mock import MagicMock, patch
+from django.test import override_settings
 from pathlib import Path
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
@@ -79,6 +81,25 @@ class Walk(unittest.TestCase):
     def test_read_bytes_caps_size(self):
         self.assertIsNone(S.read_bytes("AV/25-4476 Timeline Theatre/Equipment list.xlsx", max_bytes=10, override=self.root))
         self.assertTrue(S.read_bytes("Misc/Unfiled meeting notes.txt", override=self.root))
+
+    def test_document_reads_use_this_machines_root(self):
+        with patch.dict(os.environ, {"PCA_SHARE_ROOT": str(self.root)}), override_settings(SHARE_DOCUMENT_TRANSPORT="mount"):
+            self.assertIn(b"Meeting notes", S.document_bytes("Misc/Unfiled meeting notes.txt"))
+
+    @override_settings(SHARE_DOCUMENT_TRANSPORT="smb", SHARE_CREDENTIALS_FILE="unused")
+    def test_smb_rejects_non_relative_paths_before_connecting(self):
+        for path in ("../secret", "/etc/passwd", r"\\another\share\file", "C:\\secret", "HR/payroll"):
+            with self.assertRaises(PermissionError):
+                S.document_bytes(path)
+
+    @override_settings(SHARE_DOCUMENT_TRANSPORT="smb", SHARE_CREDENTIALS_FILE="unused")
+    def test_smb_reads_are_read_only_and_capped(self):
+        client = MagicMock()
+        client.open_file.return_value.__enter__.return_value.read.return_value = b"abcdef"
+        with patch.dict(sys.modules, {"smbclient": client}), patch.object(Path, "read_text", return_value='{"username":"test","password":"test"}'):
+            self.assertIsNone(S.document_bytes("2026 Projects/test.docx", 5))
+            client.open_file.assert_called_once_with(r"\\PACE-FPS3\projects\2026 Projects\test.docx", mode="rb")
+            client.open_file.return_value.__enter__.return_value.read.assert_called_once_with(6)
 
     def test_health(self):
         h = S.health(self.root)

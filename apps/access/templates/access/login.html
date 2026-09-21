@@ -6,7 +6,7 @@
 .gate .btn{display:inline-block;background:#1f5eff;color:#fff;border-radius:9px;padding:10px 18px;font-weight:600;margin-top:14px}</style></head>
 <body><div class="gate"><div class="card"><div class="logo">P</div><h2 style="margin:0 0 4px">Pace Company Analytics</h2>
 <div class="muted" style="color:#5d6b7c;font-size:13px">Internal system · authorized users only</div>
-{% if sso %}<a class="btn" href="{% url 'oidc_authentication_init' %}">Sign in with Microsoft</a>
-<div style="margin-top:10px;font-size:12px;color:#8fa0b8">Uses your Pace Microsoft 365 account (MFA required).</div>
+{% if sso %}<a class="btn" href="{% url 'oidc:oidc_authentication_init' %}?next={{ next_url|urlencode }}">Sign in with Microsoft</a>
+<div style="margin-top:10px;font-size:12px;color:#8fa0b8">Use your Pace Microsoft 365 account. Access must be granted by a PCA administrator.</div>
 {% else %}<div class="btn" style="background:#546e7a">Development mode — sign-in is automatic</div>{% endif %}
 </div></div></body></html>

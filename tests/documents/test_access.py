@@ -56,27 +56,33 @@ class _ShareTree(AccessTestCase):
         shutil.rmtree(cls.tmp, ignore_errors=True)
         super().tearDownClass()
 
+    def setUp(self):
+        super().setUp()
+        from unittest.mock import patch
+        self.enterContext(patch.dict(os.environ, {"PCA_SHARE_ROOT": str(self.root)}))
+        self.enterContext(override_settings(SHARE_DOCUMENT_TRANSPORT="mount"))
+
 
 class Previews(_ShareTree):
     """Word / Excel previews come from the sandboxed HTML route; both routes need documents.view."""
 
     def test_docx_preview_is_html_in_a_sandboxed_frame(self):
-        import shutil
+        from unittest.mock import patch
         f = File.objects.get(repo=self.repo, name="25-4476 Proposal.docx")
+        self.enterContext(patch("apps.documents.preview.office_binary", return_value=None))
         page = self.client_for("pm").get("/documents/%d/" % f.id).content.decode()
-        if shutil.which("textutil"):
-            self.assertIn('sandbox src="/documents/%d/html/"' % f.id, page)
-            r = self.client_for("pm").get("/documents/%d/html/" % f.id)
-            self.assertEqual(r.status_code, 200)
-            self.assertTrue(r["Content-Type"].startswith("text/html"))
-            self.assertIn("sandbox", r["Content-Security-Policy"])
-            body = b"".join(r.streaming_content).decode()
-            self.assertIn("Converted from Word", body)
-            self.assertNotIn("<script", body.lower())
-        else:
-            self.assertNotIn("/html/", page)
+        self.assertIn('sandbox src="/documents/%d/html/"' % f.id, page)
+        r = self.client_for("pm").get("/documents/%d/html/" % f.id)
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r["Content-Type"].startswith("text/html"))
+        self.assertIn("sandbox", r["Content-Security-Policy"])
+        body = b"".join(r.streaming_content).decode()
+        self.assertIn("Word text preview", body)
+        self.assertNotIn("<script", body.lower())
 
     def test_xlsx_preview_renders_a_table(self):
+        from unittest.mock import patch
+        self.enterContext(patch("apps.documents.preview.office_binary", return_value=None))
         f = File.objects.get(repo=self.repo, name="Equipment list.xlsx")
         r = self.client_for("pm").get("/documents/%d/html/" % f.id)
         self.assertEqual(r.status_code, 200)

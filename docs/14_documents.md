@@ -181,12 +181,34 @@ whole drive (`loaders.open_bid_client_names`, `_unit_order`).
 | format | how | what you see |
 |---|---|---|
 | pdf, images, txt / md / csv-as-text | the browser (`/content/`) | the file itself |
-| doc, docx, rtf, odt | macOS `textutil` → HTML, cached; served with `Content-Security-Policy: sandbox` inside a `sandbox` iframe (no scripts, opaque origin) | the text with the converter's own styles; embedded images and exact page layout are not reproduced |
-| xlsx, xlsm · xls | openpyxl · xlrd → one table per sheet (values as last saved, first 400 rows × 60 columns, 12 sheets) | the cell values |
-| pptx | python-pptx → one block per slide: title, text frames with bullet levels, tables, speaker notes | the slide text (no pictures) |
+| doc/docx/docm, rtf, odt; xls/xlsx/xlsm/xlsb, ods; ppt/pptx/pptm/pps/ppsx, odp | LibreOffice → cached PDF at `/documents/<id>/pdf/`, protected by `documents.view` | pages/slides including images, tables and layout; font substitution can affect appearance |
+| Office fallback when LibreOffice is unavailable or conversion fails | portable DOCX text/tables, openpyxl/xlrd cell tables, python-pptx slide text; macOS textutil for legacy Word | simplified content; spreadsheet fallback capped at 400 rows × 60 columns and 12 sheets |
 | csv, tsv | table | rows |
-| heic, key, pages, numbers | QuickLook `qlmanage -t` → first-page PNG, cached (15-second timeout). Only Apple-native generators: the Office ones spawn PowerPoint / Excel and hung > 60 s in testing | the first page |
+| tif/tiff, heic/heif | Pillow + pillow-heif → PNG | first image/page, resized to 1600 pixels |
+| key, pages, numbers | macOS QuickLook `qlmanage -t` → PNG | first page |
 | everything else | extracted text when there is any, else "open at the source" | |
 Converters run on PCA's cached copy of the file, never on the share directly; output is cached beside it under
 `APP_SUPPORT_DIR/doc_cache/<repo>/<id>_<etag>.preview.html` / `.page.png`. `preview.sanitize` strips scripts, frames,
 external resources and inline handlers as a second line behind the sandbox.
+
+### Machine-specific preview configuration
+
+Install Python dependencies from `requirements.txt`. Install LibreOffice Writer, Calc and Impress on the
+application host (Ubuntu: `apt-get install --no-install-recommends libreoffice-writer libreoffice-calc libreoffice-impress`).
+Set `PCA_LIBREOFFICE` to its executable if it is not on PATH. Conversion uses a fresh profile for each request,
+disables macros and linked-document updates, has a 40-second timeout, and publishes completed PDFs atomically.
+The current server uses a private runtime at `/srv/pca/files/office-runtime/libreoffice`, configured in its `.env`.
+See [LibreOffice command-line conversion parameters](https://help.libreoffice.org/latest/en-GB/text/shared/guide/start_parameters.html).
+
+File paths in the database are relative to the project share. Document reads use **this machine's configuration**,
+never the `Repo.root_path` saved by another machine or a scheduled unavailable-share guard:
+
+* Mounted share: `PCA_SHARE_DOCUMENT_TRANSPORT=mount`, with `PCA_SHARE_ROOT=/mnt/projects` on Linux or
+  `PCA_SHARE_ROOT=/Volumes/projects` (or the actual Finder mount) on macOS.
+* Direct read-only SMB: `PCA_SHARE_DOCUMENT_TRANSPORT=smb`, `PCA_SHARE_UNC_ROOT=\\PACE-FPS3\projects`, and
+  `PCA_SHARE_CREDENTIALS_FILE=/path/to/protected.json`. The JSON contains `username` and `password`, is readable
+  only by the service account, and is never committed. SMB reads request encryption, refuse non-relative paths,
+  and enforce the same 50 MB cap. This is configured on the current server because its OS share is not mounted.
+
+Direct SMB currently supports document reads; indexing still needs the configured OS mount. A folder moved
+within the share requires its indexed relative path to be refreshed regardless of the machine's root setting.

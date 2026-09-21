@@ -21,7 +21,7 @@ def _q(v, places=4):
 
 def nonlabor_eac(actual_material, purchase_variance, open_material, budget_material,
                  actual_subcontract, open_subcontract, budget_subcontract,
-                 actual_other, budget_other):
+                 actual_other, budget_other, remaining_expense=None):
     """Material / subcontract / other-direct EAC.
 
     Each category's hard base = what is already spent (+ purchase variance on material) plus its
@@ -31,16 +31,22 @@ def nonlabor_eac(actual_material, purchase_variance, open_material, budget_mater
     (subcontract budget bought as material on 264932, the reverse on 265267), and per-category
     max(actual, budget) double-counted such spend — the flooring assumed the original bucket's
     budget was still fully to come. Total = max(base, total non-labor budget); the unspent pool is
-    assigned back to categories in proportion to their unspent budgets for display."""
+    assigned back to categories in proportion to their unspent budgets for display.
+    A supplied, aged PM expense estimate replaces the budget floor; actuals plus
+    commitments still form the hard base."""
     base_mat = actual_material + purchase_variance + open_material
     base_sub = actual_subcontract + open_subcontract
     base_odc = actual_other
     base = base_mat + base_sub + base_odc
-    pool = max((budget_material + budget_subcontract + budget_other) - base, D0)
+    floor = (budget_material + budget_subcontract + budget_other) if remaining_expense is None else (actual_material + purchase_variance + actual_subcontract + actual_other + max(remaining_expense, D0))
+    pool = max(floor - base, D0)
     unspent = (max(budget_material - base_mat, D0), max(budget_subcontract - base_sub, D0), max(budget_other - base_odc, D0))
     denom = unspent[0] + unspent[1] + unspent[2]
     if pool > 0 and denom > 0:
         return (base_mat + pool * unspent[0] / denom, base_sub + pool * unspent[1] / denom, base_odc + pool * unspent[2] / denom)
+    if pool > 0:
+        # PTT gives one expense pool, not a material/subcontract split.
+        base_mat += pool
     return base_mat, base_sub, base_odc
 
 
@@ -70,6 +76,36 @@ def plausible_rate(rate, div_rate):
 # Rate logic lives in apps/analytics/labor_rates.py so the Project Snapshot prices hours
 # identically to the EAC (docs/project_snapshot_spec.md D2).
 from .labor_rates import rate_tables as _rate_tables  # noqa: E402
+
+
+def pm_cost_estimates(as_of):
+    """Dated, valid PTT estimates with the SL cost baseline on the estimate day.
+
+    Missing historical baselines leave the document/budget fallback in place.
+    A next-day snapshot accommodates PM updates after the final daily refresh.
+    """
+    return {r["project_id"]: r for r in fetch_dict("""
+        SELECT DISTINCT ON (o.project_id) o.*,
+               s.actual_direct_cost - s.actual_labor AS expense_at_estimate
+        FROM operations_percentcompleteobservation o
+        LEFT JOIN LATERAL (
+            SELECT actual_direct_cost, actual_labor FROM finance_projectfinancialsnapshot s
+            WHERE s.project_id=o.project_id
+              AND s.as_of_date BETWEEN (o.ptt_last_updated_at AT TIME ZONE 'America/Chicago')::date
+                  AND (o.ptt_last_updated_at AT TIME ZONE 'America/Chicago')::date + 1
+            ORDER BY s.as_of_date LIMIT 1
+        ) s ON TRUE
+        WHERE (o.observed_at AT TIME ZONE 'America/Chicago')::date <= %s
+        ORDER BY o.project_id, o.observed_at DESC, o.id DESC
+    """, [as_of])}
+
+
+def usable_pm_costs(obs, as_of):
+    if not obs or not obs.get("ptt_last_updated_at"):
+        return False
+    age = (as_of - timezone.localtime(obs["ptt_last_updated_at"]).date()).days
+    pct = obs.get("ptt_percent_complete")
+    return 0 <= age <= 60 and pct is not None and 0 <= pct <= 1
 
 
 def build_predictions(run, as_of=None):
@@ -104,6 +140,7 @@ def build_predictions(run, as_of=None):
                                WHERE te.source_status=1 AND te.form_type=1 AND te.work_date > v.d GROUP BY te.project_id"""
                             % ",".join("(%d,'%s'::date)" % (k, v.isoformat()) for k, v in est_day.items())):
             worked_since[r["project_id"]] = r["h"] or D0
+    estimates = pm_cost_estimates(as_of)
     rows = []
     for p in projects:
         pid = p["id"]
@@ -139,6 +176,15 @@ def build_predictions(run, as_of=None):
         if rate is None:
             rate, method = Decimal("90"), "default"
             warnings.append("no observed labor rate; default $90/h used")
+        # A handful of early crew hours is not representative of the whole job.
+        obs = estimates.get(pid)
+        pm_costs_ok = usable_pm_costs(obs, as_of)
+        if pm_costs_ok and sl_h < 80 and ptt_h < 80 and (p["pm_remaining_hours"] or D0) > 0:
+            same_revision = p["pm_remaining_hours_updated_at"] and abs((obs["ptt_last_updated_at"] - p["pm_remaining_hours_updated_at"]).total_seconds()) < 1
+            pm_rate = (obs["ptt_remaining_labor_costs"] or D0) / p["pm_remaining_hours"]
+            if same_revision and plausible_rate(pm_rate, div_rate):
+                rate, method = pm_rate, "pm_cost_estimate"
+                warnings.append("limited labor history; dated PTT labor-cost estimate used to price hours")
         # remaining hours
         rem = p["pm_remaining_hours"]
         rem_at = p["pm_remaining_hours_updated_at"]
@@ -171,10 +217,15 @@ def build_predictions(run, as_of=None):
         open_mat = p["open_commitments_material"] or D0
         open_sub = p["open_commitments_subcontract"] or D0
         ppv = p["actual_purchase_variance"] or D0
+        remaining_expense = None
+        if pm_costs_ok and obs.get("expense_at_estimate") is not None and obs.get("ptt_remaining_expense_costs") is not None and obs["ptt_remaining_expense_costs"] >= 0:
+            spent = (p["actual_direct_cost"] or D0) - (p["actual_labor"] or D0)
+            remaining_expense = max(obs["ptt_remaining_expense_costs"] - max(spent - obs["expense_at_estimate"], D0), D0)
+            warnings.append("dated PTT expense estimate, reduced by subsequent costs; open commitments retained as a minimum")
         eac_mat, eac_sub, eac_odc = nonlabor_eac(
             p["actual_material"] or D0, ppv, open_mat, p["budget_material"] or D0,
             p["actual_subcontract"] or D0, open_sub, p["budget_subcontract"] or D0,
-            p["actual_other_direct"] or D0, p["budget_other_direct"] or D0)
+            p["actual_other_direct"] or D0, p["budget_other_direct"] or D0, remaining_expense)
         eac_direct = eac_labor + eac_mat + eac_sub + eac_odc
         billed = p["billed_revenue"] or D0
         if p["project_mode_rule"] in (ProjectMode.TM_TICKET, ProjectMode.TM_SERVICE, ProjectMode.SERVICE_AGREEMENT):

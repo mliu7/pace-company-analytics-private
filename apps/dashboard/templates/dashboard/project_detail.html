@@ -18,6 +18,7 @@
     </small>
   </div>
   <div class="row">
+    <div class="kpi" title="PTT's computed progress from remaining labor and expenses; last updated {{ p.pm_percent_complete_updated_at|date:'M j, Y' }}."><div class="label">Complete · PTT</div><div class="value">{{ p.pm_percent_complete|pct:1 }}</div><div class="sub">Labor hours {{ p.labor_percent_complete_calc|pct:1 }}</div></div>
     {% if pred and acc.margins %}<span class="pill {% if pred.risk_level == 'low' %}good{% elif pred.risk_level == 'moderate' %}warn{% else %}bad{% endif %}">Risk {{ pred.risk_level }} · {{ pred.risk_score }}</span>{% endif %}
     {% for f in p.data_quality_flags %}{% if f != 'sl_commitments_already_shipped' %}<span class="pill warn" title="{{ f }}">{{ f|nice }}</span>{% endif %}{% endfor %}
   </div>
@@ -31,7 +32,7 @@
       <thead><tr><th></th>
         <th class="num" title="Current SL budget. SL keeps no original budget or change-order history, so 'sold' means the budget as it stands today.">Sold</th>
         <th class="num" title="Actuals posted in SL so far.">To date</th>
-        {% if not p.is_closed %}<th class="num" title="Deterministic estimate at completion: posted labor + unposted PTT hours × rate + PM remaining hours × rate; non-labor at least budget, or actual + open commitments if higher.">At completion</th>{% endif %}
+        {% if not p.is_closed %}<th class="num" title="Deterministic estimate at completion: posted labor + unposted PTT hours × rate + PM remaining hours × rate; non-labor uses a dated PM expense estimate reduced by subsequent costs, or the budget fallback; actuals + open commitments remain the minimum.">At completion</th>{% endif %}
       </tr></thead>
       <tbody>
         <tr><td>Revenue <span class="muted" title="Sold = SL contract value{% if p.budget_touched_after_setup %} (budget edited {{ p.contract_value_row_last_edited_at|date:'M j, Y' }}){% else %} (untouched since setup){% endif %} · To date = AR invoices − credits.">ⓘ</span></td>
@@ -170,7 +171,7 @@
   </div>
   {% endif %}
   <div class="card">
-    <h2>Labor: hours worked vs PM forecast <small>PTT cumulative hours · PM remaining-hours revisions</small></h2>
+    <h2>Labor: hours worked vs PM forecast <small>PTT cumulative hours · Cost to complete revisions</small></h2>
     <div class="chart tall"><canvas id="c_hours"></canvas></div>
     {% if system_mix %}<div style="margin-top:10px"><div class="progress-stack">{% for k, v in system_mix %}<span style="width:{% widthratio v 1 100 %}%;background:{% cycle '#1f5eff' '#178a52' '#b7791f' '#6a3ff0' '#0e9aa7' '#c62828' '#8d6e63' '#546e7a' %}" title="{{ k }} {% widthratio v 1 100 %}%"></span>{% endfor %}</div>
     <div class="legend">{% for k, v in system_mix %}<span><i style="background:{% cycle '#1f5eff' '#178a52' '#b7791f' '#6a3ff0' '#0e9aa7' '#c62828' '#8d6e63' '#546e7a' as sysc %}"></i>{{ k }} {% widthratio v 1 100 %}%</span>{% endfor %}</div></div>{% endif %}
@@ -381,7 +382,16 @@
 </div>
 
 <div class="card" style="margin-bottom:14px" id="revisions">
-  <h2>PM remaining-hours revisions <small>{{ rev_summary.n }} revision{{ rev_summary.n|pluralize }} from PTT history{% if rev_summary.span_days %} over {{ rev_summary.span_days }} days{% endif %} · spent = PTT Job Report hours logged up to each revision · projected = spent + PM remaining · budget = current SL labor budget hours (LABOR = non-union, LABORUNION = union) · hover any figure for its definition</small></h2>
+  <h2>Cost to complete revisions <small>{{ rev_summary.n }} revision{{ rev_summary.n|pluralize }} from PTT history{% if rev_summary.span_days %} over {{ rev_summary.span_days }} days{% endif %} · spent = PTT Job Report hours logged up to each revision · projected = spent + PM remaining · budget = current SL labor budget hours (LABOR = non-union, LABORUNION = union) · hover any figure for its definition</small></h2>
+  {% if acc.margins %}
+  <h3>Cost estimates &amp; computed completion</h3>
+  <p class="note">PTT records one remaining-expense estimate covering materials, subcontract and other direct costs. Material spend is shown separately below. Costs are SL snapshots on the observation date; the update date is when the PM saved the estimate. Earlier cost estimates unavailable in local history are not reconstructed from today's values.</p>
+  <div style="overflow:auto"><table class="data dense"><thead><tr><th>PM updated</th><th>Observed / cost date</th><th>By</th><th class="num">Material spent</th><th class="num">All expenses spent</th><th class="num">Expense cost to complete</th><th class="num">Change</th><th class="num">Projected expenses</th><th class="num">Labor cost to complete</th><th class="num">Computed % · PTT</th></tr></thead><tbody>
+  {% for r in cost_revisions %}<tr><td>{{ r.ptt_last_updated_at|date:"M j, Y H:i"|default:"Not recorded" }}</td><td>{{ r.observed_at|date:"M j, Y" }}{% if not r.cost_date %} · costs unavailable{% endif %}</td><td>{{ r.revised_by_name|default:"—" }}</td><td class="num">{{ r.material_spent|money }}</td><td class="num">{{ r.expense_spent|money }}</td><td class="num"><b>{{ r.ptt_remaining_expense_costs|money }}</b></td><td class="num">{{ r.expense_change|signed_money }}</td><td class="num">{{ r.expense_projected|money }}</td><td class="num">{{ r.ptt_remaining_labor_costs|money }}</td><td class="num"><b>{{ r.ptt_percent_complete|pct:1 }}</b>{% if r.ptt_percent_complete != None and r.ptt_percent_complete < 0 or r.ptt_percent_complete != None and r.ptt_percent_complete > 1 %} · invalid{% endif %}</td></tr>
+  {% empty %}<tr><td colspan="10" class="empty">No cost estimates recorded.</td></tr>{% endfor %}
+  </tbody></table></div>
+  {% endif %}
+  <h3>Labor-hours revisions</h3>
   <div class="grid kpi" style="margin-bottom:12px">
     <div class="kpi rev-tile" title="Current SL labor budget hours: LABOR (non-union) + LABORUNION (union). SL keeps no original budget, so this is the budget as it stands today."><div class="label">SL budget hours</div>
       <div class="value sm">{{ rev_summary.bud.tot|hours }}</div><div class="sub">non-union {{ rev_summary.bud.nu|num:0 }} · union {{ rev_summary.bud.u|num:0 }}</div></div>

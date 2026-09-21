@@ -5,6 +5,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
@@ -28,11 +29,13 @@ class Sanitize(unittest.TestCase):
         self.assertNotIn("javascript:", clean)
         self.assertIn('<img src="data:image/png;base64,AAAA">', clean)
 
-    def test_kind(self):
+    @patch.object(P, "office_binary", return_value=None)
+    def test_kind(self, _office):
         self.assertEqual(P.kind("xlsx"), "html")
         self.assertEqual(P.kind("csv"), "html")
         self.assertIsNone(P.kind("pdf"))
         self.assertIsNone(P.kind("zip"))
+        self.assertEqual(P.kind("DOCX"), "html")
         if shutil.which("textutil"):
             self.assertEqual(P.kind("doc"), "html")
             self.assertEqual(P.kind("DOCX"), "html")
@@ -93,7 +96,8 @@ class Slides(unittest.TestCase):
             out = P.pptx_to_html(str(p))
             self.assertIn("Slide 1 · Scope &amp; Approach", out)
             self.assertIn("Install 7 WAPs &lt;1st FL&gt;", out)
-            self.assertEqual(P.kind("pptx"), "html")
+            with patch.object(P, "office_binary", return_value=None):
+                self.assertEqual(P.kind("pptx"), "html")
             doc = P.to_html(str(p), "pptx")
             self.assertIn("Slide text only", doc)
 
@@ -103,6 +107,50 @@ class Slides(unittest.TestCase):
 
 
 class Fallbacks(unittest.TestCase):
+    @patch("shutil.which", return_value=None)
+    def test_docx_on_linux(self, _which):
+        out = P.word_to_html(str(FIX / "25-4476 Proposal.docx"), "docx")
+        self.assertIn("<p>", out)
+        self.assertGreater(len(out), 20)
+        with tempfile.TemporaryDirectory() as td:
+            bad = Path(td) / "bad.docx"
+            bad.write_bytes(b"not a zip")
+            self.assertIsNone(P.word_to_html(str(bad), "docx"))
+
+    def test_tiff_is_converted_to_browser_image(self):
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as td:
+            source, output = Path(td) / "scan.tiff", Path(td) / "page.png"
+            Image.new("RGB", (2400, 1200), "red").save(source)
+            self.assertEqual(P.kind("tiff"), "image")
+            self.assertTrue(P.to_png(source, "tiff", output))
+            with Image.open(output) as image:
+                self.assertEqual(image.format, "PNG")
+                self.assertEqual(image.size, (1600, 800))
+
+    @patch.object(P, "office_binary", return_value="/usr/bin/libreoffice")
+    def test_office_formats_and_converter_failure(self, _office):
+        for ext in P.OFFICE_EXTS:
+            self.assertEqual(P.kind(ext.upper()), "pdf")
+        with tempfile.TemporaryDirectory() as td, patch.object(P, "_run", return_value=P._Failed()):
+            source, output = Path(td) / "file.doc", Path(td) / "preview.pdf"
+            source.write_bytes(b"invalid")
+            self.assertFalse(P.to_pdf(source, "doc", output))
+            self.assertFalse(output.exists())
+
+    @unittest.skipUnless(P.office_binary(), "LibreOffice not configured")
+    def test_office_renders_word_excel_and_slides(self):
+        from pptx import Presentation
+        with tempfile.TemporaryDirectory() as td:
+            deck = Path(td) / "slides.pptx"
+            prs = Presentation()
+            prs.slides.add_slide(prs.slide_layouts[0]).shapes.title.text = "Preview test"
+            prs.save(deck)
+            for source in (FIX / "25-4476 Proposal.docx", FIX / "Equipment list.xlsx", deck):
+                output = Path(td) / (source.stem + ".pdf")
+                self.assertTrue(P.to_pdf(source, source.suffix[1:], output), source.name)
+                self.assertTrue(output.read_bytes().startswith(b"%PDF-"))
+
     def test_html_wearing_xls(self):
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "export.xls"

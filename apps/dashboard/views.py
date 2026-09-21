@@ -357,6 +357,27 @@ def project_detail(request, key):
         c["rate_ok"] = rate_visible(acc, c["is_field_hourly"])
     weekly_hours = fetch_dict("""SELECT date_trunc('week', work_date)::date w, SUM(hours_total) h, COUNT(DISTINCT employee_id) n FROM operations_timeentry
                                  WHERE project_id=%s AND source_status=1 AND form_type=1 GROUP BY 1 ORDER BY 1""", [p.id])
+    cost_revisions = []
+    if acc.margins:
+        # Cost observations have their own timeline: PTT hours history does not
+        # contain historic expense estimates. Never backfill it with today's costs.
+        cost_revisions = fetch_dict("""
+            SELECT o.*, e.canonical_name AS revised_by_name,
+                   s.actual_material + COALESCE(s.actual_purchase_variance,0) AS material_spent,
+                   s.actual_direct_cost - s.actual_labor AS expense_spent,
+                   s.as_of_date AS cost_date
+            FROM operations_percentcompleteobservation o
+            LEFT JOIN core_employee e ON e.id=o.ptt_last_updated_by_id
+            LEFT JOIN finance_projectfinancialsnapshot s ON s.project_id=o.project_id
+                AND s.as_of_date=(o.observed_at AT TIME ZONE 'America/Chicago')::date
+            WHERE o.project_id=%s ORDER BY o.observed_at, o.id
+        """, [p.id])
+        previous = None
+        for r in cost_revisions:
+            r["expense_projected"] = (r["expense_spent"] + r["ptt_remaining_expense_costs"]) if r["expense_spent"] is not None and r["ptt_remaining_expense_costs"] is not None else None
+            r["expense_change"] = (r["ptt_remaining_expense_costs"] - previous["ptt_remaining_expense_costs"]) if previous and r["ptt_remaining_expense_costs"] is not None and previous["ptt_remaining_expense_costs"] is not None else None
+            previous = r
+        cost_revisions.reverse()
     revisions = list(RemainingHoursRevision.objects.filter(project=p).select_related("revised_by").order_by("revised_at", "sequence"))
     # cumulative hours at each revision for the forecast chart
     cum = fetch_dict("SELECT work_date d, SUM(hours_total) h FROM operations_timeentry WHERE project_id=%s AND source_status=1 AND form_type=1 GROUP BY 1 ORDER BY 1", [p.id])
@@ -431,7 +452,7 @@ def project_detail(request, key):
         _prow("Material $", "$", mat_used,
               (max((pred.eac_material or D(0)) - mat_used, D(0)) if pred else None),
               p.budget_material, proj=(pred.eac_material if pred else (mat_used if closed else None)),
-              help_text="SL MATERIALS actuals, with purchase variance (%s) folded in · remaining covers real open commitments (%s) and any budget not yet spent"
+              help_text="SL MATERIALS actuals, with purchase variance (%s) folded in · remaining covers real open commitments (%s) and the allocated PM expense estimate, with unspent budget as fallback"
                         % ("$%s" % format(int(round(ppv)), ",") if ppv else "none", "$%s" % format(int(round(p.open_commitments_material or 0)), ","))),
     ]
     if any(((p.actual_subcontract or 0), (p.budget_subcontract or 0), (p.open_commitments_subcontract or 0))):
@@ -592,7 +613,7 @@ def project_detail(request, key):
     else:
         progress_rows = [r for r in progress_rows if r["unit"] == "h"]
     return render(request, "dashboard/project_detail.html", _ctx(request, "projects", p=p, pred=pred, summary=summary, by_task=by_task, tasks=tasks, tran_groups=tran_groups,
-                                                                 ledger=ledger, entries=entries, entries_total=entries_total, entries_more=entries_total - len(entries), crew=crew, revisions=revisions, rev_rows=rev_rows, rev_now=rev_now, rev_summary=rev_summary, rev_today=today, snapshots=snapshots, changes=changes, issues=issues,
+                                                                 ledger=ledger, entries=entries, entries_total=entries_total, entries_more=entries_total - len(entries), crew=crew, revisions=revisions, rev_rows=rev_rows, rev_now=rev_now, rev_summary=rev_summary, rev_today=today, cost_revisions=cost_revisions, snapshots=snapshots, changes=changes, issues=issues,
                                                                  system_mix=system_mix, work_mix=work_mix, ratings=ratings, charts=charts, vs_sold_pts=vs_sold_pts,
                                                                  commit_lines=commit_lines, commit_summary=commit_summary, progress_rows=progress_rows, board=board, materials=materials,
                                                                  co_groups=co_groups, co_summary=co_summary,

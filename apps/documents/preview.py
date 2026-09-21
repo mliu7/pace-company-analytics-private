@@ -1,10 +1,6 @@
-"""In-app previews for the office formats a browser cannot show by itself (SharePoint spec §7.2 "previews").
-
-Word / RTF / OpenDocument → HTML through macOS `textutil` (native, handles the legacy binary .doc as well as .docx);
-Excel → HTML tables through openpyxl (every sheet, capped); CSV → a table. Anything QuickLook can draw (.pptx, .xls,
-.vsdx, .heic, .dwg with a QuickLook plug-in …) falls back to a first-page PNG through `qlmanage -t`. Everything is
-read-only, works on the cached copy of the file, and is cached again next to it (`views._cache_path`). The HTML is
-served from a sandboxed frame (no scripts, opaque origin) — see `views.document_html`.
+"""Read-only previews of cached documents. LibreOffice preserves Office layout as PDF;
+portable Python readers provide HTML fallbacks. Pillow handles non-browser image
+formats and macOS QuickLook handles Apple documents. HTML is always sandboxed.
 """
 
 import csv
@@ -19,6 +15,49 @@ import tempfile
 from pathlib import Path
 
 log = logging.getLogger(__name__)
+
+OFFICE_EXTS = {"doc", "docx", "docm", "rtf", "odt", "xls", "xlsx", "xlsm", "xlsb", "ods",
+               "ppt", "pptx", "pptm", "pps", "ppsx", "odp"}
+RASTER_EXTS = {"tif", "tiff", "heic", "heif"}
+BROWSER_IMAGE_EXTS = {"png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif", "ico"}
+
+
+def office_binary():
+    """System LibreOffice, or an explicitly configured private installation."""
+    configured = os.environ.get("PCA_LIBREOFFICE")
+    return shutil.which(configured) if configured else (shutil.which("libreoffice") or shutil.which("soffice"))
+
+
+def to_pdf(src_path, ext, out_path):
+    """Render Office files with an isolated profile and atomic cache publication."""
+    binary = office_binary()
+    if not binary or ext.lower() not in OFFICE_EXTS:
+        return False
+    with tempfile.TemporaryDirectory(prefix="pca-office-", dir=Path(out_path).parent) as td:
+        root = Path(td)
+        source = root / ("source." + ext.lower())
+        shutil.copyfile(src_path, source)
+        profile = root / "profile"
+        profile.mkdir()
+        # Disable macros and updates to linked documents in the fresh conversion profile.
+        (profile / "user").mkdir()
+        (profile / "user/registrymodifications.xcu").write_text('''<?xml version="1.0"?>
+<oor:items xmlns:oor="http://openoffice.org/2001/registry">
+<item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="MacroSecurityLevel" oor:op="fuse"><value>3</value></prop></item>
+<item oor:path="/org.openoffice.Office.Writer/Content/Update"><prop oor:name="Link" oor:op="fuse"><value>0</value></prop></item>
+<item oor:path="/org.openoffice.Office.Calc/Content/Update"><prop oor:name="Link" oor:op="fuse"><value>1</value></prop></item>
+</oor:items>''', encoding="utf-8")
+        result = _run([binary, "-env:UserInstallation=" + profile.as_uri(), "--headless", "--nologo",
+                       "--norestore", "--convert-to", "pdf", "--outdir", td, str(source)])
+        made = root / "source.pdf"
+        if result.returncode != 0 or not made.exists():
+            log.warning("Office preview failed for %s: %s", src_path, result.stderr[:200])
+            return False
+        with made.open("rb") as stream:
+            if stream.read(5) != b"%PDF-":
+                return False
+        os.replace(made, out_path)
+        return True
 
 TEXTUTIL_EXTS = ("doc", "docx", "rtf", "odt", "wordml", "webarchive")
 SHEET_EXTS = ("xlsx", "xlsm")
@@ -54,8 +93,14 @@ section.slide { border-top: 1px solid #d9dee6; padding: 6px 0 10px; } section.sl
 
 
 def kind(ext):
-    """'html' | 'image' | None — what preview this extension can get on this machine."""
+    """'pdf' | 'html' | 'image' | None for files needing conversion."""
     e = (ext or "").lower()
+    if e in OFFICE_EXTS and office_binary():
+        return "pdf"
+    if e in RASTER_EXTS:
+        return "image"
+    if e == "docx":
+        return "html"
     if e in TEXTUTIL_EXTS and shutil.which("textutil"):
         return "html"
     if e in SHEET_EXTS or e in CSV_EXTS or e in XLS_EXTS or e in PPTX_EXTS:
@@ -90,6 +135,21 @@ def _run(cmd, timeout=CONVERT_TIMEOUT_S):
 def word_to_html(src_path, ext):
     """textutil: .doc / .docx / .rtf / .odt -> HTML (body + the converter's own style block). None when it fails."""
     if not shutil.which("textutil"):
+        if ext == "docx":
+            try:
+                from docx import Document
+                from docx.table import Table
+                parts = []
+                for block in Document(src_path).iter_inner_content():
+                    if isinstance(block, Table):
+                        parts.append('<table class="sheet">' + ''.join(
+                            '<tr>' + ''.join('<td>%s</td>' % html.escape(c.text) for c in row.cells) + '</tr>'
+                            for row in block.rows) + '</table>')
+                    else:
+                        parts.append('<p>%s</p>' % html.escape(block.text).replace('\n', '<br>'))
+                return ''.join(parts)
+            except Exception as exc:
+                log.warning("Word preview failed for %s: %s", src_path, exc)
         return None
     with tempfile.TemporaryDirectory(prefix="pca-preview-") as td:
         # textutil picks the reader from the extension: give the cached copy its real name
@@ -357,7 +417,7 @@ def to_html(src_path, ext):
     body = None
     if e in TEXTUTIL_EXTS:
         body = word_to_html(src_path, e)
-        note = "Converted from Word by macOS textutil — images and exact page layout are not reproduced; open the file for the original."
+        note = "Word text preview — images and exact page layout are not reproduced; open the file for the original."
     elif e in SHEET_EXTS:
         body = sheet_to_html(src_path)
         note = "Cell values as last saved (formula results, no formatting); the first %d rows × %d columns of each sheet." % (MAX_SHEET_ROWS, MAX_SHEET_COLS)
@@ -378,6 +438,23 @@ def to_html(src_path, ext):
 
 def to_png(src_path, ext, out_path, size=1600):
     """QuickLook first-page thumbnail (`qlmanage -t`) written to out_path. True on success."""
+    if (ext or "").lower() in RASTER_EXTS:
+        try:
+            from PIL import Image, ImageOps
+            if ext.lower() in {"heic", "heif"}:
+                from pillow_heif import register_heif_opener
+                register_heif_opener()
+            with Image.open(src_path) as source:
+                page = ImageOps.exif_transpose(source)
+                page.thumbnail((size, size))
+                with tempfile.TemporaryDirectory(dir=Path(out_path).parent) as td:
+                    tmp = Path(td) / "page.png"
+                    page.convert("RGBA").save(tmp, format="PNG")
+                    os.replace(tmp, out_path)
+            return True
+        except Exception as exc:
+            log.warning("Image preview failed for %s: %s", src_path, exc)
+            return False
     if not shutil.which("qlmanage"):
         return False
     with tempfile.TemporaryDirectory(prefix="pca-ql-") as td:

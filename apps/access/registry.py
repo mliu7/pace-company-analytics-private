@@ -203,6 +203,7 @@ URL_ACCESS = {
     "document_preview": _need("documents.view"),
     "document_content": _need("documents.view"),
     "document_html":    _need("documents.view"),   # Word / Excel / CSV rendered for the sandboxed preview frame
+    "document_pdf":     _need("documents.view"),   # Converted Office preview
     "document_page":    _need("documents.view"),   # QuickLook first page (pptx, xls, vsdx …)
     "documents_findings": _need("documents.view", "documents.findings"),
     "document_link_state": _need("documents.view", "documents.findings"),   # confirm / reject a document↔project link (document stewardship, not planning)
@@ -223,7 +224,7 @@ URL_ACCESS = {
     # access app
     "login":            PUBLIC,
     "denied":           PUBLIC,
-    "logout":           AUTHENTICATED,
+    "logout":           PUBLIC,   # disabled/denied users must also be able to clear their session
     "console_people":   _need("console.view"),
     "console_person":   _need("console.view"),
     "console_create":   _need("console.view", "accounts.manage"),
