@@ -13,9 +13,10 @@
 <div class="grid two" style="grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);margin-bottom:14px">
   <div class="card" id="preview">
     {% if preview == 'pdf' %}<iframe class="doc-frame" src="{% url 'documents:document_content' f.id %}#view=FitH" title="{{ f.name }}"></iframe>
+    {% elif preview == 'office' %}<iframe class="doc-frame" src="{% url 'documents:document_pdf' f.id %}#view=FitH" title="{{ f.name }}"></iframe>
     {% elif preview == 'image' %}<img class="doc-img" src="{% url 'documents:document_content' f.id %}" alt="{{ f.name }}">
     {% elif preview == 'html' %}<iframe class="doc-frame" sandbox src="{% url 'documents:document_html' f.id %}" title="{{ f.name }}"></iframe>
-    {% elif preview == 'page' %}<div class="muted" style="font-size:12px;margin-bottom:6px">First page (QuickLook) — open the file for the rest.</div><img class="doc-img" src="{% url 'documents:document_page' f.id %}" alt="{{ f.name }} — first page">
+    {% elif preview == 'page' %}<div class="muted" style="font-size:12px;margin-bottom:6px">Image preview · first page for multi-page files.</div><img class="doc-img" src="{% url 'documents:document_page' f.id %}" alt="{{ f.name }} — first page">
     {% elif preview == 'text' %}<div class="muted" style="font-size:12px;margin-bottom:6px">Extracted text ({{ text.extractor }}{% if text.pages %} · {{ text.pages }} page{{ text.pages|pluralize }}{% endif %} · {{ text.chars|intcomma }} characters{% if text.truncated %} · truncated{% endif %})</div><pre class="doc-text">{{ text_shown }}</pre>{% if text.chars > 30000 and not full %}<a href="?full=1">Show all {{ text.chars|intcomma }} characters</a>{% endif %}
     {% else %}<div class="empty">No in-app preview for this {{ kind }} file{% if f.size > 52428800 %} (over the 50 MB cap){% endif %} — open it at the source.</div>{% endif %}
   </div>

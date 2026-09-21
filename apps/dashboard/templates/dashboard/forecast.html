@@ -3,7 +3,7 @@
 {% block content %}
 <div class="topbar">
   <div class="title"><h1>Active book &amp; forecast — {{ division_label }}</h1>
-    <small>Every open project with its deterministic estimate at completion. Revenue = contract value; labor = posted + unposted PTT hours + PM remaining hours × observed loaded rate; non-labor = max(actual + commitments, budget).</small></div>
+    <small>Every open project with its deterministic estimate at completion. Revenue = contract value; labor = posted + unposted and aged remaining hours × loaded rate (dated PTT cost rate for jobs with limited labor history); expenses = actuals + aged PM estimate, at least actuals + commitments; budget fallback when no usable estimate exists.</small></div>
   {% include "dashboard/_division_bar.html" %}
 </div>
 <div class="grid kpi" style="margin-bottom:14px">

@@ -188,8 +188,10 @@ def document_preview(request, pk):
     if f.size <= CONTENT_CAP and not f.is_deleted:
         if ext == "pdf":
             preview = "pdf"
-        elif kind_of(ext) == "image" and ext != "heic":
+        elif ext in previewer.BROWSER_IMAGE_EXTS:
             preview = "image"
+        elif previewer.kind(ext) == "pdf":
+            preview = "office"
         elif previewer.kind(ext) == "html":      # Word / RTF / Excel / CSV rendered to HTML in a sandboxed frame
             preview = "html"
         elif previewer.kind(ext) == "image":     # QuickLook first page (pptx, xls, vsdx, heic …)
@@ -238,6 +240,31 @@ def _cached_source(f):
 
 
 @xframe_options_sameorigin
+def document_pdf(request, pk):
+    """Cached, full-layout Office preview; the original remains available to download."""
+    if not getattr(request, "acc", None) or not request.acc.can("documents.view"):
+        raise Http404
+    f = get_object_or_404(File.objects.select_related("repo"), pk=pk)
+    if f.is_deleted or previewer.kind(f.ext) != "pdf":
+        raise Http404
+    src, err = _cached_source(f)
+    if err is not None:
+        return err
+    out = _cache_path(f, "preview-v1.pdf")
+    if not out.exists() and not previewer.to_pdf(str(src), f.ext, str(out)):
+        markup = previewer.to_html(str(src), f.ext)
+        resp = HttpResponse(markup or "This file could not be converted for preview. Try downloading the original.",
+                            content_type="text/html; charset=utf-8", status=200 if markup else 422)
+        resp["Content-Security-Policy"] = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:"
+    else:
+        resp = FileResponse(open(out, "rb"), content_type="application/pdf")
+        resp["Content-Disposition"] = 'inline; filename="preview.pdf"'
+    resp["X-Content-Type-Options"] = "nosniff"
+    resp["Cache-Control"] = "private, max-age=0"
+    return resp
+
+
+@xframe_options_sameorigin
 def document_html(request, pk):
     """Word / RTF / Excel / CSV rendered to HTML (apps.documents.preview), cached, served for the preview page's
     sandboxed frame: no scripts can run (CSP sandbox + the frame's sandbox attribute), nothing external is loaded."""
@@ -277,7 +304,7 @@ def document_page(request, pk):
         return err
     out = _cache_path(f, "page.png")
     if not out.exists() and not previewer.to_png(str(src), f.ext, str(out)):
-        return JsonResponse({"error": "QuickLook could not draw this file — open it at the source"}, status=422)
+        return JsonResponse({"error": "This image could not be converted for preview — open it at the source"}, status=422)
     resp = FileResponse(open(out, "rb"), content_type="image/png")
     resp["Cache-Control"] = "private, max-age=0"
     return resp
@@ -297,7 +324,7 @@ def document_content(request, pk):
         return err
     ctype = mimetypes.guess_type(f.name)[0] or "application/octet-stream"
     ext = (f.ext or "").lower()
-    inline = ext in extract.PREVIEW_EXTS and request.GET.get("download") != "1"
+    inline = ext in (extract.PREVIEW_EXTS | previewer.BROWSER_IMAGE_EXTS) and request.GET.get("download") != "1"
     if ext in ("txt", "md", "csv", "log"):
         ctype = "text/plain; charset=utf-8"
     resp = FileResponse(open(path, "rb"), content_type=ctype)

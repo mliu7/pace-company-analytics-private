@@ -12,6 +12,7 @@ in until Owner grants the permission.
 """
 
 import hashlib
+import json
 import os
 import stat
 from datetime import datetime, timezone
@@ -172,6 +173,36 @@ def read_bytes(rel, max_bytes=None, override=None):
         return None
     with open_read(rel, "rb", override) as f:
         return f.read()
+
+
+def document_bytes(rel, max_bytes=None):
+    """Read a document using this machine's mounted share or explicit SMB connection.
+
+    SMB is for on-demand reads only; the indexing walker still uses SHARE_MOUNT.
+    Credentials stay in a service-readable JSON file, never in document URLs.
+    """
+    cap = max_bytes or max_text_bytes()
+    transport = getattr(settings, "SHARE_DOCUMENT_TRANSPORT", "mount")
+    if transport == "mount":
+        return read_bytes(rel, cap)
+    if transport != "smb":
+        raise ShareUnavailable("Unknown project share transport: %s" % transport)
+    # Treat either separator as structural; never let an indexed path choose a server.
+    normalized = rel.replace("\\", "/")
+    parts = normalized.split("/")
+    if normalized.startswith("/") or any(p in {"", ".", ".."} or ":" in p for p in parts):
+        raise PermissionError("invalid relative project path")
+    if any(p.lower() in excludes() for p in parts):
+        raise PermissionError("excluded project path")
+    import smbclient
+    unc = getattr(settings, "SHARE_UNC_ROOT", SHARE_UNC_ROOT).rstrip("\\")
+    server = unc.lstrip("\\").split("\\")[0]
+    credentials = json.loads(Path(settings.SHARE_CREDENTIALS_FILE).read_text())
+    smbclient.register_session(server, username=credentials["username"], password=credentials["password"],
+                               encrypt=True, connection_timeout=20)
+    with smbclient.open_file(unc + "\\" + "\\".join(parts), mode="rb") as source:
+        data = source.read(cap + 1)
+    return data if len(data) <= cap else None
 
 
 def signature(size, mtime):

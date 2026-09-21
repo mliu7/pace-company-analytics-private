@@ -5,6 +5,7 @@ from django.contrib.auth import logout as auth_logout
 from django.http import Http404
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
+from django.utils.http import url_has_allowed_host_and_scheme
 
 from .audit import log
 from .context import SESSION_VIEW_AS
@@ -14,7 +15,10 @@ from .models import Account
 def login_page(request):
     if request.user.is_authenticated:
         return redirect("/")
-    return render(request, "access/login.html", {"sso": settings.PCA_AUTH_MODE == "sso"})
+    next_url = request.GET.get("next", "/")
+    if not url_has_allowed_host_and_scheme(next_url, {request.get_host()}, require_https=request.is_secure()):
+        next_url = "/"
+    return render(request, "access/login.html", {"sso": settings.PCA_AUTH_MODE == "sso", "next_url": next_url})
 
 
 def denied(request):

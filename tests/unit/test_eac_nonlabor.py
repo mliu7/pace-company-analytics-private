@@ -82,3 +82,74 @@ class RemainingHoursAndRateGuards(unittest.TestCase):
         self.assertTrue(plausible_rate(D("240"), None))                       # no division rate: $250 absolute cap
         self.assertFalse(plausible_rate(D("260"), None))
         self.assertFalse(plausible_rate(D(0), D("100")))
+
+
+class PMExpenseEacTests(unittest.TestCase):
+    def calc(self, remaining, material=D(100), commitments=D(40), budget=D(200), sub=D(0)):
+        return nonlabor_eac(material, D(0), commitments, budget, sub, D(0), D(0), D(0), D(0), remaining)
+
+    def test_estimate_replaces_unspent_budget(self):
+        self.assertEqual(sum(self.calc(D(50))), D(150))
+
+    def test_open_commitments_are_a_floor_not_added_twice(self):
+        self.assertEqual(sum(self.calc(D(20))), D(140))
+
+    def test_missing_estimate_keeps_budget(self):
+        self.assertEqual(sum(self.calc(None)), D(200))
+
+    def test_zero_is_explicit_and_actuals_are_preserved(self):
+        self.assertEqual(sum(self.calc(D(0), commitments=D(0))), D(100))
+
+    def test_over_budget_estimate_and_cross_bucket_spend(self):
+        self.assertEqual(sum(self.calc(D(90), material=D(210), sub=D(50))), D(350))
+
+    def test_estimate_requires_recent_valid_dated_progress(self):
+        from apps.analytics.eac import usable_pm_costs
+        from datetime import datetime, timezone
+        obs = {"ptt_last_updated_at": datetime(2026, 6, 1, 12, tzinfo=timezone.utc), "ptt_percent_complete": D("0.4")}
+        self.assertTrue(usable_pm_costs(obs, date(2026, 6, 5)))
+        self.assertFalse(usable_pm_costs(obs, date(2026, 9, 5)))
+        self.assertFalse(usable_pm_costs(obs, date(2026, 5, 5)))
+        obs["ptt_percent_complete"] = D("-0.1")
+        self.assertFalse(usable_pm_costs(obs, date(2026, 6, 5)))
+
+
+class PMCostPredictionTests(unittest.TestCase):
+    def predict(self, *, hours=D(8), cost_age=0, spent=D(100), baseline=D(100)):
+        from datetime import datetime, timedelta, timezone
+        from unittest.mock import patch
+        from apps.analytics import eac
+        from apps.core.models import Project
+        at = datetime(2026, 6, 1, 12, tzinfo=timezone.utc)
+        p = Project(id=1, division_id=1, lifecycle_state="in_progress", contract_value=D(5000),
+                    budget_labor_hours=D(100), budget_labor=D(1000), ptt_hours_total=hours,
+                    actual_labor_hours_sl=D(0), actual_labor=D(0), pm_remaining_hours=D(100),
+                    pm_remaining_hours_updated_at=at, actual_material=spent, actual_direct_cost=spent,
+                    budget_material=D(300), open_commitments_material=D(30))
+        obs = {"ptt_last_updated_at": at + timedelta(seconds=cost_age), "ptt_percent_complete": D("0.4"),
+               "ptt_remaining_labor_costs": D(2000), "ptt_remaining_expense_costs": D(50), "expense_at_estimate": baseline}
+        def read(sql, args=None):
+            if "SELECT p.*, d.code" in sql: return [p.__dict__]
+            if "SUM(te.hours_total) h" in sql: return [{"project_id": 1, "h": D(8)}]
+            return []
+        with patch.object(eac, "fetch_dict", side_effect=read), patch.object(eac, "_rate_tables", return_value=({}, {1:(D(100),D("0.7"))})), patch.object(eac, "pm_cost_estimates", return_value={1:obs}), patch.object(eac, "upsert") as save:
+            eac.build_predictions(None, as_of=date(2026, 6, 2))
+        return dict(zip(save.call_args.args[1], save.call_args.args[2][0]))
+
+    def test_sparse_labor_uses_matching_cost_revision_and_burns_hours(self):
+        r = self.predict()
+        self.assertEqual(r["labor_rate_method"], "pm_cost_estimate")
+        self.assertEqual(r["labor_rate_used"], D(20))
+        self.assertEqual(r["remaining_labor_hours"], D(92))
+
+    def test_mismatched_revision_keeps_observed_rate(self):
+        self.assertEqual(self.predict(cost_age=10)["labor_rate_method"], "division_rolling")
+
+    def test_established_labor_keeps_observed_rate(self):
+        self.assertEqual(self.predict(hours=D(80))["labor_rate_method"], "division_rolling")
+
+    def test_subsequent_expenses_consume_estimate_with_commitment_floor(self):
+        self.assertEqual(self.predict(spent=D(140))["eac_material"], D(170))
+
+    def test_missing_baseline_keeps_budget_floor(self):
+        self.assertEqual(self.predict(baseline=None)["eac_material"], D(300))

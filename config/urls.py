@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib import admin
 from django.urls import include, path
 
@@ -14,10 +15,8 @@ urlpatterns = [
     path("", include("apps.dashboard.urls")),
 ]
 
-import os as _os
-if _os.environ.get("PCA_AUTH_MODE", "dev").strip() == "sso":
-    urlpatterns.append(path("oidc/", include("mozilla_django_oidc.urls")))
+if settings.PCA_AUTH_MODE == "sso":
+    urlpatterns.append(path("oidc/", include(("mozilla_django_oidc.urls", "oidc"), namespace="oidc")))
 
-from django.conf import settings
 for extension in getattr(settings, "PCA_EXTRA_URLCONFS", ()):
     urlpatterns.insert(0, path("", include(extension)))

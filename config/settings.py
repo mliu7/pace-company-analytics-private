@@ -50,10 +50,11 @@ if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 AUTHENTICATION_BACKENDS = ["django.contrib.auth.backends.ModelBackend"]
 if PCA_AUTH_MODE == "sso":
-    AUTHENTICATION_BACKENDS = ["apps.access.oidc.PCAOIDCBackend"] + AUTHENTICATION_BACKENDS
+    AUTHENTICATION_BACKENDS = ["apps.access.oidc.PCAOIDCBackend"]
     OIDC_RP_CLIENT_ID = env("PCA_OIDC_CLIENT_ID")
     OIDC_RP_CLIENT_SECRET = env("PCA_OIDC_CLIENT_SECRET")
-    _TENANT = env("PCA_OIDC_TENANT_ID")
+    OIDC_TENANT_ID = _TENANT = env("PCA_OIDC_TENANT_ID")
+    OIDC_OP_ISSUER = "https://login.microsoftonline.com/%s/v2.0" % _TENANT
     OIDC_OP_AUTHORIZATION_ENDPOINT = "https://login.microsoftonline.com/%s/oauth2/v2.0/authorize" % _TENANT
     OIDC_OP_TOKEN_ENDPOINT = "https://login.microsoftonline.com/%s/oauth2/v2.0/token" % _TENANT
     OIDC_OP_USER_ENDPOINT = "https://graph.microsoft.com/oidc/userinfo"
@@ -61,6 +62,12 @@ if PCA_AUTH_MODE == "sso":
     OIDC_RP_SIGN_ALGO = "RS256"
     OIDC_RP_SCOPES = "openid email profile"
     OIDC_CREATE_USER = False   # pre-provisioned accounts only (spec §3); our backend overrides matching
+    OIDC_AUTHENTICATION_CALLBACK_URL = "oidc:oidc_authentication_callback"
+    OIDC_CALLBACK_CLASS = "apps.access.oidc.PCAOIDCCallbackView"
+    OIDC_USE_PKCE = True
+    OIDC_PKCE_CODE_CHALLENGE_METHOD = "S256"
+    OIDC_TIMEOUT = 15
+    LOGIN_REDIRECT_URL_FAILURE = "/access/denied/?why=signin"
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -182,6 +189,9 @@ SHAREPOINT_PROJECT_PORTAL_SITE = "/sites/ProjectPortal"
 # The network share ("P:" = \\PACE-FPS3\projects). Read-only mount; the walk is limited to the roots listed and skips
 # the excludes (SharePoint spec §7.1, §13.3). Override with PCA_SHARE_ROOT for a fixture tree.
 SHARE_MOUNT = Path(env("PCA_SHARE_ROOT", "/Volumes/projects"))
+SHARE_DOCUMENT_TRANSPORT = env("PCA_SHARE_DOCUMENT_TRANSPORT", "mount")
+SHARE_UNC_ROOT = env("PCA_SHARE_UNC_ROOT", r"\\PACE-FPS3\projects")
+SHARE_CREDENTIALS_FILE = env("PCA_SHARE_CREDENTIALS_FILE", "")
 SHARE_EXCLUDE_DIRS = ("PACE_Dashboard", "HR", "Personnel", "Human Resources", "Genetec", "$RECYCLE.BIN", "System Volume Information")
 SHARE_MAX_TEXT_BYTES = 50 * 1024 * 1024
 STABILIZATION_DAYS = 45

@@ -8,6 +8,7 @@ from apps.core.models import Employee, TimeStampedModel
 
 class Account(TimeStampedModel):
     email = models.EmailField(unique=True)                       # matched case-insensitively against Entra claims
+    entra_object_id = models.UUIDField(null=True, blank=True, unique=True)  # immutable identity in the configured tenant
     display_name = models.CharField(max_length=120)
     employee = models.ForeignKey(Employee, null=True, blank=True, on_delete=models.SET_NULL, related_name="accounts")
     user = models.OneToOneField(User, null=True, blank=True, on_delete=models.SET_NULL, related_name="pca_account")

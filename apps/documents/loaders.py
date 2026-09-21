@@ -621,7 +621,9 @@ def content_bytes(f, max_bytes=None):
     """The file's bytes through the read-only clients (Graph /content or the share). None when over the cap."""
     cap = max_bytes or share_client.max_text_bytes()
     if f.repo.is_share:
-        return share_client.read_bytes(f.path, cap, override=f.repo.root_path or None)
+        # Stored paths are share-relative. The database's root_path is indexing
+        # metadata and may belong to another machine or an unavailable-share guard.
+        return share_client.document_bytes(f.path, cap)
     if f.size and f.size > cap:
         return None
     return g.content("/drives/%s/items/%s/content" % (f.repo.drive_id, f.item_id))

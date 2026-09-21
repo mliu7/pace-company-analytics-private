@@ -38,8 +38,9 @@ class AuthTests(AccessTestCase):
     def test_oidc_backend_matches_preprovisioned_only(self):
         from apps.access.oidc import PCAOIDCBackend
         b = PCAOIDCBackend.__new__(PCAOIDCBackend)   # no OIDC config needed for these methods
-        users = b.filter_users_by_claims({"email": "T-EXEC@t.local"})
+        claims = {"email": "T-EXEC@t.local", "oid": "11111111-1111-4111-8111-111111111111"}
+        users = b.filter_users_by_claims(claims)
         self.assertEqual(users.count(), 1)
-        self.assertEqual(b.filter_users_by_claims({"email": "nobody@t.local"}).count(), 0)
-        self.assertEqual(b.filter_users_by_claims({"email": "t-dis@t.local"}).count(), 0)  # disabled
+        self.assertEqual(b.filter_users_by_claims({"email": "nobody@t.local", "oid": "22222222-2222-4222-8222-222222222222"}).count(), 0)
+        self.assertEqual(b.filter_users_by_claims({"email": "t-dis@t.local", "oid": "33333333-3333-4333-8333-333333333333"}).count(), 0)  # disabled
         self.assertIsNone(b.create_user({"email": "x@t.local"}))

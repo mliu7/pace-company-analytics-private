@@ -37,7 +37,7 @@ All money is SL dollars; all percentages are stored as fractions (0.3043) and di
 | Closed / stabilized | SL inactive and no material posting created in 45 days | derived |
 | EAC labor hours | PTT hours + PM remaining hours, where the remaining hours are **burned down by every hour worked since the PM saved that estimate** (`eac_rules.burn_down_remaining`): an estimate is a statement made on a date, so hours worked after it are hours of it already spent. Without the burn-down the same hours were counted twice — once as worked, once as still to come (265296 Palmer House, 2026-09-14: 440 h estimated on Aug 30, 319 h worked before the PM revised it, EAC GP shown as $7.2k against a true ~$38k; 79 open jobs and ~$245k of phantom labor portfolio-wide). If the work done exceeds the estimate the estimate is *exhausted* and the job falls back to budget − actual **capped at the estimate itself**, so the correction can never raise remaining hours. Fallback budget − actual when the estimate is NULL **or PTT's never-entered default 0** (no timestamp, no revision history — 265312 taught us a 0 is not "nothing left"); an estimate > 60 days old on an in-progress job is still flagged | `eac.py`, `eac_rules.py` |
 | EAC labor cost | posted labor + unposted hours × rate + remaining hours × rate; rate hierarchy: project's own posted rate (≥ 80 SL h **and ≤ 2.5× the division rolling rate / $250** — SL posts labor dollars without hours, e.g. 229425 at $416/h) → crew 13-week loaded rate → division rolling rate → budget rate → $90; method recorded | `eac.py` |
-| EAC material / sub / other | material: max(actual material + purchase variance + open commitments, budget); subcontract: max(actual + open commitments, budget); other: max(actual, budget) | `eac.py` |
+| EAC material / sub / other | Pooled expenses: actuals + aged valid PM expense estimate, at least actuals + real open commitments; pooled budget fallback without a usable estimate. Purchase variance belongs to material. See rules below. | `eac.py` |
 | EAC revenue | CV; for T&M / service agreement max(billed, CV) | `eac.py` |
 | EAC GP, EAC GP %, vs sold, shortfall | EAC revenue − EAC direct cost; ÷ EAC revenue; − sold GP %; shortfall = (sold GP or 0) − EAC GP for every job, so Σ shortfall = Σ sold − Σ forecast on the Forecast page | `eac.py` |
 | Risk score / level | heuristic 0–100 (loss +45, margin <10 % +25, >5 pts below sold +25, >15 pts +10, hours EAC >110 % +15, >130 % +10, dormant +10, no PM estimate +5); low <25, moderate <50, high <75, critical ≥75 or projected loss > $50k | `eac.py` |
@@ -68,9 +68,11 @@ commitments per category, with the budget floor applied to the **pooled** unspen
 category (`analytics/eac.nonlabor_eac`). Per-category flooring double-counted cross-bucket buying (subcontract
 budget bought as material on 264932 → fake −$57k; the reverse on 265267 → fake −$90k) — 52 open jobs / $780k of
 phantom EAC cost at the time of the fix. Open POs whose cost was already vouchered directly are netted out
-(`voucher_matched`). PTT's PM remaining-expense estimate remains unused (deliberate, ratified by Owner 2026-08-31: labor trusts the PM's
-hours, non-labor trusts documents; the budget floor is the conservative bound). It lives in
-`operations_percentcompleteobservation.ptt_remaining_expense_costs` if that ever changes.
+(`voucher_matched`). As of 2026-09-21, a valid PTT cost estimate dated within 60 days replaces the budget floor when an SL expense baseline exists on the estimate date (or the following day for after-hours updates). Subsequent net expense increases consume the estimate; actuals plus real open commitments remain the minimum. Missing, stale or invalid estimates keep the pooled budget fallback. The PTT expense pool includes material, subcontract and other direct costs; any amount beyond commitments is allocated by unspent category budgets, with material as the residual category when no unspent budget exists.
+
+On jobs with fewer than 80 PTT and 80 SL hours, a plausible PTT remaining-labor cost per remaining hour takes precedence over a sparse crew sample, only when the cost estimate and hours revision timestamps match within one second. Remaining hours still burn down. Method: `pm_cost_estimate`. This avoids extrapolating a single early worker's rate over an entire job.
+
+The project page's **Cost to complete revisions** shows cost observations separately from the PTT hours revision history because PTT's hours JSON contains no historic expense costs. Cost observations show saved labor/expense remaining, expense change, SL material and total expense spend at observation, projected expenses, and PTT's computed completion. Missing snapshots remain blank. The header prominently shows PTT completion, alongside the distinct hours-based completion.
 
 ## WIP and the period result (docs/07 §3 — the org's accounting rule, 2026-09-03)
 
@@ -81,7 +83,7 @@ hours, non-labor trusts documents; the budget floor is the conservative bound). 
 | GP (period) | revenue posted in the period − direct cost posted in the period (labor + burden + union; material + subcontract + other direct incl. purchase variance), by fiscal period. The Project Update workbook's REVENUE − COST (col AH). | `finance_wip.ledger_window`, `divisional_pnl.Model.projects` (PJTran) |
 | Adjusted GP (period) | GP + ΔWIP = the real result for the period on the earned basis (= earned revenue − cost). Workbook column AJ. | WIP by Job "Period result" band; Divisional P&L per-project "Adj. GP" |
 
-## PM remaining-hours revisions (project page, 2026-09-03)
+## Cost to complete revisions (project page; hours history introduced 2026-09-03)
 
 One row per PTT remaining-hours revision, newest first, plus a **Now** row when hours were logged after the last revision.
 - **Spent to date** = PTT Job Report hours (`operations_timeentry`, live, form_type 1) with `work_date` ≤ the revision's Central date, split by the employee's PTT type (`ptt_employee_type` non_union / union; untyped hours count in the total only).

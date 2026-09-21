@@ -6,8 +6,12 @@ numpy>=1.26
 pandas>=2.2
 scikit-learn>=1.5
 joblib>=1.4
-mozilla-django-oidc
+mozilla-django-oidc>=5.0.2,<5.1
+PyJWT[crypto]>=2.10,<3
 python-docx>=1.1
+Pillow>=10.4,<13
+pillow-heif>=0.18,<2
+smbprotocol>=1.15,<2
 extract-msg>=0.50
 python-pptx>=1.0
 xlrd>=2.0

@@ -161,7 +161,16 @@
 {% if oh_rows %}
 <div class="card" style="margin-bottom:12px" id="overhead">
   <h2>Overhead buckets <small>9999 jobs — internal time not attached to a billable project, grouped by bucket · click a bucket for its people</small></h2>
-  <div style="overflow:auto;max-height:60vh"><table class="data dense pay-table snap-stick"><thead><tr>
+  <div style="overflow:auto;max-height:60vh;scrollbar-gutter:stable"><table class="data dense pay-table snap-stick" style="table-layout:fixed;min-width:760px">
+  {# Keep column sizes independent of the hidden person rows and their notes. #}
+  <colgroup>
+    <col style="width:35%">
+    <col style="width:64px">
+    <col>
+    <col style="width:130px">
+    <col style="width:120px">
+  </colgroup>
+  <thead><tr>
     <th>Bucket / person</th>
     <th title="Division of the bucket job the time was charged to.">Div</th>
     <th>Latest note</th>
@@ -170,16 +179,16 @@
   </tr></thead><tbody>
   {% for b in oh_rows %}
   <tr class="pay-group" data-g="oh{{ forloop.counter }}" onclick="snapToggleRows('oh{{ forloop.counter }}')" title="Click to show who charged this bucket.">
-    <td class="trunc fluid" style="width:35%;min-width:220px" title="{{ b.bucket }} — {{ b.title }}"><span class="pay-caret" id="caret-oh{{ forloop.counter }}">▸</span><span class="mono">{{ b.bucket }}</span> <span class="muted" style="font-weight:400">{{ b.title }}</span></td>
+    <td class="trunc" title="{{ b.bucket }} — {{ b.title }}"><span class="pay-caret" id="caret-oh{{ forloop.counter }}">▸</span><span class="mono">{{ b.bucket }}</span> <span class="muted" style="font-weight:400">{{ b.title }}</span></td>
     <td><span class="tag">{{ b.division }}</span></td>
     <td class="muted">{{ b.people|length }} {{ b.people|length|pluralize:"person,people" }}</td>
     <td class="num"><b>{{ b.hours|num:1 }}</b>{% if b.ot %} <span class="warn-ink" style="cursor:help" title="Overtime: {{ b.ot|num:1 }} of the {{ b.hours|num:1 }} hours charged to this bucket in the window were logged in PTT's overtime column — overtime spent on internal, non-billable time (crew log onsite, overtime and offsite hours separately). The estimated cost uses the flat loaded rate — no overtime premium is added.">⚡</span>{% endif %}</td>
     <td class="num"><b>{{ b.cost|money }}</b></td></tr>
   {% for p in b.people %}
   <tr class="pay-inv pay-hidden" data-g="oh{{ forloop.parentloop.counter }}">
-    <td class="pay-indent"><a href="{% url 'dashboard:person_detail' p.key %}">{{ p.name }}</a></td>
+    <td class="pay-indent trunc" title="{{ p.name }}"><a href="{% url 'dashboard:person_detail' p.key %}">{{ p.name }}</a></td>
     <td></td>
-    <td class="muted" style="font-size:11.5px;white-space:normal;width:40%" title="{{ p.note }}"><div class="clamp2">{{ p.note }}</div></td>
+    <td class="muted" style="font-size:11.5px;white-space:normal" title="{{ p.note }}"><div class="clamp2">{{ p.note }}</div></td>
     <td class="num">{{ p.h|num:1 }}{% if p.ot %} <span class="warn-ink" style="cursor:help" title="Overtime: {{ p.ot|num:1 }} of {{ p.name }}'s {{ p.h|num:1 }} hours on this bucket in the window were logged in PTT's overtime column — overtime spent on internal, non-billable time (crew log onsite, overtime and offsite hours separately on each job report). The estimated cost uses the flat loaded rate — no overtime premium is added.">⚡</span>{% endif %}{% if view == 'week' %} <span class="muted">· {{ p.days }}d</span>{% endif %}</td>
     <td class="num muted">{{ p.cost|money }}</td></tr>
   {% endfor %}

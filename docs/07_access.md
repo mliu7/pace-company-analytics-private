@@ -28,7 +28,7 @@ Implemented 2026-08-27 from `Pace_Company_Analytics_Access_Spec_v1.md` (the cont
   `rates.field.view` — and an account linked to a field-hourly employee never holds it, whatever role or extra grant it is
   given (`context._caps_for`; "field employees see no rates at all", restated by Owner on the Permissions page 2026-09-11).
 - **Identity**: accounts are **pre-provisioned** in the console (they exist before first sign-in). `PCA_AUTH_MODE=sso` turns on
-  Microsoft Entra OIDC (`apps/access/oidc.py` matches by email, never creates accounts); `PCA_AUTH_MODE=dev` auto-signs-in a
+  Microsoft Entra OIDC (`apps/access/oidc.py` binds approved accounts to their Entra object ID, never creates accounts); `PCA_AUTH_MODE=dev` auto-signs-in a
   local superadmin and physically refuses to run unless `DEBUG=True` on localhost.
 - **User switcher**: superadmin-only "View as…" in the sidebar footer renders any account's exact permissions (verified
   byte-for-byte by `tests/access/test_impersonation.py`); all writes are blocked while impersonating; everything is audited.
@@ -134,3 +134,9 @@ and GP to every sales010 holder by design, and the Sales role holds no `margins.
 2. `.env` on the server: `PCA_AUTH_MODE=sso`, `PCA_OIDC_TENANT_ID`, `PCA_OIDC_CLIENT_ID`, `PCA_OIDC_CLIENT_SECRET`,
    `PCA_ALLOWED_HOSTS=<host>`, `PCA_DEBUG=0` (TLS via nginx; secure cookies switch on automatically).
 3. `pip install mozilla-django-oidc` (in requirements.txt) · run `access_bootstrap` · pre-create pilot accounts in the console.
+
+
+### Entra browser sign-in
+
+See [Entra sign-in and activation](entra_signin.md) for the registration settings,
+initial owner restrictions, identity binding, and deployment verification.
