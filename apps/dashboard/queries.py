@@ -34,13 +34,14 @@ def div_where(d, alias="p"):
 
 
 def freshness():
-    last = IngestionRun.objects.filter(source_system="local", status="succeeded").order_by("-finished_at").first()
+    last = IngestionRun.objects.filter(source_system="local", status="succeeded", finished_at__isnull=False).order_by("-finished_at").first()
     row = fetch_dict("SELECT (SELECT MAX(work_date) FROM operations_timeentry WHERE source_status=1) ptt_max, "
                      "(SELECT MAX(transaction_date) FROM finance_projectfinancialtransaction WHERE transaction_date <= CURRENT_DATE + 7) sl_max, "
                      "(SELECT MAX(source_created_at) FROM finance_projectfinancialtransaction) sl_created_max")[0]
     blocking = DataQualityIssue.objects.filter(status="open", severity="blocking").count()
     checksum_bad = DataQualityIssue.objects.filter(status="open", code="pjtran_checksum_mismatch").exists()
-    running = IngestionRun.objects.filter(source_system="local", status="running").exists()
+    # A copied run is historical data, not evidence of a worker on this host.
+    running = not settings.PRIVATE_MODE and IngestionRun.objects.filter(source_system="local", status="running").exists()
     return {"last_run": last, "ptt_max": row["ptt_max"], "sl_max": row["sl_max"], "sl_created_max": row["sl_created_max"], "blocking": blocking,
             "checksum_ok": not checksum_bad, "running": running}
 

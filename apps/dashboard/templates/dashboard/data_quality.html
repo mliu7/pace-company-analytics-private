@@ -2,9 +2,9 @@
 {% block title %}Data Quality & Refresh · Pace Company Analytics{% endblock %}
 {% block content %}
 <div class="topbar"><div class="title"><h1>Data quality, reconciliation &amp; refresh</h1><small>Every refresh re-proves the read-only permissions, re-reads the sources, and checks Σ transactions = SL's own rollup for every project × account.</small></div>
-  <form method="post" action="{% url 'dashboard:refresh' %}" class="row">{% csrf_token %}
+  {% if PRIVATE_MODE %}<p>Company source refreshes run on the server.</p>{% else %}<form method="post" action="{% url 'dashboard:refresh' %}" class="row">{% csrf_token %}
     <label class="note"><input type="checkbox" name="with_ratings" value="1"> recalc ratings</label>
-    <button class="btn primary" {% if freshness.running %}disabled{% endif %}>{% if freshness.running %}Refresh running…{% else %}Refresh from PTT + SL now{% endif %}</button></form></div>
+    <button class="btn primary" {% if freshness.running %}disabled{% endif %}>{% if freshness.running %}Refresh running…{% else %}Refresh from PTT + SL now{% endif %}</button></form>{% endif %}</div>
 
 <div class="grid kpi" style="margin-bottom:14px">
   <div class="card kpi"><div class="label">Σ PJTran vs SL rollup</div><div class="value sm {% if checksum %}neg{% else %}pos{% endif %}">{% if checksum %}{{ checksum }} variances{% else %}Exact{% endif %}</div><div class="sub">44,447 project×account rows checked each run</div></div>

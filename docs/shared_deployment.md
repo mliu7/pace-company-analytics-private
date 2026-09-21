@@ -16,10 +16,14 @@ owner checkout or copy its `.env`.
    infer a server mount from a Mac's P: drive equivalent.
 5. Start `deploy/start_shared.sh` under the server's service manager. It refuses a
    private profile or a branch other than `main`.
-6. Schedule `refresh_all --trigger nightly` at 07:00, 12:00 and 16:30 America/Chicago.
-   Schedule `reconcile_bank`, `refresh_sharepoint`, `refresh_documents`,
-   `refresh_planner`, and geocoding on the server as appropriate to source quotas.
-   Use the command help for existing flags. The private Mac does not run these jobs.
+6. Install the reviewed `deploy/refresh` bundle as described in
+   [server refresh automation](runbooks/server_refresh.md). Refreshes run at
+   06:00, 08:00, 10:00, 12:00, 14:00, 16:00 and 18:00 Monday–Friday, and at
+   06:00 and 18:00 Saturday–Sunday, all America/Chicago. A five-minute watchdog
+   verifies completed ingestion records, repairs a stopped timer and retries
+   missed/failed work. The pipeline already includes SharePoint, Planner,
+   documents and geocoding; the worker also reconciles bank data and creates a
+   daily shared-state backup. The private Mac does not run these jobs.
 7. Create a separate mirror reader with CONNECT, public-schema USAGE and SELECT
    on shared tables and SELECT on sequences (needed by pg_dump), plus ALTER DEFAULT
    PRIVILEGES for future tables/sequences. Do not grant sequence USAGE or UPDATE. It must have
@@ -27,8 +31,8 @@ owner checkout or copy its `.env`.
    CREATEROLE. Limit its connection to the owner's VPN address. A separate read-only
    SSH account may read the bank/report directories for one-way file pulls.
 
-No server has been contacted or deployed as part of the local implementation.
-The host, credentials, SSO configuration and share mount must be supplied for cutover.
+Keep hostnames, credentials, SSO configuration and share mount details in
+server-specific deployment records outside Git.
 
 ## State that Git cannot restore
 

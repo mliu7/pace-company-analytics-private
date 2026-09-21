@@ -1,0 +1,13 @@
+[Unit]
+Description=Company refresh: weekdays every two hours 06-18, weekends 06 and 18 Central
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 06,08,10,12,14,16,18:00:00 America/Chicago
+OnCalendar=Sat,Sun *-*-* 06,18:00:00 America/Chicago
+Persistent=true
+AccuracySec=1s
+RandomizedDelaySec=0
+Unit=pca-refresh.service
+
+[Install]
+WantedBy=timers.target

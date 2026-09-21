@@ -1,0 +1,12 @@
+[Unit]
+Description=Check PCA refresh completion and repair scheduling every five minutes
+
+[Timer]
+OnBootSec=2min
+OnCalendar=*-*-* *:00/5:00
+Persistent=true
+AccuracySec=1s
+Unit=pca-refresh-watchdog.service
+
+[Install]
+WantedBy=timers.target

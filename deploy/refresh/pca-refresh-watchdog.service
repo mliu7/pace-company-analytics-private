@@ -1,0 +1,13 @@
+[Unit]
+Description=Verify PCA refresh completion, restore timer and retry missed refreshes
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /usr/local/lib/pca/refresh-watchdog.sh
+TimeoutStartSec=2min
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true

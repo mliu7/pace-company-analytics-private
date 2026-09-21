@@ -4,7 +4,15 @@
 1. `./scripts/run_app.sh` — starts the local PostgreSQL 16 cluster (port 5433) if needed and the Django server on http://127.0.0.1:8000/, then opens the browser.
 2. The sidebar shows the last successful refresh and the SL checksum status. Use **Data Quality & Refresh → Refresh from PTT + SL now** to pull the latest data (≈45 s incremental).
 
-## Scheduled refresh (launchd)
+## Scheduled refresh on the server
+
+Use [server refresh automation](server_refresh.md): weekdays at 06:00, 08:00,
+10:00, 12:00, 14:00, 16:00 and 18:00; weekends at 06:00 and 18:00, Central Time.
+The server timer and completion watchdog run independently of the Mac and web
+workers. The watchdog restores a stopped refresh timer and retries incomplete
+refreshes. Do not enable the old Mac job against the shared server database.
+
+## Legacy Mac refresh (launchd; local installations only)
 `scripts/scheduled_refresh.sh` runs every day at **07:00, 12:00 and 16:30** local time (the Mac is on America/Chicago): `refresh_all --trigger nightly` — the same pipeline as the UI's Refresh button; the `nightly` trigger also writes a `pg_dump` to `~/Library/Application Support/PaceCompanyAnalytics/backups/` (one file per day, 30 kept) — then `reconcile_bank`. Install or re-install after editing the plist:
 ```
 cp docs/runbooks/com.pace.companyanalytics.refresh.plist ~/Library/LaunchAgents/
@@ -37,5 +45,5 @@ launchctl kickstart gui/$(id -u)/com.pace.companyanalytics.refresh              
 `/opt/homebrew/opt/postgresql@16/bin/pg_restore -h 127.0.0.1 -p 5433 -d pace_company_analytics -c <dump>`; then run `refresh_all` to catch up.
 
 ## Guarantees
-* Only `pace_company_analytics` on 127.0.0.1:5433 is ever written. PTT and SL are read with `ptt_reader` / `sl_reader`, both verified read-only at the start of every run (the run aborts otherwise).
+* Only the configured application database and its local file stores are written. PTT and SL use the configured reader accounts, both verified read-only at the start of every run (the run aborts otherwise).
 * Every SELECT against a source is one of the 21 registered files under `sql/source/`, hashed and recorded on the run.

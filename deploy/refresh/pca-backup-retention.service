@@ -1,0 +1,13 @@
+[Unit]
+Description=Prune PCA local backup archives older than fourteen days
+
+[Service]
+Type=oneshot
+User=pca
+Group=pca
+ExecStartPre=/usr/bin/mkdir -p /srv/pca/files/backups
+ExecStart=/usr/bin/find /srv/pca/backups -maxdepth 1 -type f -name shared-state-*.tar.gz -mtime +14 -delete
+ExecStart=/usr/bin/find /srv/pca/files/backups -maxdepth 1 -type f -name pace_company_analytics_*.dump -mtime +14 -delete
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true

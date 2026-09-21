@@ -1,0 +1,22 @@
+[Unit]
+Description=Refresh and verify Pace Company Analytics from read-only sources
+After=network-online.target postgresql.service
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+User=pca
+Group=pca
+WorkingDirectory=/srv/pca/app
+ExecStart=/srv/pca/app/.venv/bin/python /usr/local/lib/pca/refresh-worker.py run
+TimeoutStartSec=90min
+TimeoutStopSec=30s
+KillMode=control-group
+UMask=0027
+Nice=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+Environment=PYTHONUNBUFFERED=1

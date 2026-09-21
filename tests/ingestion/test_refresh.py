@@ -8,10 +8,26 @@ from unittest.mock import patch
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import close_old_connections, connection
-from django.test import TransactionTestCase
+from django.test import TestCase, TransactionTestCase, override_settings
+from django.utils import timezone
 
 from apps.ingestion.management.commands.refresh_all import LOCK_KEY
 from apps.ingestion.models import IngestionRun, RefreshRequest
+
+
+class RefreshDisplayTests(TestCase):
+    def test_incomplete_success_record_cannot_hide_last_completed_refresh(self):
+        from apps.dashboard.queries import freshness
+        complete = IngestionRun.objects.create(source_system="local", status="succeeded", finished_at=timezone.now())
+        IngestionRun.objects.create(source_system="local", status="succeeded", finished_at=None)
+        self.assertEqual(freshness()["last_run"], complete)
+
+    def test_historical_running_record_is_not_a_local_worker_in_private_mode(self):
+        from apps.dashboard.queries import freshness
+        IngestionRun.objects.create(source_system="local", status="running")
+        self.assertTrue(freshness()["running"])
+        with override_settings(PRIVATE_MODE=True):
+            self.assertFalse(freshness()["running"])
 
 
 class RefreshOrchestrationTests(TransactionTestCase):
